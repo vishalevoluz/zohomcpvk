@@ -3,7 +3,7 @@ import type { McpTool } from "@/types/mcp";
 export type Section = "modules" | "workflows" | "fields" | "blueprints" | "functions" | "logs";
 
 export const SECTIONS = [
-  { id: "modules" as const,    label: "Modules",    icon: "⊞", keywords: ["module", "record", "contact", "lead", "deal", "account"] },
+  { id: "modules" as const,    label: "Modules",    icon: "⊞", keywords: ["module", "record", "contact", "lead", "deal", "account", "crm"] },
   { id: "workflows" as const,  label: "Workflows",  icon: "⟳", keywords: ["workflow", "automation", "trigger", "rule"] },
   { id: "fields" as const,     label: "Fields",     icon: "☰", keywords: ["field", "layout", "picklist", "metadata"] },
   { id: "blueprints" as const, label: "Blueprints", icon: "◈", keywords: ["blueprint", "transition", "stage"] },
