@@ -60,28 +60,32 @@ export default function DashboardPage() {
         </div>
 
         {config && (
-          activeSection === "logs" ? (
-            <div className="main-card">
-              <AuditLogs logs={logs} onClear={() => setLogs([])} />
-            </div>
-          ) : activeSection === "modules" ? (
-            <div className="main-card">
+          <>
+            {/* Keep audit panels mounted so loaded data survives section switches */}
+            <div className="main-card" style={{ display: activeSection === "modules" ? undefined : "none" }}>
               <ModulesAudit config={config} tools={categorized.modules} onLog={onLog} />
             </div>
-          ) : activeSection === "workflows" ? (
-            <div className="main-card">
+            <div className="main-card" style={{ display: activeSection === "workflows" ? undefined : "none" }}>
               <WorkflowAudit config={config} tools={categorized.workflows} onLog={onLog} />
             </div>
-          ) : (
-            <SectionPanel
-              section={activeSectionDef}
-              tools={categorized[activeSection] ?? []}
-              config={config}
-              selectedTool={selectedTool}
-              onSelectTool={setSelectedTool}
-              onLog={onLog}
-            />
-          )
+
+            {activeSection === "logs" && (
+              <div className="main-card">
+                <AuditLogs logs={logs} onClear={() => setLogs([])} />
+              </div>
+            )}
+
+            {!["modules", "workflows", "logs"].includes(activeSection) && (
+              <SectionPanel
+                section={activeSectionDef}
+                tools={categorized[activeSection] ?? []}
+                config={config}
+                selectedTool={selectedTool}
+                onSelectTool={setSelectedTool}
+                onLog={onLog}
+              />
+            )}
+          </>
         )}
 
         {!config && (
