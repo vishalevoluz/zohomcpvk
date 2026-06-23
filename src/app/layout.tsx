@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Zoho MCP Dashboard",
+  title: "EvoAudit",
   description: "Connect and interact with Zoho via MCP",
 };
 

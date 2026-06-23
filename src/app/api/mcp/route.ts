@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Proxy error";
-    return NextResponse.json({ error: message }, { status: 502 });
+    const cause = err instanceof Error && err.cause ? String(err.cause) : undefined;
+    return NextResponse.json({ error: message, cause }, { status: 502 });
   }
 }
