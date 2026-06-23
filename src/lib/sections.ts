@@ -1,19 +1,20 @@
 import type { McpTool } from "@/types/mcp";
 
-export type Section = "modules" | "blueprints" | "functions" | "logs";
+export type Section = "modules" | "workflows" | "blueprints" | "functions" | "logs";
 
 export const SECTIONS = [
   { id: "modules" as const,    label: "Modules",    icon: "⊞", keywords: ["module", "record", "contact", "lead", "deal", "account", "crm"] },
+  { id: "workflows" as const,  label: "Workflows",  icon: "⟳", keywords: ["workflow", "automation", "trigger", "rule"] },
   { id: "blueprints" as const, label: "Blueprints", icon: "◈", keywords: ["blueprint", "transition", "stage"] },
   { id: "functions" as const,  label: "Functions",  icon: "ƒ", keywords: ["function", "script", "custom_function", "deluge"] },
 ] as const;
 
 // Check specific sections before modules so broad names like "crm" don't swallow everything
-const CATEGORIZE_ORDER: Section[] = ["blueprints", "functions", "modules"];
+const CATEGORIZE_ORDER: Section[] = ["workflows", "blueprints", "functions", "modules"];
 
 export function categorizeTools(tools: McpTool[]): Record<Section, McpTool[]> {
   const result: Record<Section, McpTool[]> = {
-    modules: [], blueprints: [], functions: [], logs: [],
+    modules: [], workflows: [], blueprints: [], functions: [], logs: [],
   };
   for (const tool of tools) {
     const hay = `${tool.name} ${tool.description ?? ""}`.toLowerCase();

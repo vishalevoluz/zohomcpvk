@@ -7,6 +7,7 @@ import ConnectionForm from "@/components/ConnectionForm";
 import Sidebar from "@/components/Sidebar";
 import SectionPanel from "@/components/SectionPanel";
 import ModulesAudit from "@/components/ModulesAudit";
+import WorkflowAudit from "@/components/WorkflowAudit";
 import AuditLogs from "@/components/AuditLogs";
 
 export default function DashboardPage() {
@@ -60,9 +61,12 @@ export default function DashboardPage() {
 
         {config && (
           <>
-            {/* Keep ModulesAudit mounted so loaded data survives section switches */}
+            {/* Keep audit panels mounted so loaded data survives section switches */}
             <div className="main-card" style={{ display: activeSection === "modules" ? undefined : "none" }}>
               <ModulesAudit config={config} tools={categorized.modules} onLog={onLog} />
+            </div>
+            <div className="main-card" style={{ display: activeSection === "workflows" ? undefined : "none" }}>
+              <WorkflowAudit config={config} tools={categorized.workflows} onLog={onLog} />
             </div>
 
             {activeSection === "logs" && (
@@ -71,7 +75,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {!["modules", "logs"].includes(activeSection) && (
+            {!["modules", "workflows", "logs"].includes(activeSection) && (
               <SectionPanel
                 section={activeSectionDef}
                 tools={categorized[activeSection] ?? []}
