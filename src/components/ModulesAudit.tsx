@@ -27,20 +27,52 @@ const STANDARD_MODULES = new Set([
   "Meetings","Home","Analytics","Forecasts","Portals","Social","Webforms",
 ]);
 
-function extractModules(result: unknown): ZohoModule[] {
-  if (Array.isArray(result)) return result;
+function extractModulesFromValue(result: unknown): ZohoModule[] {
+  if (Array.isArray(result)) {
+    // If it's an array of module-like objects
+    if (result.length > 0 && typeof result[0] === "object" && result[0] !== null) {
+      return result as ZohoModule[];
+    }
+  }
   if (result && typeof result === "object") {
     const r = result as Record<string, unknown>;
     if (Array.isArray(r.modules)) return r.modules as ZohoModule[];
     if (Array.isArray(r.data)) return r.data as ZohoModule[];
+    // Scan all array-valued keys for module-like objects
     for (const val of Object.values(r)) {
       if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
         const first = val[0] as Record<string, unknown>;
-        if ("module_name" in first || "api_name" in first) return val as ZohoModule[];
+        if ("module_name" in first || "api_name" in first || "singular_label" in first) {
+          return val as ZohoModule[];
+        }
       }
     }
   }
   return [];
+}
+
+function extractModules(result: unknown): ZohoModule[] {
+  if (!result) return [];
+
+  // MCP tools/call wraps output in: { content: [{ type: "text", text: "..." }], isError: false }
+  if (typeof result === "object" && !Array.isArray(result)) {
+    const r = result as Record<string, unknown>;
+    if (Array.isArray(r.content)) {
+      for (const item of r.content as Record<string, unknown>[]) {
+        if (item.type === "text" && typeof item.text === "string") {
+          try {
+            const parsed = JSON.parse(item.text);
+            const mods = extractModulesFromValue(parsed);
+            if (mods.length > 0) return mods;
+          } catch {
+            // text is not JSON, skip
+          }
+        }
+      }
+    }
+  }
+
+  return extractModulesFromValue(result);
 }
 
 function getName(m: ZohoModule): string {
@@ -82,7 +114,8 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
       const output = await executeTool(config, toolName, {});
       const mods = extractModules(output);
       if (mods.length === 0) {
-        setError("No module data found in the response. Try a different tool.");
+        const preview = JSON.stringify(output).slice(0, 300);
+        setError(`No module data found. Response preview: ${preview}`);
         onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output, status: "error", errorMessage: "No modules found", durationMs: Date.now() - start, timestamp: new Date() });
       } else {
         setModules(mods);
