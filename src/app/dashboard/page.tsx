@@ -6,6 +6,7 @@ import { SECTIONS, categorizeTools, type Section } from "@/lib/sections";
 import ConnectionForm from "@/components/ConnectionForm";
 import Sidebar from "@/components/Sidebar";
 import SectionPanel from "@/components/SectionPanel";
+import ModulesAudit from "@/components/ModulesAudit";
 import AuditLogs from "@/components/AuditLogs";
 
 export default function DashboardPage() {
@@ -61,6 +62,10 @@ export default function DashboardPage() {
           activeSection === "logs" ? (
             <div className="main-card">
               <AuditLogs logs={logs} onClear={() => setLogs([])} />
+            </div>
+          ) : activeSection === "modules" ? (
+            <div className="main-card">
+              <ModulesAudit config={config} tools={tools} onLog={onLog} />
             </div>
           ) : (
             <SectionPanel
