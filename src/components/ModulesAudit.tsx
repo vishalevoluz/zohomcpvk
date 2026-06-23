@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
+import MultiToolSelect from "@/components/MultiToolSelect";
 
 interface ZohoModule {
   module_name?: string;
@@ -99,33 +100,36 @@ interface Props {
 }
 
 export default function ModulesAudit({ config, tools, onLog }: Props) {
-  const [toolName, setToolName] = useState(tools[0]?.name ?? "");
+  const [selectedTools, setSelectedTools] = useState<string[]>(tools.length > 0 ? [tools[0].name] : []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [modules, setModules] = useState<ZohoModule[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
 
   async function loadModules() {
-    if (!toolName) return;
+    if (selectedTools.length === 0) return;
     setLoading(true);
     setError("");
-    const start = Date.now();
     try {
-      const output = await executeTool(config, toolName, {});
-      const mods = extractModules(output);
-      if (mods.length === 0) {
-        const preview = JSON.stringify(output).slice(0, 300);
-        setError(`No module data found. Response preview: ${preview}`);
-        onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output, status: "error", errorMessage: "No modules found", durationMs: Date.now() - start, timestamp: new Date() });
-      } else {
-        setModules(mods);
-        setFilter("all");
-        onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+      const allMods: ZohoModule[] = [];
+      for (const toolName of selectedTools) {
+        const start = Date.now();
+        try {
+          const output = await executeTool(config, toolName, {});
+          const mods = extractModules(output);
+          if (mods.length > 0) allMods.push(...mods);
+          onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output, status: mods.length > 0 ? "success" : "error", errorMessage: mods.length === 0 ? "No modules found" : undefined, durationMs: Date.now() - start, timestamp: new Date() });
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "Failed to load";
+          onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output: null, status: "error", errorMessage: msg, durationMs: Date.now() - start, timestamp: new Date() });
+        }
       }
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to load";
-      setError(msg);
-      onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output: null, status: "error", errorMessage: msg, durationMs: Date.now() - start, timestamp: new Date() });
+      if (allMods.length === 0) {
+        setError(`No module data found in selected tool${selectedTools.length > 1 ? "s" : ""}.`);
+      } else {
+        setModules(allMods);
+        setFilter("all");
+      }
     } finally {
       setLoading(false);
     }
@@ -187,13 +191,11 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
         </div>
         <div className="audit-toolbar">
           {tools.length > 0 ? (
-            <select value={toolName} onChange={e => setToolName(e.target.value)} className="select-tool audit-select">
-              {tools.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
-            </select>
+            <MultiToolSelect tools={tools} selected={selectedTools} onChange={setSelectedTools} />
           ) : (
             <span className="no-tools-hint">No module tools found — check connection</span>
           )}
-          <button onClick={loadModules} disabled={loading || !toolName} className="btn-connect">
+          <button onClick={loadModules} disabled={loading || selectedTools.length === 0} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : modules.length ? "Reload" : "Load Modules"}
           </button>
         </div>

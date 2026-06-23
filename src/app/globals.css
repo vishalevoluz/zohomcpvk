@@ -1106,3 +1106,128 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   .audit-toolbar { width: 100%; }
   .audit-select { flex: 1; }
 }
+
+/* ─── Multi-tool select ──────────────────────────────────────── */
+.multi-select { position: relative; }
+
+.multi-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 220px;
+  background: var(--color-bg-secondary);
+  border: 0.5px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--color-text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.multi-select-trigger:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
+}
+
+.multi-select-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.multi-select-arrow { font-size: 9px; color: var(--color-text-tertiary); flex-shrink: 0; }
+
+.multi-select-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 260px;
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.multi-select-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 0.5px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.multi-select-list {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.multi-select-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text);
+  transition: background 0.1s;
+}
+
+.multi-select-item:hover { background: var(--color-bg-secondary); }
+
+.multi-select-item input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  margin: 0;
+  border: none;
+  box-shadow: none;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.multi-select-item-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text);
+}
+
+/* ─── Workflow audit tags ────────────────────────────────────── */
+.tag-wf-disabled    { background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
+.tag-wf-duplicate   { background: var(--color-warning-bg); color: #854F0B; }
+.tag-wf-conflicting { background: var(--color-danger-bg); color: var(--color-danger); }
+.tag-wf-complex     { background: var(--color-accent-bg); color: var(--color-accent); }
+
+.cell-criteria, .cell-trigger {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  max-width: 160px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.count-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.count-badge.danger {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}

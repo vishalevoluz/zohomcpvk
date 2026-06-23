@@ -7,6 +7,7 @@ import ConnectionForm from "@/components/ConnectionForm";
 import Sidebar from "@/components/Sidebar";
 import SectionPanel from "@/components/SectionPanel";
 import ModulesAudit from "@/components/ModulesAudit";
+import WorkflowAudit from "@/components/WorkflowAudit";
 import AuditLogs from "@/components/AuditLogs";
 
 export default function DashboardPage() {
@@ -65,7 +66,11 @@ export default function DashboardPage() {
             </div>
           ) : activeSection === "modules" ? (
             <div className="main-card">
-              <ModulesAudit config={config} tools={tools} onLog={onLog} />
+              <ModulesAudit config={config} tools={categorized.modules} onLog={onLog} />
+            </div>
+          ) : activeSection === "workflows" ? (
+            <div className="main-card">
+              <WorkflowAudit config={config} tools={categorized.workflows} onLog={onLog} />
             </div>
           ) : (
             <SectionPanel
