@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
@@ -28,34 +28,49 @@ const STANDARD_MODULES = new Set([
   "Meetings","Home","Analytics","Forecasts","Portals","Social","Webforms",
 ]);
 
-function extractModulesFromValue(result: unknown): ZohoModule[] {
-  if (Array.isArray(result)) {
-    // If it's an array of module-like objects
-    if (result.length > 0 && typeof result[0] === "object" && result[0] !== null) {
-      return result as ZohoModule[];
-    }
+const MODULE_KEYS = new Set(["module_name", "api_name", "singular_label", "plural_label"]);
+const PRIORITY_ARRAY_KEYS = ["modules", "data", "result", "records", "response", "items", "list"];
+
+function isModuleLike(obj: unknown): boolean {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  return MODULE_KEYS.size > 0 && Object.keys(obj as Record<string, unknown>).some(k => MODULE_KEYS.has(k));
+}
+
+function findModuleArray(val: unknown, depth = 0): ZohoModule[] {
+  if (depth > 6) return [];
+
+  if (Array.isArray(val) && val.length > 0) {
+    const first = val[0];
+    if (isModuleLike(first)) return val as ZohoModule[];
+    // At depth 0 accept any array of objects (direct tool response)
+    if (depth === 0 && typeof first === "object" && first !== null) return val as ZohoModule[];
   }
-  if (result && typeof result === "object") {
-    const r = result as Record<string, unknown>;
-    if (Array.isArray(r.modules)) return r.modules as ZohoModule[];
-    if (Array.isArray(r.data)) return r.data as ZohoModule[];
-    // Scan all array-valued keys for module-like objects
-    for (const val of Object.values(r)) {
-      if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
-        const first = val[0] as Record<string, unknown>;
-        if ("module_name" in first || "api_name" in first || "singular_label" in first) {
-          return val as ZohoModule[];
-        }
+
+  if (val && typeof val === "object" && !Array.isArray(val)) {
+    const r = val as Record<string, unknown>;
+    // Check priority keys first
+    for (const key of PRIORITY_ARRAY_KEYS) {
+      if (Array.isArray(r[key])) {
+        const found = findModuleArray(r[key], depth + 1);
+        if (found.length > 0) return found;
+      }
+    }
+    // Recurse into nested objects
+    for (const v of Object.values(r)) {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const found = findModuleArray(v, depth + 1);
+        if (found.length > 0) return found;
       }
     }
   }
+
   return [];
 }
 
 function extractModules(result: unknown): ZohoModule[] {
   if (!result) return [];
 
-  // MCP tools/call wraps output in: { content: [{ type: "text", text: "..." }], isError: false }
+  // Unwrap MCP content wrapper: { content: [{ type: "text", text: "..." }] }
   if (typeof result === "object" && !Array.isArray(result)) {
     const r = result as Record<string, unknown>;
     if (Array.isArray(r.content)) {
@@ -63,17 +78,15 @@ function extractModules(result: unknown): ZohoModule[] {
         if (item.type === "text" && typeof item.text === "string") {
           try {
             const parsed = JSON.parse(item.text);
-            const mods = extractModulesFromValue(parsed);
+            const mods = findModuleArray(parsed);
             if (mods.length > 0) return mods;
-          } catch {
-            // text is not JSON, skip
-          }
+          } catch { /* not JSON */ }
         }
       }
     }
   }
 
-  return extractModulesFromValue(result);
+  return findModuleArray(result);
 }
 
 function getName(m: ZohoModule): string {
@@ -105,6 +118,12 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
   const [error, setError] = useState("");
   const [modules, setModules] = useState<ZohoModule[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
+
+  useEffect(() => {
+    setSelectedTools(tools.length > 0 ? [tools[0].name] : []);
+    setModules([]);
+    setError("");
+  }, [tools]);
 
   async function loadModules() {
     if (selectedTools.length === 0) return;

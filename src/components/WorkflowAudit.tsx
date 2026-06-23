@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
@@ -135,6 +135,12 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
   const [error, setError] = useState("");
   const [workflows, setWorkflows] = useState<ZohoWorkflow[]>([]);
   const [filter, setFilter] = useState<WFFilterKey>("all");
+
+  useEffect(() => {
+    setSelectedTools(tools.length > 0 ? [tools[0].name] : []);
+    setWorkflows([]);
+    setError("");
+  }, [tools]);
 
   async function loadWorkflows() {
     if (selectedTools.length === 0) return;
