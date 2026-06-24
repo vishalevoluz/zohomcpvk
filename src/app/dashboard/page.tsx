@@ -10,6 +10,7 @@ import ModulesAudit from "@/components/ModulesAudit";
 import WorkflowAudit from "@/components/WorkflowAudit";
 import BlueprintAudit from "@/components/BlueprintAudit";
 import FunctionAudit from "@/components/FunctionAudit";
+import FieldsAudit from "@/components/FieldsAudit";
 import AuditLogs from "@/components/AuditLogs";
 
 export default function DashboardPage() {
@@ -76,6 +77,9 @@ export default function DashboardPage() {
             <div className="main-card" style={{ display: activeSection === "functions" ? undefined : "none" }}>
               <FunctionAudit config={config} tools={categorized.functions} allTools={tools} onLog={onLog} />
             </div>
+            <div className="main-card" style={{ display: activeSection === "fields" ? undefined : "none" }}>
+              <FieldsAudit config={config} tools={categorized.fields} allTools={tools} onLog={onLog} />
+            </div>
 
             {activeSection === "logs" && (
               <div className="main-card">
@@ -83,7 +87,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {!["modules", "workflows", "blueprints", "functions", "logs"].includes(activeSection) && (
+            {!["modules", "workflows", "blueprints", "functions", "fields", "logs"].includes(activeSection) && (
               <SectionPanel
                 section={activeSectionDef}
                 tools={categorized[activeSection] ?? []}
