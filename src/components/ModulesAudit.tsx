@@ -6,17 +6,43 @@ import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
 
 interface ZohoModule {
+  id?: string;
   module_name?: string;
   api_name?: string;
   singular_label?: string;
   plural_label?: string;
-  visible?: boolean;
+  actual_singular_label?: string;
+  actual_plural_label?: string;
+  // Real Zoho API uses "viewable", not "visible"
+  viewable?: boolean;
+  visible?: boolean;          // legacy fallback
+  visibility?: number;        // 1 = visible, 0 = hidden
   creatable?: boolean;
   editable?: boolean;
+  deletable?: boolean;
+  convertable?: boolean;
+  lookupable?: boolean;
   api_supported?: boolean;
-  status?: string;
+  show_as_tab?: boolean;
+  quick_create?: boolean;
+  isBlueprintSupported?: boolean;
+  global_search_supported?: boolean;
+  feeds_required?: boolean;
+  recycle_bin_on_delete?: boolean;
+  sub_menu_available?: boolean;
+  has_more_profiles?: boolean;
+  access_type?: string;
   generated_type?: string;
-  profiles?: unknown;
+  status?: string;
+  sequence_number?: number;
+  profile_count?: number;
+  business_card_field_limit?: number;
+  profiles?: Array<{ name?: string; id?: string }> | unknown;
+  modified_by?: { name?: string; id?: string } | null;
+  modified_time?: string | null;
+  description?: string | null;
+  web_link?: string | null;
+  parent_module?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -154,15 +180,17 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
     }
   }
 
-  // Audit categorization
+  // Audit categorization — real Zoho API uses "viewable", visibility number, and status string
   const hidden = modules.filter(m =>
+    m.viewable === false ||
     m.visible === false ||
+    m.visibility === 0 ||
     ["user_hidden", "system_hidden", "hidden"].includes(String(m.status ?? "").toLowerCase())
   );
 
   const unused = modules.filter(m =>
     m.api_supported === false ||
-    (m.creatable === false && m.editable === false && m.visible !== false)
+    (m.creatable === false && m.editable === false && m.viewable !== false && m.visible !== false)
   );
 
   const custom = modules.filter(m =>
@@ -273,12 +301,22 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
                   <thead>
                     <tr>
                       <th><span className="th-tip" data-tooltip-below="The display name of the CRM module">Module Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Unique ID of this module">Module ID<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The technical API identifier used in integrations and API calls">API Name<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether this module is visible to users in the CRM navigation">Visibility<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The internal system name of this module">Module Name (System)<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this is a default Zoho module or a custom module your org created">Generated Type<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The current visibility status of this module (visible, hidden, etc.)">Status<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether users can view this module in the CRM">Viewable<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this module appears as a tab in the CRM navigation bar">Show as Tab<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether new records can be created in this module">Creatable<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether existing records can be modified in this module">Editable<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether records in this module can be deleted">Deletable<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether this module can be accessed via the Zoho CRM API">API Supported<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Which user profiles have access to this module">Profiles Access<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether Blueprint processes can be applied to this module">Blueprint Support<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether records can be quick-created from other modules">Quick Create<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Number of user profiles that have access to this module">Profile Count<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="User profiles that have access to this module">Profiles<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The display order of this module in the CRM navigation">Seq No<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this module">Findings<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
@@ -288,12 +326,22 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
                       return (
                         <tr key={i} className={tags.length ? "row-flagged" : ""}>
                           <td className="cell-name">{getName(m)}</td>
+                          <td className="cell-mono fn-id">{String(m.id ?? "—")}</td>
                           <td className="cell-mono">{String(m.api_name ?? "—")}</td>
-                          <td><span className={`bool-badge ${m.visible !== false ? "yes" : "no"}`}>{m.visible !== false ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.creatable !== false ? "yes" : "no"}`}>{m.creatable !== false ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.editable !== false ? "yes" : "no"}`}>{m.editable !== false ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.api_supported !== false ? "yes" : "no"}`}>{m.api_supported !== false ? "Yes" : "No"}</span></td>
+                          <td className="cell-mono">{String(m.module_name ?? "—")}</td>
+                          <td><span className="arg-badge">{String(m.generated_type ?? "—")}</span></td>
+                          <td><span className="arg-badge">{String(m.status ?? "—")}</span></td>
+                          <td><span className={`bool-badge ${(m.viewable ?? m.visible) !== false ? "yes" : "no"}`}>{(m.viewable ?? m.visible) !== false ? "Yes" : "No"}</span></td>
+                          <td><span className={`bool-badge ${m.show_as_tab ? "yes" : "no"}`}>{m.show_as_tab ? "Yes" : "No"}</span></td>
+                          <td><span className={`bool-badge ${m.creatable ? "yes" : "no"}`}>{m.creatable ? "Yes" : "No"}</span></td>
+                          <td><span className={`bool-badge ${m.editable ? "yes" : "no"}`}>{m.editable ? "Yes" : "No"}</span></td>
+                          <td><span className={`bool-badge ${m.deletable ? "yes" : "no"}`}>{m.deletable ? "Yes" : "No"}</span></td>
+                          <td><span className={`bool-badge ${m.api_supported ? "yes" : "no"}`}>{m.api_supported ? "Yes" : "No"}</span></td>
+                          <td><span className={`bool-badge ${m.isBlueprintSupported ? "yes" : "no"}`}>{m.isBlueprintSupported ? "Yes" : "No"}</span></td>
+                          <td><span className={`bool-badge ${m.quick_create ? "yes" : "no"}`}>{m.quick_create ? "Yes" : "No"}</span></td>
+                          <td><span className="count-badge">{String(m.profile_count ?? "—")}</span></td>
                           <td className="cell-profiles">{getProfiles(m)}</td>
+                          <td className="cell-mono">{String(m.sequence_number ?? "—")}</td>
                           <td>
                             <div className="tag-list">
                               {tags.length === 0
