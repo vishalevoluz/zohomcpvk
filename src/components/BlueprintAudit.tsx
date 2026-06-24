@@ -32,9 +32,19 @@ interface ZohoBlueprint {
   id?: string;
   name?: string;
   blueprint_name?: string;
-  status?: string;
+  // Real Zoho list API: active is a top-level boolean, status is a string
   active?: boolean;
+  status?: string;
+  // Real Zoho list API fields
   module?: string | { api_name?: string; name?: string; plural_label?: string };
+  field?: { name?: string; id?: string } | null;          // the picklist field (e.g. "Stage")
+  layout?: { name?: string; display_label?: string; id?: string } | null;
+  supported_clone?: boolean;
+  created_by?: { name?: string; id?: string };
+  modified_by?: { name?: string; id?: string };
+  created_time?: string;
+  modified_time?: string;
+  // Detail-only fields (not present in list response)
   transitions?: ZohoBPTransition[];
   process_info?: {
     field_label?: string;
@@ -60,7 +70,8 @@ function extractFromValue(result: unknown): ZohoBlueprint[] {
     for (const val of Object.values(r)) {
       if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
         const first = val[0] as Record<string, unknown>;
-        if ("blueprint_name" in first || "transitions" in first || "process_info" in first) {
+        if ("blueprint_name" in first || "transitions" in first || "process_info" in first ||
+            ("name" in first && ("field" in first || "layout" in first || "supported_clone" in first))) {
           return val as ZohoBlueprint[];
         }
       }
@@ -136,8 +147,36 @@ function getBPModule(bp: ZohoBlueprint): string {
   return String(m.api_name ?? m.plural_label ?? m.name ?? "—");
 }
 
+function getBPField(bp: ZohoBlueprint): string {
+  return String(bp.field?.name ?? "—");
+}
+
+function getBPLayout(bp: ZohoBlueprint): string {
+  return String(bp.layout?.display_label ?? bp.layout?.name ?? "—");
+}
+
+function getBPCreatedBy(bp: ZohoBlueprint): string {
+  return String(bp.created_by?.name ?? "—");
+}
+
+function getBPModifiedBy(bp: ZohoBlueprint): string {
+  return String(bp.modified_by?.name ?? "—");
+}
+
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return String(iso); }
+}
+
 function isBPActive(bp: ZohoBlueprint): boolean {
+  // Real Zoho API: active is a top-level boolean
   if (bp.active === false) return false;
+  if (bp.active === true) return true;
   const s = String(bp.status ?? "").toLowerCase();
   if (s === "inactive" || s === "disabled" || s === "false" || s === "draft") return false;
   return true;
@@ -408,12 +447,16 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
                   <thead>
                     <tr>
                       <th><span className="th-tip" data-tooltip-below="The name of this blueprint process">Blueprint Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Unique ID of this blueprint">Blueprint ID<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether this blueprint is currently active and enforcing stage transitions">Status<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The CRM module this blueprint process is applied to">Module<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="The number of unique stages defined in this blueprint">States<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="The number of stage-to-stage transitions defined in this blueprint">Transitions<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Total mandatory fields required across all transitions in this blueprint">Mandatory Fields<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Total validation rules configured across all transitions in this blueprint">Validation Rules<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The picklist field that drives the blueprint stages (e.g. Stage, Status)">Field<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The record layout this blueprint is associated with">Layout<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this blueprint can be cloned">Supported Clone<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The user who created this blueprint">Created By<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="When this blueprint was created">Created Time<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The user who last modified this blueprint">Modified By<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="When this blueprint was last modified">Modified Time<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this blueprint">Findings<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
@@ -421,36 +464,27 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
                     {displayed.map((bp, i) => {
                       const tags = getTags(bp);
                       const active = isBPActive(bp);
-                      const a = analyzeBlueprint(bp);
                       return (
                         <tr key={i} className={tags.length ? "row-flagged" : ""}>
                           <td className="cell-name">{getBPName(bp)}</td>
+                          <td className="cell-mono fn-id">{String(bp.id ?? "—")}</td>
                           <td>
                             <span className={`bool-badge ${active ? "yes" : "no"}`}>
                               {active ? "Active" : "Inactive"}
                             </span>
                           </td>
                           <td className="cell-mono">{getBPModule(bp)}</td>
+                          <td className="cell-mono">{getBPField(bp)}</td>
+                          <td className="cell-mono">{getBPLayout(bp)}</td>
                           <td>
-                            {a.stagesCount > 0
-                              ? <span className={`count-badge${a.deadEndStages.length > 0 ? " danger" : ""}`}>{a.stagesCount}</span>
-                              : <span className="cell-mono">—</span>}
-                          </td>
-                          <td>
-                            {a.transitionsCount > 0
-                              ? <span className="count-badge">{a.transitionsCount}</span>
-                              : <span className="cell-mono">—</span>}
-                          </td>
-                          <td>
-                            <span className={a.totalMandatoryFields === 0 ? "cell-mono" : "count-badge"}>
-                              {a.totalMandatoryFields > 0 ? a.totalMandatoryFields : "0"}
+                            <span className={`bool-badge ${bp.supported_clone ? "yes" : "no"}`}>
+                              {bp.supported_clone ? "Yes" : "No"}
                             </span>
                           </td>
-                          <td>
-                            <span className={a.totalValidationRules === 0 ? "cell-mono" : "count-badge"}>
-                              {a.totalValidationRules > 0 ? a.totalValidationRules : "0"}
-                            </span>
-                          </td>
+                          <td className="cell-mono" style={{ fontSize: 12 }}>{getBPCreatedBy(bp)}</td>
+                          <td className="cell-datetime">{formatDateTime(bp.created_time)}</td>
+                          <td className="cell-mono" style={{ fontSize: 12 }}>{getBPModifiedBy(bp)}</td>
+                          <td className="cell-datetime">{formatDateTime(bp.modified_time)}</td>
                           <td>
                             <div className="tag-list">
                               {tags.length === 0
