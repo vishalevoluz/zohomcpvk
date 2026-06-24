@@ -9,17 +9,38 @@ interface ZohoWorkflow {
   id?: string;
   name?: string;
   workflow_name?: string;
-  status?: string;
+  // Real Zoho CRM API: status is an object
+  status?: string | { active?: boolean };
   active?: boolean;
   module?: string | { api_name?: string; name?: string; plural_label?: string };
-  criteria?: unknown;
-  conditions?: unknown;
+  // Real Zoho CRM API: trigger info lives in execute_when
+  execute_when?: {
+    type?: string;
+    details?: {
+      trigger_module?: { api_name?: string; id?: string };
+      repeat?: boolean;
+    };
+  };
+  // Legacy / alternative field names
   trigger_on?: string | string[];
   trigger?: string | string[];
   triggers?: string | string[];
+  criteria?: unknown;
+  conditions?: unknown;
   actions?: unknown[];
   action_list?: unknown[];
   workflow_actions?: unknown[];
+  // Real Zoho CRM API: extra metadata
+  description?: string | null;
+  source?: string;
+  created_by?: { name?: string; id?: string };
+  modified_by?: { name?: string; id?: string };
+  created_time?: string;
+  modified_time?: string;
+  last_executed_time?: string;
+  lock?: { status?: boolean; locked_by?: unknown; message?: string | null };
+  editable?: boolean;
+  deletable?: boolean;
   [key: string]: unknown;
 }
 
@@ -37,7 +58,7 @@ function extractWorkflowsFromValue(result: unknown): ZohoWorkflow[] {
     for (const val of Object.values(r)) {
       if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
         const first = val[0] as Record<string, unknown>;
-        if ("workflow_name" in first || ("name" in first && ("trigger_on" in first || "module" in first || "active" in first))) {
+        if ("workflow_name" in first || "execute_when" in first || ("name" in first && ("trigger_on" in first || "module" in first || "active" in first || "last_executed_time" in first))) {
           return val as ZohoWorkflow[];
         }
       }
@@ -77,10 +98,18 @@ function getModule(w: ZohoWorkflow): string {
 }
 
 function getTriggerEvents(w: ZohoWorkflow): string {
+  // Real Zoho API uses execute_when.type
+  if (w.execute_when?.type) return String(w.execute_when.type).replace(/_/g, " ");
   const t = w.trigger_on ?? w.trigger ?? w.triggers;
   if (!t) return "—";
   if (Array.isArray(t)) return t.join(", ");
   return String(t);
+}
+
+function getRepeat(w: ZohoWorkflow): string {
+  const r = w.execute_when?.details?.repeat;
+  if (r === undefined) return "—";
+  return r ? "Yes" : "No";
 }
 
 function getActionsCount(w: ZohoWorkflow): number {
@@ -115,10 +144,38 @@ function getCriteriaCount(w: ZohoWorkflow): number {
 }
 
 function isActive(w: ZohoWorkflow): boolean {
+  // Real Zoho API: status is { active: boolean }
+  if (w.status && typeof w.status === "object") {
+    const s = w.status as { active?: boolean };
+    if (s.active === false) return false;
+    if (s.active === true) return true;
+  }
   if (w.active === false) return false;
   const s = String(w.status ?? "").toLowerCase();
   if (s === "inactive" || s === "disabled" || s === "false") return false;
   return true;
+}
+
+function isLocked(w: ZohoWorkflow): boolean {
+  return w.lock?.status === true;
+}
+
+function getCreatedBy(w: ZohoWorkflow): string {
+  return String(w.created_by?.name ?? "—");
+}
+
+function getModifiedBy(w: ZohoWorkflow): string {
+  return String(w.modified_by?.name ?? "—");
+}
+
+function formatDateTime(iso?: string | null): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return String(iso); }
 }
 
 type WFFilterKey = "all" | "disabled" | "duplicate" | "conflicting" | "complex";
@@ -288,11 +345,19 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
                   <thead>
                     <tr>
                       <th><span className="th-tip" data-tooltip-below="The name of this workflow rule">Workflow Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Unique ID of this workflow rule">Workflow ID<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether this workflow rule is currently active or inactive">Status<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The CRM module this workflow rule applies to">Module<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="When this workflow fires — on record create, edit, or both">Execute When<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this workflow repeats on every edit (not just the first time the criteria is met)">Repeat<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The conditions that must be met for this workflow to trigger">Criteria<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="The record events that cause this workflow to fire (e.g., Created, Modified, Deleted)">Trigger Events<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The number of actions this workflow performs when triggered">Actions<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this workflow is currently locked for editing">Locked<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The user who created this workflow rule">Created By<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="When this workflow rule was created">Created Time<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The user who last modified this workflow rule">Modified By<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="When this workflow rule was last modified">Modified Time<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The last time this workflow was triggered on a record">Last Executed<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this workflow">Findings<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
@@ -303,19 +368,35 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
                       return (
                         <tr key={i} className={tags.length ? "row-flagged" : ""}>
                           <td className="cell-name">{getName(w)}</td>
+                          <td className="cell-mono fn-id">{String(w.id ?? "—")}</td>
                           <td>
                             <span className={`bool-badge ${active ? "yes" : "no"}`}>
                               {active ? "Active" : "Inactive"}
                             </span>
                           </td>
                           <td className="cell-mono">{getModule(w)}</td>
-                          <td className="cell-criteria">{getCriteria(w)}</td>
                           <td className="cell-trigger">{getTriggerEvents(w)}</td>
+                          <td>
+                            <span className={`bool-badge ${getRepeat(w) === "Yes" ? "no" : getRepeat(w) === "No" ? "yes" : ""}`}>
+                              {getRepeat(w)}
+                            </span>
+                          </td>
+                          <td className="cell-criteria">{getCriteria(w)}</td>
                           <td>
                             {getActionsCount(w) > 0
                               ? <span className={getActionsCount(w) > 5 ? "count-badge danger" : "count-badge"}>{getActionsCount(w)}</span>
                               : <span className="cell-mono">—</span>}
                           </td>
+                          <td>
+                            <span className={`bool-badge ${isLocked(w) ? "no" : "yes"}`}>
+                              {isLocked(w) ? "Locked" : "No"}
+                            </span>
+                          </td>
+                          <td className="cell-mono" style={{ fontSize: 12 }}>{getCreatedBy(w)}</td>
+                          <td className="cell-datetime">{formatDateTime(w.created_time as string)}</td>
+                          <td className="cell-mono" style={{ fontSize: 12 }}>{getModifiedBy(w)}</td>
+                          <td className="cell-datetime">{formatDateTime(w.modified_time as string)}</td>
+                          <td className="cell-datetime">{formatDateTime(w.last_executed_time as string)}</td>
                           <td>
                             <div className="tag-list">
                               {tags.length === 0
