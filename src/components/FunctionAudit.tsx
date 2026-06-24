@@ -1,0 +1,407 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
+import { executeTool } from "@/lib/zohoMcp";
+import MultiToolSelect from "@/components/MultiToolSelect";
+
+// Actual Zoho CRM workflow-function shape returned by the MCP tool
+interface ZohoFunction {
+  id?: string;
+  name?: string;
+  description?: string | null;
+  language?: string;            // e.g. "deluge"
+  source?: string;              // e.g. "crm"  (NOT Deluge code)
+  feature_type?: string;        // e.g. "workflow"
+  associated?: boolean;
+  editable?: boolean;
+  deletable?: boolean;
+  lock_status?: { locked?: boolean };
+  module?: {
+    singular_label?: string;
+    plural_label?: string;
+    api_name?: string;
+    moduleName?: string;
+    id?: string;
+  } | null;
+  related_module?: unknown;
+  // Nested object holding the actual Deluge function ID
+  function?: { id?: string } | null;
+  created_by?: { name?: string; id?: string };
+  modified_by?: { name?: string; id?: string };
+  created_time?: string;
+  modified_time?: string;
+  [key: string]: unknown;
+}
+
+// ─── Extraction ───────────────────────────────────────────────────────────────
+
+function extractFromValue(result: unknown): ZohoFunction[] {
+  if (Array.isArray(result)) {
+    if (result.length > 0 && typeof result[0] === "object" && result[0] !== null) {
+      return result as ZohoFunction[];
+    }
+  }
+  if (result && typeof result === "object") {
+    const r = result as Record<string, unknown>;
+    // Zoho returns { "functions": [...] }
+    if (Array.isArray(r.functions)) return r.functions as ZohoFunction[];
+    if (Array.isArray(r.custom_functions)) return r.custom_functions as ZohoFunction[];
+    if (Array.isArray(r.function_list)) return r.function_list as ZohoFunction[];
+    if (Array.isArray(r.data)) return r.data as ZohoFunction[];
+    if (Array.isArray(r.result)) return r.result as ZohoFunction[];
+    for (const val of Object.values(r)) {
+      if (Array.isArray(val) && val.length > 0 && typeof val[0] === "object" && val[0] !== null) {
+        const first = val[0] as Record<string, unknown>;
+        if (
+          "feature_type" in first ||
+          "language" in first ||
+          ("name" in first && "function" in first) ||
+          ("name" in first && ("associated" in first || "lock_status" in first))
+        ) {
+          return val as ZohoFunction[];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+function extractFunctions(result: unknown): ZohoFunction[] {
+  if (!result) return [];
+  if (typeof result === "object" && !Array.isArray(result)) {
+    const r = result as Record<string, unknown>;
+    if (Array.isArray(r.content)) {
+      for (const item of r.content as Record<string, unknown>[]) {
+        if (item.type === "text" && typeof item.text === "string") {
+          try {
+            const parsed = JSON.parse(item.text);
+            const fns = extractFromValue(parsed);
+            if (fns.length > 0) return fns;
+          } catch { /* not JSON */ }
+        }
+      }
+    }
+  }
+  return extractFromValue(result);
+}
+
+// ─── Field accessors ──────────────────────────────────────────────────────────
+
+function getFnName(f: ZohoFunction): string {
+  return String(f.name ?? f.id ?? "Unknown");
+}
+
+// The actual Deluge function ID lives in f.function.id; f.id is the association ID
+function getFnId(f: ZohoFunction): string {
+  const nested = f.function;
+  if (nested && typeof nested === "object" && nested.id) return String(nested.id);
+  return String(f.id ?? "—");
+}
+
+function getAssociationId(f: ZohoFunction): string {
+  return String(f.id ?? "—");
+}
+
+function getModule(f: ZohoFunction): string {
+  if (!f.module) return "—";
+  return String(f.module.plural_label ?? f.module.api_name ?? f.module.singular_label ?? "—");
+}
+
+function getLanguage(f: ZohoFunction): string {
+  return String(f.language ?? "—");
+}
+
+function getFeatureType(f: ZohoFunction): string {
+  return String(f.feature_type ?? "—");
+}
+
+function getModuleName(f: ZohoFunction): string {
+  if (!f.module) return "—";
+  return String(f.module.moduleName ?? f.module.api_name ?? "—");
+}
+
+function formatDateTime(iso?: string): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString(undefined, {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function isAssociated(f: ZohoFunction): boolean {
+  if (typeof f.associated === "boolean") return f.associated;
+  return true;
+}
+
+function isLocked(f: ZohoFunction): boolean {
+  return f.lock_status?.locked === true;
+}
+
+function hasFunctionId(f: ZohoFunction): boolean {
+  const nested = f.function;
+  return !!(nested && typeof nested === "object" && nested.id);
+}
+
+function getCreatedBy(f: ZohoFunction): string {
+  return String(f.created_by?.name ?? "—");
+}
+
+// ─── Audit logic ──────────────────────────────────────────────────────────────
+
+// Unused: function is not associated with any workflow
+function isUnused(f: ZohoFunction): boolean {
+  return !isAssociated(f);
+}
+
+// Missing function reference: the nested function object is absent or has no ID
+function hasMissingFunctionRef(f: ZohoFunction): boolean {
+  return !hasFunctionId(f);
+}
+
+// Invalid binding: function is locked (can't be edited/executed)
+function hasInvalidBinding(f: ZohoFunction): boolean {
+  return isLocked(f);
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type FnFilterKey = "all" | "unused" | "missing_ref" | "locked";
+
+interface Props {
+  config: McpConfig;
+  tools: McpTool[];
+  allTools?: McpTool[];
+  onLog: (log: ExecutionLog) => void;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export default function FunctionAudit({ config, tools, allTools = [], onLog }: Props) {
+  const availableTools = tools.length > 0 ? tools : allTools;
+  const usingFallback = tools.length === 0 && allTools.length > 0;
+
+  const [selectedTools, setSelectedTools] = useState<string[]>(
+    availableTools.length > 0 ? [availableTools[0].name] : []
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [functions, setFunctions] = useState<ZohoFunction[]>([]);
+  const [filter, setFilter] = useState<FnFilterKey>("all");
+
+  useEffect(() => {
+    const next = tools.length > 0 ? tools : allTools;
+    setSelectedTools(next.length > 0 ? [next[0].name] : []);
+    setFunctions([]);
+    setError("");
+  }, [tools, allTools]);
+
+  async function loadFunctions() {
+    if (selectedTools.length === 0) return;
+    setLoading(true);
+    setError("");
+    try {
+      const all: ZohoFunction[] = [];
+      for (const toolName of selectedTools) {
+        const start = Date.now();
+        try {
+          const output = await executeTool(config, toolName, {});
+          const fns = extractFunctions(output);
+          if (fns.length > 0) all.push(...fns);
+          onLog({
+            id: crypto.randomUUID(), tool: toolName, input: {}, output,
+            status: fns.length > 0 ? "success" : "error",
+            errorMessage: fns.length === 0 ? "No functions found" : undefined,
+            durationMs: Date.now() - start, timestamp: new Date(),
+          });
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : "Failed";
+          onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output: null, status: "error", errorMessage: msg, durationMs: Date.now() - start, timestamp: new Date() });
+        }
+      }
+      if (all.length === 0) {
+        setError(`No function data found in selected tool${selectedTools.length > 1 ? "s" : ""}.`);
+      } else {
+        setFunctions(all);
+        setFilter("all");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const unused = functions.filter(isUnused);
+  const missingRef = functions.filter(hasMissingFunctionRef);
+  const locked = functions.filter(hasInvalidBinding);
+
+  const filterMap: Record<FnFilterKey, ZohoFunction[]> = {
+    all: functions,
+    unused,
+    missing_ref: missingRef,
+    locked,
+  };
+  const displayed = filterMap[filter];
+
+  function getTags(f: ZohoFunction): FnFilterKey[] {
+    const tags: FnFilterKey[] = [];
+    if (isUnused(f)) tags.push("unused");
+    if (hasMissingFunctionRef(f)) tags.push("missing_ref");
+    if (hasInvalidBinding(f)) tags.push("locked");
+    return tags;
+  }
+
+  const findings: { key: FnFilterKey; label: string; count: number; severity: string }[] = [
+    { key: "unused",      label: "Unassociated Functions", count: unused.length,     severity: unused.length > 0 ? "warn" : "ok" },
+    { key: "missing_ref", label: "Missing Function Refs",  count: missingRef.length, severity: missingRef.length > 0 ? "danger" : "ok" },
+    { key: "locked",      label: "Locked Functions",       count: locked.length,     severity: locked.length > 0 ? "warn" : "ok" },
+  ];
+
+  return (
+    <div className="modules-audit">
+      <div className="audit-header">
+        <div className="audit-header-left">
+          <span className="pane-icon">ƒ</span>
+          <h2 className="pane-title">Functions Audit</h2>
+          {functions.length > 0 && (
+            <span className="pane-count">{functions.length} function{functions.length !== 1 ? "s" : ""}</span>
+          )}
+        </div>
+        <div className="audit-toolbar">
+          {availableTools.length > 0 ? (
+            <>
+              {usingFallback && (
+                <span className="no-tools-hint" title="No tools matched function keywords — showing all tools.">
+                  ⚠ Select function tool manually
+                </span>
+              )}
+              <MultiToolSelect tools={availableTools} selected={selectedTools} onChange={setSelectedTools} />
+            </>
+          ) : (
+            <span className="no-tools-hint">No tools found — check connection</span>
+          )}
+          <button onClick={loadFunctions} disabled={loading || selectedTools.length === 0} className="btn-connect">
+            {loading ? <><span className="spinner" /> Loading…</> : functions.length ? "Reload" : "Load Functions"}
+          </button>
+        </div>
+      </div>
+
+      {error && <p className="form-error">⚠ {error}</p>}
+
+      {functions.length === 0 && !error && !loading && (
+        <div className="audit-empty">
+          <div className="audit-empty-icon">ƒ</div>
+          <p className="audit-empty-title">No data loaded</p>
+          <p className="audit-empty-sub">
+            {usingFallback
+              ? "Pick the tool that returns custom function data, then click Load Functions."
+              : "Select a tool and click \"Load Functions\" to run the audit."}
+          </p>
+        </div>
+      )}
+
+      {functions.length > 0 && (
+        <>
+          <div className="findings-grid">
+            {findings.map(f => (
+              <button
+                key={f.key}
+                className={`finding-card severity-${f.severity} ${filter === f.key ? "active" : ""}`}
+                onClick={() => setFilter(filter === f.key ? "all" : f.key)}
+              >
+                <span className="finding-count">{f.count}</span>
+                <span className="finding-label">{f.label}</span>
+                {f.count > 0 && (
+                  <span className="finding-hint">{filter === f.key ? "Click to clear" : "Click to filter"}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="modules-table-wrap">
+            <div className="table-toolbar">
+              <span className="table-info">
+                {filter === "all"
+                  ? `Showing all ${functions.length} function${functions.length !== 1 ? "s" : ""}`
+                  : `Showing ${displayed.length} ${filter.replace(/_/g, " ")} of ${functions.length}`}
+              </span>
+              {filter !== "all" && (
+                <button className="btn-secondary" onClick={() => setFilter("all")}>Clear filter</button>
+              )}
+            </div>
+
+            {displayed.length === 0 ? (
+              <div className="empty-state">No {filter.replace(/_/g, " ")} found — this is a good sign!</div>
+            ) : (
+              <div className="table-scroll">
+                <table className="modules-table">
+                  <thead>
+                    <tr>
+                      <th>Function Name</th>
+                      <th>Function ID</th>
+                      <th>Module</th>
+                      <th>Module Name</th>
+                      <th>Feature Type</th>
+                      <th>Language</th>
+                      <th>Associated</th>
+                      <th>Created By</th>
+                      <th>Created Time</th>
+                      <th>Modified Time</th>
+                      <th>Findings</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayed.map((fn, i) => {
+                      const tags = getTags(fn);
+                      const associated = isAssociated(fn);
+                      const locked = isLocked(fn);
+
+                      return (
+                        <React.Fragment key={getAssociationId(fn) + i}>
+                          <tr className={tags.length ? "row-flagged" : ""}>
+                            <td className="cell-name">{getFnName(fn)}</td>
+                            <td className="cell-mono fn-id">{getFnId(fn)}</td>
+                            <td className="cell-mono">{getModule(fn)}</td>
+                            <td className="cell-mono">{getModuleName(fn)}</td>
+                            <td>
+                              <span className="arg-badge">{getFeatureType(fn)}</span>
+                            </td>
+                            <td>
+                              <span className="arg-badge">{getLanguage(fn)}</span>
+                            </td>
+                            <td>
+                              <span className={`bool-badge ${associated ? "yes" : "no"}`}>
+                                {associated ? "Yes" : "No"}
+                              </span>
+                            </td>
+                            <td className="cell-mono" style={{ fontSize: 12 }}>{getCreatedBy(fn)}</td>
+                            <td className="cell-datetime">{formatDateTime(fn.created_time as string)}</td>
+                            <td className="cell-datetime">{formatDateTime(fn.modified_time as string)}</td>
+                            <td>
+                              <div className="tag-list">
+                                {tags.length === 0 && !locked
+                                  ? <span className="audit-tag tag-ok">clean</span>
+                                  : tags.map(tag => (
+                                      <span key={tag} className={`audit-tag tag-fn-${tag}`}>
+                                        {tag.replace(/_/g, " ")}
+                                      </span>
+                                    ))}
+                              </div>
+                            </td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

@@ -8,6 +8,8 @@ import Sidebar from "@/components/Sidebar";
 import SectionPanel from "@/components/SectionPanel";
 import ModulesAudit from "@/components/ModulesAudit";
 import WorkflowAudit from "@/components/WorkflowAudit";
+import BlueprintAudit from "@/components/BlueprintAudit";
+import FunctionAudit from "@/components/FunctionAudit";
 import AuditLogs from "@/components/AuditLogs";
 
 export default function DashboardPage() {
@@ -68,6 +70,12 @@ export default function DashboardPage() {
             <div className="main-card" style={{ display: activeSection === "workflows" ? undefined : "none" }}>
               <WorkflowAudit config={config} tools={categorized.workflows} onLog={onLog} />
             </div>
+            <div className="main-card" style={{ display: activeSection === "blueprints" ? undefined : "none" }}>
+              <BlueprintAudit config={config} tools={categorized.blueprints} onLog={onLog} />
+            </div>
+            <div className="main-card" style={{ display: activeSection === "functions" ? undefined : "none" }}>
+              <FunctionAudit config={config} tools={categorized.functions} allTools={tools} onLog={onLog} />
+            </div>
 
             {activeSection === "logs" && (
               <div className="main-card">
@@ -75,7 +83,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {!["modules", "workflows", "logs"].includes(activeSection) && (
+            {!["modules", "workflows", "blueprints", "functions", "logs"].includes(activeSection) && (
               <SectionPanel
                 section={activeSectionDef}
                 tools={categorized[activeSection] ?? []}

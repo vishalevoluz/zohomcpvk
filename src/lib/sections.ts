@@ -6,7 +6,7 @@ export const SECTIONS = [
   { id: "modules" as const,    label: "Modules",    icon: "⊞", keywords: ["module", "record", "contact", "lead", "deal", "account", "crm"] },
   { id: "workflows" as const,  label: "Workflows",  icon: "⟳", keywords: ["workflow", "automation", "trigger", "rule"] },
   { id: "blueprints" as const, label: "Blueprints", icon: "◈", keywords: ["blueprint", "transition", "stage"] },
-  { id: "functions" as const,  label: "Functions",  icon: "ƒ", keywords: ["function", "script", "custom_function", "deluge"] },
+  { id: "functions" as const,  label: "Functions",  icon: "ƒ", keywords: ["function", "script", "custom_function", "deluge", "automation_script", "serverless"] },
 ] as const;
 
 // Check specific sections before modules so broad names like "crm" don't swallow everything
