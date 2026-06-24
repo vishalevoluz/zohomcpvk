@@ -69,6 +69,43 @@ function extractFromValue(result: unknown): ZohoBlueprint[] {
   return [];
 }
 
+function detectApiError(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as Record<string, unknown>;
+  // MCP wraps errors in content[].text
+  if (Array.isArray(r.content)) {
+    for (const item of r.content as Record<string, unknown>[]) {
+      if (item.type === "text" && typeof item.text === "string") {
+        try {
+          const parsed = JSON.parse(item.text) as Record<string, unknown>;
+          if (parsed.status === "error" && parsed.code) {
+            const code = String(parsed.code);
+            const msg = String(parsed.message ?? "Unknown API error");
+            if (code === "OAUTH_SCOPE_MISMATCH") {
+              return `OAuth scope error: your token lacks permission for this API. Add the Blueprint scope (ZohoCRM.blueprint.READ) to your OAuth client and regenerate the token.`;
+            }
+            return `Zoho API error [${code}]: ${msg}`;
+          }
+        } catch { /* not JSON */ }
+      }
+    }
+  }
+  // structuredContent error
+  if (r.isError && r.structuredContent) {
+    const sc = r.structuredContent as Record<string, unknown>;
+    const data = sc.data as Record<string, unknown> | undefined;
+    if (data?.code) {
+      const code = String(data.code);
+      const msg = String(data.message ?? "Unknown API error");
+      if (code === "OAUTH_SCOPE_MISMATCH") {
+        return `OAuth scope error: your token lacks permission for this API. Add the Blueprint scope (ZohoCRM.blueprint.READ) to your OAuth client and regenerate the token.`;
+      }
+      return `Zoho API error [${code}]: ${msg}`;
+    }
+  }
+  return null;
+}
+
 function extractBlueprints(result: unknown): ZohoBlueprint[] {
   if (!result) return [];
   if (typeof result === "object" && !Array.isArray(result)) {
@@ -243,6 +280,12 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
         const start = Date.now();
         try {
           const output = await executeTool(config, toolName, {});
+          const apiErr = detectApiError(output);
+          if (apiErr) {
+            setError(apiErr);
+            onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output, status: "error", errorMessage: apiErr, durationMs: Date.now() - start, timestamp: new Date() });
+            return;
+          }
           const bps = extractBlueprints(output);
           if (bps.length > 0) all.push(...bps);
           onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output, status: bps.length > 0 ? "success" : "error", errorMessage: bps.length === 0 ? "No blueprints found" : undefined, durationMs: Date.now() - start, timestamp: new Date() });
@@ -251,7 +294,7 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
           onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output: null, status: "error", errorMessage: msg, durationMs: Date.now() - start, timestamp: new Date() });
         }
       }
-      if (all.length === 0) {
+      if (all.length === 0 && !error) {
         setError(`No blueprint data found in selected tool${selectedTools.length > 1 ? "s" : ""}.`);
       } else {
         setBlueprints(all);
