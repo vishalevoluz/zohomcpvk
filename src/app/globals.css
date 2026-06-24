@@ -1348,3 +1348,122 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 
 .cell-datetime { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
+
+/* ─── Tooltip system ─────────────────────────────────────────── */
+
+/* Above: for finding cards, badges outside tables */
+[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]::before,
+[data-tooltip]::after {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 1200;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1c1c1a;
+  color: #f0efed;
+  font-size: 12px;
+  font-weight: 400;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  padding: 7px 11px;
+  border-radius: 7px;
+  width: max-content;
+  max-width: 260px;
+  white-space: normal;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+}
+[data-tooltip]::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: #1c1c1a;
+}
+[data-tooltip]:hover::before,
+[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
+/* Below: for table headers (drops into table body, avoids top clip) */
+[data-tooltip-below] {
+  position: relative;
+  cursor: help;
+}
+[data-tooltip-below]::before,
+[data-tooltip-below]::after {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 1200;
+}
+[data-tooltip-below]::after {
+  content: attr(data-tooltip-below);
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1c1c1a;
+  color: #f0efed;
+  font-size: 12px;
+  font-weight: 400;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  padding: 7px 11px;
+  border-radius: 7px;
+  width: max-content;
+  max-width: 240px;
+  white-space: normal;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+}
+[data-tooltip-below]::before {
+  content: '';
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-bottom-color: #1c1c1a;
+}
+[data-tooltip-below]:hover::before,
+[data-tooltip-below]:hover::after {
+  opacity: 1;
+}
+
+/* th tooltip wrapper — lets the ::after escape the th */
+.th-tip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.th-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--color-border-strong);
+  color: var(--color-text-tertiary);
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
+  line-height: 1;
+  font-family: var(--font-sans);
+  text-transform: none;
+  letter-spacing: 0;
+}

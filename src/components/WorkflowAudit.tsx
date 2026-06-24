@@ -210,11 +210,11 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
     return tags;
   }
 
-  const findings: { key: WFFilterKey; label: string; count: number; severity: string }[] = [
-    { key: "disabled",    label: "Disabled Workflows",    count: disabled.length,    severity: disabled.length > 0 ? "warn" : "ok" },
-    { key: "duplicate",   label: "Duplicate Workflows",   count: duplicate.length,   severity: duplicate.length > 0 ? "warn" : "ok" },
-    { key: "conflicting", label: "Conflicting Workflows", count: conflicting.length, severity: conflicting.length > 0 ? "danger" : "ok" },
-    { key: "complex",     label: "Excessive Complexity",  count: complex.length,     severity: complex.length > 3 ? "danger" : complex.length > 0 ? "warn" : "ok" },
+  const findings: { key: WFFilterKey; label: string; count: number; severity: string; tip: string }[] = [
+    { key: "disabled",    label: "Disabled Workflows",    count: disabled.length,    severity: disabled.length > 0 ? "warn" : "ok",                                       tip: "Workflow rules that are currently turned off and not triggering on any record events." },
+    { key: "duplicate",   label: "Duplicate Workflows",   count: duplicate.length,   severity: duplicate.length > 0 ? "warn" : "ok",                                      tip: "Multiple workflow rules sharing the same name — may indicate redundancy or copy-paste errors." },
+    { key: "conflicting", label: "Conflicting Workflows", count: conflicting.length, severity: conflicting.length > 0 ? "danger" : "ok",                                  tip: "Multiple active workflows on the same module and trigger event. They fire simultaneously and may cause unexpected or duplicate actions." },
+    { key: "complex",     label: "Excessive Complexity",  count: complex.length,     severity: complex.length > 3 ? "danger" : complex.length > 0 ? "warn" : "ok",       tip: "Workflows with more than 5 actions or 5 criteria conditions. Complex rules are harder to debug and maintain." },
   ];
 
   return (
@@ -255,6 +255,7 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
             {findings.map(f => (
               <button
                 key={f.key}
+                data-tooltip={f.tip}
                 className={`finding-card severity-${f.severity} ${filter === f.key ? "active" : ""}`}
                 onClick={() => setFilter(filter === f.key ? "all" : f.key)}
               >
@@ -286,13 +287,13 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
                 <table className="modules-table">
                   <thead>
                     <tr>
-                      <th>Workflow Name</th>
-                      <th>Status</th>
-                      <th>Module</th>
-                      <th>Criteria</th>
-                      <th>Trigger Events</th>
-                      <th>Actions</th>
-                      <th>Findings</th>
+                      <th><span className="th-tip" data-tooltip-below="The name of this workflow rule">Workflow Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this workflow rule is currently active or inactive">Status<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The CRM module this workflow rule applies to">Module<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The conditions that must be met for this workflow to trigger">Criteria<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The record events that cause this workflow to fire (e.g., Created, Modified, Deleted)">Trigger Events<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The number of actions this workflow performs when triggered">Actions<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Audit issues detected for this workflow">Findings<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -318,9 +319,14 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
                           <td>
                             <div className="tag-list">
                               {tags.length === 0
-                                ? <span className="audit-tag tag-ok">clean</span>
+                                ? <span className="audit-tag tag-ok" title="No issues detected for this workflow">clean</span>
                                 : tags.map(tag => (
-                                    <span key={tag} className={`audit-tag tag-wf-${tag}`}>{tag}</span>
+                                    <span key={tag} className={`audit-tag tag-wf-${tag}`} title={
+                                      tag === "disabled"    ? "This workflow is currently inactive and not triggering on record events." :
+                                      tag === "duplicate"   ? "Another workflow rule shares this exact name — check for redundancy." :
+                                      tag === "conflicting" ? "Another active workflow targets the same module and trigger event — they may fire together and cause duplicate actions." :
+                                      tag === "complex"     ? "This workflow has more than 5 actions or conditions — consider simplifying." : tag
+                                    }>{tag}</span>
                                   ))}
                             </div>
                           </td>

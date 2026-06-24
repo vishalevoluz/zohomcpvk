@@ -330,11 +330,11 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
     return tags;
   }
 
-  const findings: { key: BPFilterKey; label: string; count: number; severity: string }[] = [
-    { key: "inactive",            label: "Inactive Blueprints",  count: inactive.length,           severity: inactive.length > 0 ? "warn" : "ok" },
-    { key: "dead_end",           label: "Dead-end Stages",       count: deadEnd.length,            severity: deadEnd.length > 0 ? "danger" : "ok" },
-    { key: "missing_transitions", label: "Missing Transitions",  count: missingTransitions.length, severity: missingTransitions.length > 0 ? "danger" : "ok" },
-    { key: "incomplete",          label: "Incomplete Processes", count: incomplete.length,          severity: incomplete.length > 0 ? "warn" : "ok" },
+  const findings: { key: BPFilterKey; label: string; count: number; severity: string; tip: string }[] = [
+    { key: "inactive",            label: "Inactive Blueprints",  count: inactive.length,           severity: inactive.length > 0 ? "warn" : "ok",           tip: "Blueprint processes not currently active — stage transitions are not being enforced on records." },
+    { key: "dead_end",           label: "Dead-end Stages",       count: deadEnd.length,            severity: deadEnd.length > 0 ? "danger" : "ok",          tip: "Stages that can be reached via transitions but have no outgoing transitions defined. Records can get permanently stuck here." },
+    { key: "missing_transitions", label: "Missing Transitions",  count: missingTransitions.length, severity: missingTransitions.length > 0 ? "danger" : "ok", tip: "Picklist values in the blueprint field that aren't connected to any transition — those stages are completely unreachable." },
+    { key: "incomplete",          label: "Incomplete Processes", count: incomplete.length,          severity: incomplete.length > 0 ? "warn" : "ok",          tip: "Transitions with no mandatory fields, validation rules, or actions configured — they do nothing when executed." },
   ];
 
   return (
@@ -375,6 +375,7 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
             {findings.map(f => (
               <button
                 key={f.key}
+                data-tooltip={f.tip}
                 className={`finding-card severity-${f.severity} ${filter === f.key ? "active" : ""}`}
                 onClick={() => setFilter(filter === f.key ? "all" : f.key)}
               >
@@ -406,14 +407,14 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
                 <table className="modules-table">
                   <thead>
                     <tr>
-                      <th>Blueprint Name</th>
-                      <th>Status</th>
-                      <th>Module</th>
-                      <th>States</th>
-                      <th>Transitions</th>
-                      <th>Mandatory Fields</th>
-                      <th>Validation Rules</th>
-                      <th>Findings</th>
+                      <th><span className="th-tip" data-tooltip-below="The name of this blueprint process">Blueprint Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this blueprint is currently active and enforcing stage transitions">Status<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The CRM module this blueprint process is applied to">Module<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The number of unique stages defined in this blueprint">States<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The number of stage-to-stage transitions defined in this blueprint">Transitions<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Total mandatory fields required across all transitions in this blueprint">Mandatory Fields<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Total validation rules configured across all transitions in this blueprint">Validation Rules<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Audit issues detected for this blueprint">Findings<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -453,11 +454,14 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
                           <td>
                             <div className="tag-list">
                               {tags.length === 0
-                                ? <span className="audit-tag tag-ok">clean</span>
+                                ? <span className="audit-tag tag-ok" title="No issues detected for this blueprint">clean</span>
                                 : tags.map(tag => (
-                                    <span key={tag} className={`audit-tag tag-bp-${tag}`}>
-                                      {tag.replace(/_/g, " ")}
-                                    </span>
+                                    <span key={tag} className={`audit-tag tag-bp-${tag}`} title={
+                                      tag === "inactive"            ? "This blueprint is inactive and not enforcing any stage transitions on records." :
+                                      tag === "dead_end"            ? "This blueprint has stages with no outgoing transitions — records can get permanently stuck." :
+                                      tag === "missing_transitions" ? "Some picklist stages in this blueprint have no connected transitions — those stages are unreachable." :
+                                      tag === "incomplete"          ? "This blueprint has transitions with no mandatory fields, validation rules, or actions configured." : tag
+                                    }>{tag.replace(/_/g, " ")}</span>
                                   ))}
                             </div>
                           </td>

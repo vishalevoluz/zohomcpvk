@@ -254,10 +254,10 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
     return tags;
   }
 
-  const findings: { key: FnFilterKey; label: string; count: number; severity: string }[] = [
-    { key: "unused",      label: "Unassociated Functions", count: unused.length,     severity: unused.length > 0 ? "warn" : "ok" },
-    { key: "missing_ref", label: "Missing Function Refs",  count: missingRef.length, severity: missingRef.length > 0 ? "danger" : "ok" },
-    { key: "locked",      label: "Locked Functions",       count: locked.length,     severity: locked.length > 0 ? "warn" : "ok" },
+  const findings: { key: FnFilterKey; label: string; count: number; severity: string; tip: string }[] = [
+    { key: "unused",      label: "Unassociated Functions", count: unused.length,     severity: unused.length > 0 ? "warn" : "ok",    tip: "Custom functions not linked to any workflow rule — they exist in Zoho but are never triggered automatically." },
+    { key: "missing_ref", label: "Missing Function Refs",  count: missingRef.length, severity: missingRef.length > 0 ? "danger" : "ok", tip: "The underlying Deluge function ID (function.id) is missing from this association — the link to the script may be broken." },
+    { key: "locked",      label: "Locked Functions",       count: locked.length,     severity: locked.length > 0 ? "warn" : "ok",    tip: "Functions that are locked and cannot be edited or executed by the current user." },
   ];
 
   return (
@@ -309,6 +309,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
             {findings.map(f => (
               <button
                 key={f.key}
+                data-tooltip={f.tip}
                 className={`finding-card severity-${f.severity} ${filter === f.key ? "active" : ""}`}
                 onClick={() => setFilter(filter === f.key ? "all" : f.key)}
               >
@@ -340,17 +341,17 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                 <table className="modules-table">
                   <thead>
                     <tr>
-                      <th>Function Name</th>
-                      <th>Function ID</th>
-                      <th>Module</th>
-                      <th>Module Name</th>
-                      <th>Feature Type</th>
-                      <th>Language</th>
-                      <th>Associated</th>
-                      <th>Created By</th>
-                      <th>Created Time</th>
-                      <th>Modified Time</th>
-                      <th>Findings</th>
+                      <th><span className="th-tip" data-tooltip-below="The display name of this custom Deluge function">Function Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The unique ID of the underlying Deluge function script (function.id)">Function ID<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The CRM module this function is associated with">Module<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The internal system name of the module (e.g. CustomModule89)">Module Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The type of automation this function is tied to (e.g. workflow)">Feature Type<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The scripting language used to write this function — Zoho uses Deluge">Language<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this function is linked to and triggered by a workflow rule">Associated<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The user who created this function">Created By<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="When this function was first created">Created Time<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="When this function was last modified">Modified Time<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Audit issues detected for this function">Findings<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -383,11 +384,13 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                             <td>
                               <div className="tag-list">
                                 {tags.length === 0 && !locked
-                                  ? <span className="audit-tag tag-ok">clean</span>
+                                  ? <span className="audit-tag tag-ok" title="No issues detected for this function">clean</span>
                                   : tags.map(tag => (
-                                      <span key={tag} className={`audit-tag tag-fn-${tag}`}>
-                                        {tag.replace(/_/g, " ")}
-                                      </span>
+                                      <span key={tag} className={`audit-tag tag-fn-${tag}`} title={
+                                        tag === "unused"      ? "This function is not associated with any workflow rule — it will never be triggered automatically." :
+                                        tag === "missing_ref" ? "The Deluge function ID is missing — this association may be broken or the underlying script deleted." :
+                                        tag === "locked"      ? "This function is locked and cannot be edited or executed by the current user." : tag
+                                      }>{tag.replace(/_/g, " ")}</span>
                                     ))}
                               </div>
                             </td>

@@ -190,11 +190,11 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
     return tags;
   }
 
-  const findings: { key: FilterKey; label: string; count: number; severity: string }[] = [
-    { key: "hidden",     label: "Hidden Modules",     count: hidden.length,     severity: hidden.length > 0 ? "warn" : "ok" },
-    { key: "unused",     label: "Unused Modules",     count: unused.length,     severity: unused.length > 0 ? "warn" : "ok" },
-    { key: "custom",     label: "Excessive Custom",   count: custom.length,     severity: custom.length > 5 ? "danger" : custom.length > 0 ? "warn" : "ok" },
-    { key: "deprecated", label: "Deprecated Modules", count: deprecated.length, severity: deprecated.length > 0 ? "danger" : "ok" },
+  const findings: { key: FilterKey; label: string; count: number; severity: string; tip: string }[] = [
+    { key: "hidden",     label: "Hidden Modules",     count: hidden.length,     severity: hidden.length > 0 ? "warn" : "ok",                                            tip: "Modules not visible to users in the CRM navigation. May be system-hidden or manually hidden by admins." },
+    { key: "unused",     label: "Unused Modules",     count: unused.length,     severity: unused.length > 0 ? "warn" : "ok",                                            tip: "Modules where records can't be created or edited, or API access is disabled." },
+    { key: "custom",     label: "Excessive Custom",   count: custom.length,     severity: custom.length > 5 ? "danger" : custom.length > 0 ? "warn" : "ok",            tip: "Non-standard modules your org created. Too many custom modules can complicate data architecture and maintenance." },
+    { key: "deprecated", label: "Deprecated Modules", count: deprecated.length, severity: deprecated.length > 0 ? "danger" : "ok",                                     tip: "Modules flagged as deprecated or deleted by Zoho. Should be reviewed and removed." },
   ];
 
   return (
@@ -237,6 +237,7 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
             {findings.map(f => (
               <button
                 key={f.key}
+                data-tooltip={f.tip}
                 className={`finding-card severity-${f.severity} ${filter === f.key ? "active" : ""}`}
                 onClick={() => setFilter(filter === f.key ? "all" : f.key)}
               >
@@ -271,14 +272,14 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
                 <table className="modules-table">
                   <thead>
                     <tr>
-                      <th>Module Name</th>
-                      <th>API Name</th>
-                      <th>Visibility</th>
-                      <th>Creatable</th>
-                      <th>Editable</th>
-                      <th>API Supported</th>
-                      <th>Profiles Access</th>
-                      <th>Findings</th>
+                      <th><span className="th-tip" data-tooltip-below="The display name of the CRM module">Module Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The technical API identifier used in integrations and API calls">API Name<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this module is visible to users in the CRM navigation">Visibility<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether new records can be created in this module">Creatable<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether existing records can be modified in this module">Editable<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this module can be accessed via the Zoho CRM API">API Supported<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Which user profiles have access to this module">Profiles Access<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Audit issues detected for this module">Findings<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -296,9 +297,14 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
                           <td>
                             <div className="tag-list">
                               {tags.length === 0
-                                ? <span className="audit-tag tag-ok">clean</span>
+                                ? <span className="audit-tag tag-ok" title="No issues detected for this module">clean</span>
                                 : tags.map(tag => (
-                                    <span key={tag} className={`audit-tag tag-${tag}`}>{tag}</span>
+                                    <span key={tag} className={`audit-tag tag-${tag}`} title={
+                                      tag === "hidden"     ? "This module is hidden from CRM users and may not appear in navigation." :
+                                      tag === "unused"     ? "This module has no create/edit access or is not accessible via API." :
+                                      tag === "custom"     ? "This is a custom module created by your organization, not a standard Zoho CRM module." :
+                                      tag === "deprecated" ? "This module is marked as deprecated or deleted and should be reviewed." : tag
+                                    }>{tag}</span>
                                   ))}
                             </div>
                           </td>
