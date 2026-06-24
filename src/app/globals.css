@@ -186,6 +186,17 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .btn-connect:hover { opacity: 0.85; background: var(--color-accent-bg); }
 
+.module-input {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-text);
+  font-size: 13px;
+  padding: 7px 12px;
+  outline: none;
+}
+.module-input:focus { border-color: var(--color-accent); }
+
 .btn-run {
   background: var(--color-accent);
   color: #fff;

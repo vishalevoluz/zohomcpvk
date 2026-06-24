@@ -221,6 +221,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
   const [selectedTools, setSelectedTools] = useState<string[]>(
     availableTools.length > 0 ? [availableTools[0].name] : []
   );
+  const [moduleName, setModuleName] = useState("Leads");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fields, setFields] = useState<ZohoField[]>([]);
@@ -233,32 +234,67 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
     setError("");
   }, [tools, allTools]);
 
+  function detectToolError(output: unknown): string | null {
+    if (output && typeof output === "object") {
+      const o = output as Record<string, unknown>;
+      // structuredContent.status === "failure"
+      if (o.structuredContent && typeof o.structuredContent === "object") {
+        const sc = o.structuredContent as Record<string, unknown>;
+        if (sc.status === "failure" && sc.data && typeof sc.data === "object") {
+          const d = sc.data as Record<string, unknown>;
+          if (typeof d.message === "string") return d.message;
+        }
+      }
+      // content[].text plain message
+      if (Array.isArray(o.content)) {
+        for (const item of o.content as Record<string, unknown>[]) {
+          if (item.type === "text" && typeof item.text === "string") {
+            const text = item.text;
+            if (text.toLowerCase().includes("mandatory") || text.toLowerCase().includes("required") || text.toLowerCase().includes("failure")) {
+              return text;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
   async function loadFields() {
     if (selectedTools.length === 0) return;
+    const mod = moduleName.trim();
+    if (!mod) { setError("Enter a module name (e.g. Leads, Contacts, Deals)."); return; }
     setLoading(true);
     setError("");
     try {
       const all: ZohoField[] = [];
+      const params = { module: mod };
       for (const toolName of selectedTools) {
         const start = Date.now();
         try {
-          const output = await executeTool(config, toolName, {});
+          const output = await executeTool(config, toolName, params);
+          const toolErr = detectToolError(output);
+          if (toolErr) {
+            setError(toolErr);
+            onLog({ id: crypto.randomUUID(), tool: toolName, input: params, output, status: "error", errorMessage: toolErr, durationMs: Date.now() - start, timestamp: new Date() });
+            continue;
+          }
           const flds = extractFields(output);
           if (flds.length > 0) all.push(...flds);
           onLog({
-            id: crypto.randomUUID(), tool: toolName, input: {}, output,
+            id: crypto.randomUUID(), tool: toolName, input: params, output,
             status: flds.length > 0 ? "success" : "error",
             errorMessage: flds.length === 0 ? "No fields found" : undefined,
             durationMs: Date.now() - start, timestamp: new Date(),
           });
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : "Failed";
-          onLog({ id: crypto.randomUUID(), tool: toolName, input: {}, output: null, status: "error", errorMessage: msg, durationMs: Date.now() - start, timestamp: new Date() });
+          onLog({ id: crypto.randomUUID(), tool: toolName, input: params, output: null, status: "error", errorMessage: msg, durationMs: Date.now() - start, timestamp: new Date() });
         }
       }
-      if (all.length === 0) {
-        setError(`No field data found in selected tool${selectedTools.length > 1 ? "s" : ""}.`);
-      } else {
+      if (all.length === 0 && !error) {
+        setError(`No field data found in "${mod}". Check the module API name (e.g. Leads, Contacts, Deals).`);
+      } else if (all.length > 0) {
         setFields(all);
         setFilter("all");
       }
@@ -355,7 +391,36 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
           ) : (
             <span className="no-tools-hint">No tools found — check connection</span>
           )}
-          <button onClick={loadFields} disabled={loading || selectedTools.length === 0} className="btn-connect">
+          <input
+            className="module-input"
+            type="text"
+            value={moduleName}
+            onChange={e => setModuleName(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && loadFields()}
+            placeholder="Module (e.g. Leads)"
+            title="Zoho CRM module API name — e.g. Leads, Contacts, Deals, Accounts"
+            list="zoho-modules"
+            style={{ width: 160 }}
+          />
+          <datalist id="zoho-modules">
+            <option value="Leads" />
+            <option value="Contacts" />
+            <option value="Accounts" />
+            <option value="Deals" />
+            <option value="Activities" />
+            <option value="Tasks" />
+            <option value="Calls" />
+            <option value="Meetings" />
+            <option value="Products" />
+            <option value="Quotes" />
+            <option value="Invoices" />
+            <option value="Purchase_Orders" />
+            <option value="Sales_Orders" />
+            <option value="Campaigns" />
+            <option value="Cases" />
+            <option value="Solutions" />
+          </datalist>
+          <button onClick={loadFields} disabled={loading || selectedTools.length === 0 || !moduleName.trim()} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : fields.length ? "Reload" : "Load Fields"}
           </button>
         </div>
@@ -369,8 +434,8 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
           <p className="audit-empty-title">No data loaded</p>
           <p className="audit-empty-sub">
             {usingFallback
-              ? "Pick the tool that returns CRM field metadata, then click Load Fields."
-              : "Select a tool and click \"Load Fields\" to run the audit."}
+              ? "Pick the tool that returns CRM field metadata, enter a module name (e.g. Leads), then click Load Fields."
+              : "Enter a module name (e.g. Leads, Contacts, Deals) and click \"Load Fields\" to run the audit."}
           </p>
         </div>
       )}
