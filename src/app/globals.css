@@ -340,6 +340,22 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   margin-top: 2px;
 }
 
+.schema-hint-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.schema-hint-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .schema-hints {
   background: var(--color-bg-secondary);
   border-radius: var(--radius-md);

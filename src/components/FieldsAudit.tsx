@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
@@ -221,11 +221,33 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
   const [selectedTools, setSelectedTools] = useState<string[]>(
     availableTools.length > 0 ? [availableTools[0].name] : []
   );
-  const [moduleName, setModuleName] = useState("Leads");
+  const [toolParams, setToolParams] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [fields, setFields] = useState<ZohoField[]>([]);
   const [filter, setFilter] = useState<FieldFilterKey>("all");
+
+  // Derive the selected tool's schema
+  const selectedToolObj = useMemo(
+    () => availableTools.find(t => t.name === selectedTools[0]),
+    [availableTools, selectedTools]
+  );
+  const schemaProps = selectedToolObj?.inputSchema?.properties ?? {};
+  const requiredParams: string[] = selectedToolObj?.inputSchema?.required ?? [];
+
+  // Reset param inputs whenever the selected tool changes
+  useEffect(() => {
+    const props = selectedToolObj?.inputSchema?.properties ?? {};
+    const required = selectedToolObj?.inputSchema?.required ?? [];
+    const defaults: Record<string, string> = {};
+    for (const key of required) {
+      if (!props[key] || props[key].type === "string") {
+        defaults[key] = key.toLowerCase().includes("module") ? "Leads" : "";
+      }
+    }
+    setToolParams(defaults);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTools.join(",")]);
 
   useEffect(() => {
     const next = tools.length > 0 ? tools : allTools;
@@ -262,13 +284,22 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
 
   async function loadFields() {
     if (selectedTools.length === 0) return;
-    const mod = moduleName.trim();
-    if (!mod) { setError("Enter a module name (e.g. Leads, Contacts, Deals)."); return; }
+
+    // Validate and build params from tool schema
+    const params: Record<string, string> = {};
+    for (const key of requiredParams) {
+      const val = (toolParams[key] ?? "").trim();
+      if (!val) {
+        setError(`Required parameter "${key}" is empty — enter a value before loading.`);
+        return;
+      }
+      params[key] = val;
+    }
+
     setLoading(true);
     setError("");
     try {
       const all: ZohoField[] = [];
-      const params = { module: mod };
       for (const toolName of selectedTools) {
         const start = Date.now();
         try {
@@ -292,9 +323,10 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
           onLog({ id: crypto.randomUUID(), tool: toolName, input: params, output: null, status: "error", errorMessage: msg, durationMs: Date.now() - start, timestamp: new Date() });
         }
       }
-      if (all.length === 0 && !error) {
-        setError(`No field data found in "${mod}". Check the module API name (e.g. Leads, Contacts, Deals).`);
-      } else if (all.length > 0) {
+      if (all.length === 0) {
+        const modVal = Object.values(params)[0] ?? "";
+        setError(`No field data found${modVal ? ` for "${modVal}"` : ""}. Check the parameter value (e.g. Leads, Contacts, Deals).`);
+      } else {
         setFields(all);
         setFilter("all");
       }
@@ -391,17 +423,38 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
           ) : (
             <span className="no-tools-hint">No tools found — check connection</span>
           )}
-          <input
-            className="module-input"
-            type="text"
-            value={moduleName}
-            onChange={e => setModuleName(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && loadFields()}
-            placeholder="Module (e.g. Leads)"
-            title="Zoho CRM module API name — e.g. Leads, Contacts, Deals, Accounts"
-            list="zoho-modules"
-            style={{ width: 160 }}
-          />
+          {requiredParams.map(key => {
+            const prop = schemaProps[key];
+            const isModuleLike = key.toLowerCase().includes("module");
+            return (
+              <React.Fragment key={key}>
+                <input
+                  className="module-input"
+                  type="text"
+                  value={toolParams[key] ?? ""}
+                  onChange={e => setToolParams(p => ({ ...p, [key]: e.target.value }))}
+                  onKeyDown={e => e.key === "Enter" && loadFields()}
+                  placeholder={prop?.description ? prop.description.slice(0, 28) : key}
+                  title={prop?.description ?? key}
+                  list={isModuleLike ? "zoho-modules" : undefined}
+                  style={{ width: 160 }}
+                />
+              </React.Fragment>
+            );
+          })}
+          {requiredParams.length === 0 && (
+            <input
+              className="module-input"
+              type="text"
+              value={toolParams["module"] ?? "Leads"}
+              onChange={e => setToolParams(p => ({ ...p, module: e.target.value }))}
+              onKeyDown={e => e.key === "Enter" && loadFields()}
+              placeholder="Module (e.g. Leads)"
+              title="Zoho CRM module API name — e.g. Leads, Contacts, Deals"
+              list="zoho-modules"
+              style={{ width: 160 }}
+            />
+          )}
           <datalist id="zoho-modules">
             <option value="Leads" />
             <option value="Contacts" />
@@ -420,7 +473,11 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
             <option value="Cases" />
             <option value="Solutions" />
           </datalist>
-          <button onClick={loadFields} disabled={loading || selectedTools.length === 0 || !moduleName.trim()} className="btn-connect">
+          <button
+            onClick={loadFields}
+            disabled={loading || selectedTools.length === 0 || requiredParams.some(k => !(toolParams[k] ?? "").trim())}
+            className="btn-connect"
+          >
             {loading ? <><span className="spinner" /> Loading…</> : fields.length ? "Reload" : "Load Fields"}
           </button>
         </div>
@@ -428,14 +485,31 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
 
       {error && <p className="form-error">⚠ {error}</p>}
 
+      {requiredParams.length > 0 && fields.length === 0 && !loading && (
+        <div className="schema-hint-bar">
+          {requiredParams.map(key => {
+            const prop = schemaProps[key];
+            return (
+              <span key={key} className="schema-hint-item">
+                <code className="param-name">{key}</code>
+                <span className="required-badge">required</span>
+                {prop?.description && <span className="param-desc">{prop.description}</span>}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
       {fields.length === 0 && !error && !loading && (
         <div className="audit-empty">
           <div className="audit-empty-icon">⊟</div>
           <p className="audit-empty-title">No data loaded</p>
           <p className="audit-empty-sub">
-            {usingFallback
-              ? "Pick the tool that returns CRM field metadata, enter a module name (e.g. Leads), then click Load Fields."
-              : "Enter a module name (e.g. Leads, Contacts, Deals) and click \"Load Fields\" to run the audit."}
+            {requiredParams.length > 0
+              ? `Fill in the required parameter${requiredParams.length > 1 ? "s" : ""} above (${requiredParams.join(", ")}) and click "Load Fields".`
+              : usingFallback
+                ? "Pick the tool that returns CRM field metadata, enter a module name (e.g. Leads), then click Load Fields."
+                : "Enter a module name (e.g. Leads, Contacts, Deals) and click \"Load Fields\" to run the audit."}
           </p>
         </div>
       )}
