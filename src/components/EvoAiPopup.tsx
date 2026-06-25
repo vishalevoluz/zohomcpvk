@@ -13,7 +13,7 @@ interface ChatMessage {
 export interface EvoAiTarget {
   data: Record<string, unknown>;
   name: string;
-  type: "module" | "workflow" | "blueprint";
+  type: "module" | "workflow" | "blueprint" | "function";
 }
 
 interface Props {
@@ -23,35 +23,34 @@ interface Props {
   onClose: () => void;
 }
 
-// Matches ZohoCRM_createZiaRecommendation and similar Zoho MCP tool names
-const ZIA_PATTERNS = [
-  /createzia/i,
-  /ziarecommend/i,
-  /zia_recommend/i,
-  /getzia/i,
-  /zia_insight/i,
-];
-const ZIA_KEYWORDS = ["zia", "recommend", "insight", "suggest", "predict", "ai_recommendation"];
+// Preferred tools per entity type — ordered by usefulness
+const PREFERRED_TOOLS: Record<EvoAiTarget["type"], string[]> = {
+  module:    [],
+  workflow:  ["getWorkflowRuleById", "getWorkflowRuleUsage"],
+  blueprint: ["getBlueprintId", "getBlueprintRecordsCount"],
+  function:  ["getAutomationFunctionFailures", "getAutomationFunctions"],
+};
 
-function scoreZiaTool(t: McpTool): number {
-  const hay = `${t.name} ${t.description ?? ""}`.toLowerCase();
-  // Exact known tool name gets highest priority
-  if (t.name === "ZohoCRM_createZiaRecommendation") return 100;
-  if (ZIA_PATTERNS.some(p => p.test(t.name))) return 80;
-  if (ZIA_PATTERNS.some(p => p.test(hay))) return 60;
-  if (ZIA_KEYWORDS.some(kw => hay.includes(kw))) return 40;
-  return 0;
+// Fallback patterns if preferred tools aren't in the connected MCP
+const FALLBACK_PATTERNS: Record<EvoAiTarget["type"], RegExp[]> = {
+  module:    [/getmodule/i],
+  workflow:  [/workflowrule/i, /workflow/i],
+  blueprint: [/getblueprint/i, /blueprint/i],
+  function:  [/automationfunction/i, /getfunction/i, /function/i],
+};
+
+function findEntityTools(tools: McpTool[], type: EvoAiTarget["type"]): McpTool[] {
+  const preferred = PREFERRED_TOOLS[type];
+  const exact = tools.filter(t => preferred.includes(t.name));
+  if (exact.length > 0) {
+    return exact.sort((a, b) => preferred.indexOf(a.name) - preferred.indexOf(b.name));
+  }
+  const patterns = FALLBACK_PATTERNS[type];
+  const matched = tools.filter(t => patterns.some(p => p.test(t.name)));
+  return matched.length > 0 ? matched : tools;
 }
 
-function findZiaTools(tools: McpTool[]): McpTool[] {
-  return tools
-    .map(t => ({ t, score: scoreZiaTool(t) }))
-    .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map(({ t }) => t);
-}
-
-// Resolve module api_name from any item type (module/workflow/blueprint row)
+// Resolve module api_name from any entity row
 function resolveModule(item: Record<string, unknown>): string {
   if (typeof item.api_name === "string" && item.api_name) return item.api_name;
   if (typeof item.module_name === "string" && item.module_name) return item.module_name;
@@ -61,6 +60,20 @@ function resolveModule(item: Record<string, unknown>): string {
     return String(m.api_name ?? m.plural_label ?? m.name ?? "");
   }
   return "";
+}
+
+// Returns true for any parameter that should receive the entity's ID value.
+// Handles camelCase (workflowRuleId, blueprintId, functionid) and snake_case (workflow_rule_id).
+function isIdParam(lk: string): boolean {
+  return (
+    lk === "id" ||
+    lk.endsWith("_id") ||
+    lk === "workflowruleid" ||
+    lk === "blueprintid" ||
+    lk === "functionid" ||
+    lk === "record_id" ||
+    lk === "entity_id"
+  );
 }
 
 function buildParams(tool: McpTool, item: Record<string, unknown>): Record<string, unknown> {
@@ -79,10 +92,10 @@ function buildParams(tool: McpTool, item: Record<string, unknown>): Record<strin
 
     if (lk === "recommendations" || (propType === "array" && lk.includes("recommend"))) {
       params[key] = idVal ? [{ id: idVal }] : [];
+    } else if (isIdParam(lk)) {
+      params[key] = idVal;
     } else if (lk.includes("module") || lk === "module_api_name" || lk === "module_name") {
       params[key] = moduleVal;
-    } else if (lk === "id" || lk === "record_id" || lk === "entity_id" || lk.endsWith("_id")) {
-      params[key] = idVal;
     } else if (lk.includes("name") && !lk.includes("api")) {
       params[key] = nameVal;
     } else if (propType === "array") {
@@ -113,14 +126,16 @@ function extractText(output: unknown): string {
 }
 
 const TYPE_ICON: Record<EvoAiTarget["type"], string> = {
-  module: "⊞",
-  workflow: "⟳",
+  module:    "⊞",
+  workflow:  "⟳",
   blueprint: "◈",
+  function:  "ƒ",
 };
 
 export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
-  const ziaTools = findZiaTools(tools);
-  const available = ziaTools.length > 0 ? ziaTools : tools;
+  const entityTools = findEntityTools(tools, target.type);
+  const available = entityTools.length > 0 ? entityTools : tools;
+  const usingFallback = entityTools.length === 0 && tools.length > 0;
 
   const [selectedTool, setSelectedTool] = useState<McpTool | null>(available[0] ?? null);
   const [params, setParams] = useState<Record<string, unknown>>(() =>
@@ -132,39 +147,35 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Close on Escape
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-call on mount
   useEffect(() => {
     if (!selectedTool) {
       setMessages([{
         role: "bot",
-        text: "No Zia tools found.\n\nMake sure your MCP server is connected and the ZohoCRM_createZiaRecommendation scope is authorised.",
+        text: "No tools found for this entity type.\n\nMake sure your MCP server is connected.",
       }]);
       return;
     }
-    callZia(selectedTool, params, true);
+    callTool(selectedTool, params, true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reset params when tool changes
   function handleToolChange(toolName: string) {
     const t = available.find(t => t.name === toolName) ?? null;
     setSelectedTool(t);
     if (t) setParams(buildParams(t, target.data));
   }
 
-  async function callZia(tool: McpTool, callParams: Record<string, unknown>, isInitial = false) {
+  async function callTool(tool: McpTool, callParams: Record<string, unknown>, isInitial = false) {
     setLoading(true);
     setMessages(prev => [...prev, { role: "bot", text: "", isLoading: true }]);
     try {
@@ -175,7 +186,7 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
         {
           role: "bot",
           text: isInitial
-            ? `Zia recommendations for ${target.name} [via ${tool.name}]:\n\n${text}`
+            ? `EvoAi insights for ${target.name} [via ${tool.name}]:\n\n${text}`
             : text,
         },
       ]);
@@ -194,7 +205,6 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
     setInput("");
     setMessages(prev => [...prev, { role: "user", text: q }]);
 
-    // Try to find a query/prompt param in the tool schema
     const schemaProps = selectedTool.inputSchema?.properties ?? {};
     const queryKey = Object.keys(schemaProps).find(k =>
       ["query", "question", "prompt", "text", "message", "input", "search"].includes(k.toLowerCase())
@@ -202,7 +212,7 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
     const callParams = { ...params };
     if (queryKey) callParams[queryKey] = q;
 
-    await callZia(selectedTool, callParams);
+    await callTool(selectedTool, callParams);
   }
 
   const schemaProps = selectedTool?.inputSchema?.properties ?? {};
@@ -221,8 +231,8 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
               <span>{TYPE_ICON[target.type]}</span>
               <span>{target.name}</span>
             </span>
-            {ziaTools.length === 0 && tools.length > 0 && (
-              <span className="evoai-warn-badge" title="Expected: ZohoCRM_createZiaRecommendation">No Zia tools detected — showing all tools</span>
+            {usingFallback && (
+              <span className="evoai-warn-badge" title="No specific tools found — showing all available tools">No specific tools matched</span>
             )}
           </div>
           <button className="evoai-close" onClick={onClose} title="Close (Esc)">✕</button>
@@ -241,13 +251,12 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
                 <option key={t.name} value={t.name}>{t.name}</option>
               ))}
             </select>
-            {/* Editable string params; complex params (arrays/objects) are auto-built */}
             {requiredKeys.map(key => {
               const propType = schemaProps[key]?.type ?? "string";
               const val = params[key];
               if (propType === "array" || propType === "object" || typeof val === "object") {
                 return (
-                  <span key={key} className="evoai-param-badge" title={`${key} (auto-built)`}>
+                  <span key={key} className="evoai-param-badge" title={`${key} (auto-filled)`}>
                     {key}: auto
                   </span>
                 );
@@ -267,7 +276,7 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
             })}
             <button
               className="btn-secondary"
-              onClick={() => selectedTool && callZia(selectedTool, params, true)}
+              onClick={() => selectedTool && callTool(selectedTool, params, true)}
               disabled={loading || !selectedTool}
             >
               {loading ? <span className="spinner" /> : "↺ Run"}
@@ -280,7 +289,7 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
           {messages.length === 0 && (
             <div className="evoai-empty">
               <span className="evoai-empty-icon">⚡</span>
-              <p>Fetching Zia recommendations…</p>
+              <p>Fetching insights…</p>
             </div>
           )}
           {messages.map((msg, i) => (

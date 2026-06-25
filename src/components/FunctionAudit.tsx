@@ -418,7 +418,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                                 >⋯</button>
                                 {activeMenu === getAssociationId(fn) + i && (
                                   <div className="action-dropdown">
-                                    <button className="action-dropdown-item" onClick={() => { setEvoAiTarget({ data: fn as Record<string,unknown>, name: getFnName(fn), type: "workflow" }); setActiveMenu(null); }}>
+                                    <button className="action-dropdown-item" onClick={() => { setEvoAiTarget({ data: fn as Record<string,unknown>, name: getFnName(fn), type: "function" }); setActiveMenu(null); }}>
                                       <span className="action-icon">⚡</span>EvoAi Insights
                                     </button>
                                     <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(getFnName(fn)); setActiveMenu(null); }}>
