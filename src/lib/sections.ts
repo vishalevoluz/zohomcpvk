@@ -1,6 +1,6 @@
 import type { McpTool } from "@/types/mcp";
 
-export type Section = "modules" | "workflows" | "blueprints" | "functions" | "fields" | "logs";
+export type Section = "modules" | "workflows" | "blueprints" | "functions" | "fields" | "logs" | "integrations";
 
 export const SECTIONS = [
   { id: "modules" as const,    label: "Modules",    icon: "⊞", keywords: ["module", "record", "contact", "lead", "deal", "account", "crm"] },
@@ -11,12 +11,13 @@ export const SECTIONS = [
 
 // Keyword map for tool categorization — includes "fields" even though it's not a sidebar section
 const CATEGORIZE_KEYWORDS: Record<Section, string[]> = {
-  workflows:  ["workflow", "automation", "trigger", "rule"],
-  blueprints: ["blueprint", "transition", "stage"],
-  functions:  ["function", "script", "custom_function", "deluge", "automation_script", "serverless"],
-  fields:     ["field", "fields", "column", "attribute", "picklist", "lookup"],
-  modules:    ["module", "record", "contact", "lead", "deal", "account", "crm"],
-  logs:       [],
+  workflows:    ["workflow", "automation", "trigger", "rule"],
+  blueprints:   ["blueprint", "transition", "stage"],
+  functions:    ["function", "script", "custom_function", "deluge", "automation_script", "serverless"],
+  fields:       ["field", "fields", "column", "attribute", "picklist", "lookup"],
+  modules:      ["module", "record", "contact", "lead", "deal", "account", "crm"],
+  logs:         [],
+  integrations: [],
 };
 
 // Check specific sections before modules so broad names like "crm" don't swallow everything
@@ -24,7 +25,7 @@ const CATEGORIZE_ORDER: Section[] = ["workflows", "blueprints", "functions", "fi
 
 export function categorizeTools(tools: McpTool[]): Record<Section, McpTool[]> {
   const result: Record<Section, McpTool[]> = {
-    modules: [], workflows: [], blueprints: [], functions: [], fields: [], logs: [],
+    modules: [], workflows: [], blueprints: [], functions: [], fields: [], logs: [], integrations: [],
   };
   for (const tool of tools) {
     const hay = `${tool.name} ${tool.description ?? ""}`.toLowerCase();

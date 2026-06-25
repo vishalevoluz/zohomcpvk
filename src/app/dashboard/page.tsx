@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { SECTIONS, categorizeTools, type Section } from "@/lib/sections";
 import ConnectionForm from "@/components/ConnectionForm";
+import ConnectedStatus from "@/components/ConnectedStatus";
 import Sidebar from "@/components/Sidebar";
 import SectionPanel from "@/components/SectionPanel";
 import ModulesAudit from "@/components/ModulesAudit";
@@ -11,6 +12,7 @@ import WorkflowAudit from "@/components/WorkflowAudit";
 import BlueprintAudit from "@/components/BlueprintAudit";
 import FunctionAudit from "@/components/FunctionAudit";
 import AuditLogs from "@/components/AuditLogs";
+import IntegrationsPanel from "@/components/IntegrationsPanel";
 
 export default function DashboardPage() {
   const [config, setConfig] = useState<McpConfig | null>(null);
@@ -57,7 +59,10 @@ export default function DashboardPage() {
       />
 
       <div className="app-main">
-        {!config && (
+        {/* Connection bar — always visible at the top */}
+        {config ? (
+          <ConnectedStatus config={config} onDisconnect={onDisconnect} />
+        ) : (
           <div className="main-connection">
             <p className="main-connection-label">Connection</p>
             <ConnectionForm onConnected={onConnected} />
@@ -86,7 +91,13 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {!["modules", "workflows", "blueprints", "functions", "logs"].includes(activeSection) && (
+            {activeSection === "integrations" && (
+              <div className="main-card">
+                <IntegrationsPanel />
+              </div>
+            )}
+
+            {!["modules", "workflows", "blueprints", "functions", "logs", "integrations"].includes(activeSection) && (
               <SectionPanel
                 section={activeSectionDef}
                 tools={categorized[activeSection] ?? []}

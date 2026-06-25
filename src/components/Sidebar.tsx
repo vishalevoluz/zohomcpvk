@@ -61,6 +61,14 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
           <span className="sidebar-nav-text">Audit Logs</span>
           {logCount > 0 && <span className="sidebar-nav-count">{logCount}</span>}
         </button>
+
+        <button
+          className={`sidebar-nav-item ${activeSection === "integrations" ? "active" : ""}`}
+          onClick={() => onSelectSection("integrations")}
+        >
+          <span className="sidebar-nav-icon">⧉</span>
+          <span className="sidebar-nav-text">Integrations</span>
+        </button>
       </nav>
 
       {connected && allTools.length > 0 && (
