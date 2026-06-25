@@ -125,6 +125,133 @@ function extractText(output: unknown): string {
   return JSON.stringify(output, null, 2);
 }
 
+// ─── Formatted message renderer ────────────────────────────────────────────
+
+function fmtKey(k: string): string {
+  return k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function isDateStr(s: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}(T|\s|$)/.test(s);
+}
+
+function fmtDate(s: string): string {
+  try {
+    return new Date(s).toLocaleString(undefined, {
+      year: "numeric", month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return s; }
+}
+
+function RenderValue({ val, depth = 0 }: { val: unknown; depth?: number }): React.JSX.Element {
+  if (val === null || val === undefined || val === "") {
+    return <span className="ev-null">—</span>;
+  }
+  if (typeof val === "boolean") {
+    return <span className={`ev-bool ${val ? "ev-yes" : "ev-no"}`}>{val ? "Yes" : "No"}</span>;
+  }
+  if (typeof val === "number") {
+    return <span className="ev-num">{val.toLocaleString()}</span>;
+  }
+  if (typeof val === "string") {
+    if (isDateStr(val)) return <span className="ev-date" title={val}>{fmtDate(val)}</span>;
+    return <span className="ev-str">{val}</span>;
+  }
+  if (Array.isArray(val)) {
+    if (val.length === 0) return <span className="ev-null">None</span>;
+    if (val.every(v => v === null || typeof v !== "object")) {
+      return (
+        <div className="ev-chips">
+          {val.map((v, i) => <span key={i} className="ev-chip">{v === null ? "—" : String(v)}</span>)}
+        </div>
+      );
+    }
+    return (
+      <div className="ev-list">
+        {val.map((v, i) => (
+          <div key={i} className="ev-list-item">
+            <span className="ev-list-idx">{i + 1}</span>
+            <div className="ev-list-body"><RenderValue val={v} depth={depth + 1} /></div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  if (typeof val === "object") {
+    const entries = Object.entries(val as Record<string, unknown>);
+    if (entries.length === 0) return <span className="ev-null">—</span>;
+    if (depth >= 3) {
+      return <span className="ev-compact">{JSON.stringify(val)}</span>;
+    }
+    return (
+      <dl className={`ev-obj${depth > 0 ? " ev-obj-nested" : ""}`}>
+        {entries.map(([k, v]) => (
+          <div key={k} className="ev-field">
+            <dt className="ev-key">{fmtKey(k)}</dt>
+            <dd className="ev-val"><RenderValue val={v} depth={depth + 1} /></dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return <span>{String(val)}</span>;
+}
+
+function MessageContent({ text }: { text: string }): React.JSX.Element {
+  if (text.startsWith("⚠")) {
+    return <p className="ev-error">{text}</p>;
+  }
+
+  let header = "";
+  let body = text;
+  if (text.startsWith("EvoAi insights for")) {
+    const sep = text.indexOf("\n\n");
+    if (sep !== -1) { header = text.slice(0, sep); body = text.slice(sep + 2); }
+  }
+
+  let parsed: unknown = null;
+  let isApiError = false;
+  try {
+    parsed = JSON.parse(body);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const r = parsed as Record<string, unknown>;
+      if (r.status === "error" || (r.code && r.message)) isApiError = true;
+    }
+  } catch { /* plain text */ }
+
+  const toolName = header.match(/\[via ([^\]]+)\]/)?.[1] ?? "";
+  const entityName = header.replace(/^EvoAi insights for /, "").replace(/\s*\[via [^\]]+\]/, "");
+
+  return (
+    <div className="ev-content">
+      {header && (
+        <div className="ev-header">
+          <span className="ev-header-name">{entityName}</span>
+          {toolName && <span className="ev-via">{toolName}</span>}
+        </div>
+      )}
+      {parsed !== null ? (
+        isApiError ? (
+          <div className="ev-api-error">
+            <span>⚠</span>
+            <div>
+              <p className="ev-error-code">{String((parsed as Record<string,unknown>).code ?? "Error")}</p>
+              <p className="ev-error-msg">{String((parsed as Record<string,unknown>).message ?? "")}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="ev-formatted"><RenderValue val={parsed} depth={0} /></div>
+        )
+      ) : (
+        <div className="ev-plain">
+          {body.split("\n").map((line, i) => line ? <p key={i}>{line}</p> : <br key={i} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TYPE_ICON: Record<EvoAiTarget["type"], string> = {
   module:    "⊞",
   workflow:  "⟳",
@@ -298,8 +425,10 @@ export default function EvoAiPopup({ config, tools, target, onClose }: Props) {
               <div className="evoai-bubble">
                 {msg.isLoading ? (
                   <span className="evoai-typing"><span /><span /><span /></span>
+                ) : msg.role === "bot" ? (
+                  <MessageContent text={msg.text} />
                 ) : (
-                  <pre className="evoai-text">{msg.text}</pre>
+                  <p className="ev-user-text">{msg.text}</p>
                 )}
               </div>
             </div>

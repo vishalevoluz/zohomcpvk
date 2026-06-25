@@ -1484,8 +1484,8 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 
 .evoai-popup {
-  width: 520px;
-  height: 620px;
+  width: 620px;
+  height: 700px;
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 32px);
   background: var(--color-bg);
@@ -1644,7 +1644,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   border: 1px solid var(--color-accent);
 }
 .evoai-bubble {
-  max-width: 78%;
+  max-width: 94%;
   border-radius: 10px;
   padding: 10px 13px;
   font-size: 13px;
@@ -1661,15 +1661,151 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   border-top-right-radius: 3px;
   color: var(--color-accent);
 }
-.evoai-text {
-  font-family: var(--font-sans);
-  font-size: 13px;
-  white-space: pre-wrap;
+.ev-user-text { font-size: 13px; color: var(--color-accent); margin: 0; }
+
+/* ─── EvoAi formatted response ──────────────────────────────── */
+.ev-content { font-size: 13px; color: var(--color-text); }
+
+.ev-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 0.5px solid var(--color-border);
+}
+.ev-header-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  flex: 1;
+}
+.ev-via {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--color-bg-tertiary);
+  border: 0.5px solid var(--color-border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.ev-formatted { }
+
+.ev-obj {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 14px;
+  list-style: none;
+}
+.ev-obj-nested {
+  background: var(--color-bg-tertiary);
+  border: 0.5px solid var(--color-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  grid-template-columns: auto 1fr;
+}
+.ev-field { display: contents; }
+.ev-key {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  padding: 4px 0;
+  align-self: start;
+}
+.ev-val {
+  font-size: 12.5px;
+  padding: 4px 0;
   word-break: break-word;
-  margin: 0;
   color: var(--color-text);
 }
-.evoai-msg-user .evoai-text { color: var(--color-accent); }
+
+.ev-bool {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 20px;
+}
+.ev-yes { background: var(--color-success-bg); color: var(--color-success); }
+.ev-no  { background: var(--color-danger-bg);  color: var(--color-danger); }
+
+.ev-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-accent);
+}
+.ev-date {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.ev-str { color: var(--color-text); }
+.ev-null {
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+.ev-compact {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+  opacity: 0.7;
+}
+
+.ev-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ev-chip {
+  font-size: 11px;
+  background: var(--color-bg-tertiary);
+  border: 0.5px solid var(--color-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  color: var(--color-text-secondary);
+}
+
+.ev-list { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+.ev-list-item { display: flex; gap: 8px; align-items: flex-start; }
+.ev-list-idx {
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.ev-list-body { flex: 1; }
+
+.ev-plain p { margin-bottom: 4px; font-size: 13px; line-height: 1.6; }
+
+.ev-error { color: var(--color-danger); font-size: 13px; }
+.ev-api-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--color-danger-bg);
+  border: 0.5px solid var(--color-danger);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--color-danger);
+}
+.ev-error-code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.ev-error-msg { font-size: 12px; color: var(--color-text); }
 
 .evoai-typing {
   display: flex;
