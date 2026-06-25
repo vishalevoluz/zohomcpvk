@@ -53,13 +53,16 @@ export default function DashboardPage() {
         categorized={categorized}
         logCount={logs.length}
         onDisconnect={onDisconnect}
+        allTools={tools}
       />
 
       <div className="app-main">
-        <div className="main-connection">
-          <p className="main-connection-label">Connection</p>
-          <ConnectionForm onConnected={onConnected} />
-        </div>
+        {!config && (
+          <div className="main-connection">
+            <p className="main-connection-label">Connection</p>
+            <ConnectionForm onConnected={onConnected} />
+          </div>
+        )}
 
         {config && (
           <>

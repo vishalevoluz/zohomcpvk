@@ -666,6 +666,79 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 .sidebar-disconnect:hover { background: var(--color-danger-bg); border-color: transparent; }
 
+/* ─── Sidebar: Connected Tools section ──────────────────────── */
+.sidebar-tools-section {
+  margin-top: 8px;
+  border-top: 0.5px solid var(--color-border);
+  padding-top: 4px;
+}
+
+.sidebar-tools-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  text-align: left;
+  flex-shrink: 0;
+}
+.sidebar-tools-header:hover { background: var(--color-bg-secondary); }
+
+.sidebar-tools-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex: 1;
+}
+
+.sidebar-tools-chevron {
+  font-size: 10px;
+  color: var(--color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.sidebar-tools-list {
+  overflow-y: auto;
+  max-height: 260px;
+  padding: 2px 0 8px;
+}
+
+.sidebar-tool-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px 4px 12px;
+  cursor: default;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+.sidebar-tool-item:hover { background: var(--color-bg-secondary); }
+
+.sidebar-tool-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.sidebar-tool-name {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+}
+.sidebar-tool-item:hover .sidebar-tool-name { color: var(--color-text); }
+
 /* ─── Main area ──────────────────────────────────────────────── */
 .app-main {
   flex: 1;

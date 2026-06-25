@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { SECTIONS, type Section } from "@/lib/sections";
 import type { McpTool } from "@/types/mcp";
 
@@ -10,9 +11,12 @@ interface Props {
   categorized: Record<Section, McpTool[]>;
   logCount: number;
   onDisconnect: () => void;
+  allTools: McpTool[];
 }
 
-export default function Sidebar({ connected, activeSection, onSelectSection, categorized, logCount, onDisconnect }: Props) {
+export default function Sidebar({ connected, activeSection, onSelectSection, categorized, logCount, onDisconnect, allTools }: Props) {
+  const [toolsOpen, setToolsOpen] = useState(true);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -58,6 +62,33 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
           {logCount > 0 && <span className="sidebar-nav-count">{logCount}</span>}
         </button>
       </nav>
+
+      {connected && allTools.length > 0 && (
+        <div className="sidebar-tools-section">
+          <button
+            className="sidebar-tools-header"
+            onClick={() => setToolsOpen(o => !o)}
+          >
+            <span className="sidebar-tools-title">Connected Tools</span>
+            <span className="sidebar-nav-count">{allTools.length}</span>
+            <span className="sidebar-tools-chevron">{toolsOpen ? "▴" : "▾"}</span>
+          </button>
+          {toolsOpen && (
+            <div className="sidebar-tools-list">
+              {allTools.map(t => (
+                <div
+                  key={t.name}
+                  className="sidebar-tool-item"
+                  title={t.description ?? t.name}
+                >
+                  <span className="sidebar-tool-dot" />
+                  <span className="sidebar-tool-name">{t.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {connected && (
         <div className="sidebar-footer">
