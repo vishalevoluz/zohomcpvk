@@ -1471,6 +1471,62 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   opacity: 1;
 }
 
+/* ─── Module-inline fields panel ────────────────────────────── */
+.module-fields-inline {
+  margin-top: 1.25rem;
+  border-top: 2px solid var(--color-accent);
+  padding-top: 1.25rem;
+}
+
+.fields-embedded-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 1rem;
+}
+
+.fields-embedded-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fields-embedded-module {
+  color: var(--color-accent);
+}
+
+.row-selected {
+  background: var(--color-accent-bg) !important;
+}
+.row-selected td { border-color: var(--color-accent) !important; }
+
+.btn-fields {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 0.5px solid var(--color-border-strong);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
+}
+.btn-fields:hover {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent);
+}
+.btn-fields.active {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent);
+}
+
 /* th tooltip wrapper — lets the ::after escape the th */
 .th-tip {
   display: inline-flex;

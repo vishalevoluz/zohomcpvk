@@ -210,11 +210,14 @@ interface Props {
   tools: McpTool[];
   allTools?: McpTool[];
   onLog: (log: ExecutionLog) => void;
+  embedded?: boolean;
+  defaultModule?: string;
+  autoLoad?: boolean;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function FieldsAudit({ config, tools, allTools = [], onLog }: Props) {
+export default function FieldsAudit({ config, tools, allTools = [], onLog, embedded = false, defaultModule, autoLoad = false }: Props) {
   const availableTools = tools.length > 0 ? tools : allTools;
   const usingFallback = tools.length === 0 && allTools.length > 0;
 
@@ -226,6 +229,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
   const [error, setError] = useState("");
   const [fields, setFields] = useState<ZohoField[]>([]);
   const [filter, setFilter] = useState<FieldFilterKey>("all");
+  const autoLoadedRef = React.useRef<string | null>(null);
 
   // Derive the selected tool's schema
   const selectedToolObj = useMemo(
@@ -282,19 +286,35 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
     return null;
   }
 
-  async function loadFields() {
+  // Auto-load when embedded and defaultModule changes
+  React.useEffect(() => {
+    if (!autoLoad || !defaultModule || selectedTools.length === 0) return;
+    if (autoLoadedRef.current === defaultModule) return;
+    autoLoadedRef.current = defaultModule;
+    const key = requiredParams.find(k => k.toLowerCase().includes("module")) ?? (requiredParams[0] || "module");
+    loadFields({ [key]: defaultModule });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLoad, defaultModule, selectedTools.join(","), requiredParams.join(",")]);
+
+  async function loadFields(moduleOverride?: Record<string, string>) {
     if (selectedTools.length === 0) return;
 
-    // Validate and build params from tool schema
+    // Build params: use override (embedded autoload) or validate from state (manual)
     const params: Record<string, string> = {};
-    for (const key of requiredParams) {
-      const val = (toolParams[key] ?? "").trim();
-      if (!val) {
-        setError(`Required parameter "${key}" is empty — enter a value before loading.`);
-        return;
+    if (moduleOverride) {
+      Object.assign(params, moduleOverride);
+    } else {
+      for (const key of requiredParams) {
+        const val = (toolParams[key] ?? "").trim();
+        if (!val) {
+          setError(`Required parameter "${key}" is empty — enter a value before loading.`);
+          return;
+        }
+        params[key] = val;
       }
-      params[key] = val;
     }
+
+    setFields([]);
 
     setLoading(true);
     setError("");
@@ -402,90 +422,120 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
 
   return (
     <div className="modules-audit">
-      <div className="audit-header">
-        <div className="audit-header-left">
+
+      {/* Embedded compact header */}
+      {embedded ? (
+        <div className="fields-embedded-header">
           <span className="pane-icon">⊟</span>
-          <h2 className="pane-title">Fields Audit</h2>
+          <h3 className="fields-embedded-title">
+            Fields —&nbsp;<span className="fields-embedded-module">{defaultModule}</span>
+          </h3>
           {fields.length > 0 && (
             <span className="pane-count">{fields.length} field{fields.length !== 1 ? "s" : ""}</span>
           )}
-        </div>
-        <div className="audit-toolbar">
-          {availableTools.length > 0 ? (
-            <>
-              {usingFallback && (
-                <span className="no-tools-hint" title="No tools matched field keywords — showing all tools.">
-                  ⚠ Select fields tool manually
-                </span>
-              )}
-              <MultiToolSelect tools={availableTools} selected={selectedTools} onChange={setSelectedTools} />
-            </>
-          ) : (
-            <span className="no-tools-hint">No tools found — check connection</span>
-          )}
-          {requiredParams.map(key => {
-            const prop = schemaProps[key];
-            const isModuleLike = key.toLowerCase().includes("module");
-            return (
-              <React.Fragment key={key}>
-                <input
-                  className="module-input"
-                  type="text"
-                  value={toolParams[key] ?? ""}
-                  onChange={e => setToolParams(p => ({ ...p, [key]: e.target.value }))}
-                  onKeyDown={e => e.key === "Enter" && loadFields()}
-                  placeholder={prop?.description ? prop.description.slice(0, 28) : key}
-                  title={prop?.description ?? key}
-                  list={isModuleLike ? "zoho-modules" : undefined}
-                  style={{ width: 160 }}
-                />
-              </React.Fragment>
-            );
-          })}
-          {requiredParams.length === 0 && (
-            <input
-              className="module-input"
-              type="text"
-              value={toolParams["module"] ?? "Leads"}
-              onChange={e => setToolParams(p => ({ ...p, module: e.target.value }))}
-              onKeyDown={e => e.key === "Enter" && loadFields()}
-              placeholder="Module (e.g. Leads)"
-              title="Zoho CRM module API name — e.g. Leads, Contacts, Deals"
-              list="zoho-modules"
-              style={{ width: 160 }}
-            />
-          )}
-          <datalist id="zoho-modules">
-            <option value="Leads" />
-            <option value="Contacts" />
-            <option value="Accounts" />
-            <option value="Deals" />
-            <option value="Activities" />
-            <option value="Tasks" />
-            <option value="Calls" />
-            <option value="Meetings" />
-            <option value="Products" />
-            <option value="Quotes" />
-            <option value="Invoices" />
-            <option value="Purchase_Orders" />
-            <option value="Sales_Orders" />
-            <option value="Campaigns" />
-            <option value="Cases" />
-            <option value="Solutions" />
-          </datalist>
+          {loading && <span className="spinner" style={{ marginLeft: 4 }} />}
           <button
-            onClick={loadFields}
-            disabled={loading || selectedTools.length === 0 || requiredParams.some(k => !(toolParams[k] ?? "").trim())}
-            className="btn-connect"
+            onClick={() => {
+              if (defaultModule) {
+                autoLoadedRef.current = null;
+                const key = requiredParams.find(k => k.toLowerCase().includes("module")) ?? (requiredParams[0] || "module");
+                loadFields({ [key]: defaultModule });
+              }
+            }}
+            disabled={loading || selectedTools.length === 0}
+            className="btn-secondary"
+            style={{ marginLeft: "auto" }}
           >
-            {loading ? <><span className="spinner" /> Loading…</> : fields.length ? "Reload" : "Load Fields"}
+            Reload
           </button>
         </div>
-      </div>
+      ) : (
+        /* Full standalone header */
+        <div className="audit-header">
+          <div className="audit-header-left">
+            <span className="pane-icon">⊟</span>
+            <h2 className="pane-title">Fields Audit</h2>
+            {fields.length > 0 && (
+              <span className="pane-count">{fields.length} field{fields.length !== 1 ? "s" : ""}</span>
+            )}
+          </div>
+          <div className="audit-toolbar">
+            {availableTools.length > 0 ? (
+              <>
+                {usingFallback && (
+                  <span className="no-tools-hint" title="No tools matched field keywords — showing all tools.">
+                    ⚠ Select fields tool manually
+                  </span>
+                )}
+                <MultiToolSelect tools={availableTools} selected={selectedTools} onChange={setSelectedTools} />
+              </>
+            ) : (
+              <span className="no-tools-hint">No tools found — check connection</span>
+            )}
+            {requiredParams.map(key => {
+              const prop = schemaProps[key];
+              const isModuleLike = key.toLowerCase().includes("module");
+              return (
+                <React.Fragment key={key}>
+                  <input
+                    className="module-input"
+                    type="text"
+                    value={toolParams[key] ?? ""}
+                    onChange={e => setToolParams(p => ({ ...p, [key]: e.target.value }))}
+                    onKeyDown={e => e.key === "Enter" && loadFields()}
+                    placeholder={prop?.description ? prop.description.slice(0, 28) : key}
+                    title={prop?.description ?? key}
+                    list={isModuleLike ? "zoho-modules" : undefined}
+                    style={{ width: 160 }}
+                  />
+                </React.Fragment>
+              );
+            })}
+            {requiredParams.length === 0 && (
+              <input
+                className="module-input"
+                type="text"
+                value={toolParams["module"] ?? "Leads"}
+                onChange={e => setToolParams(p => ({ ...p, module: e.target.value }))}
+                onKeyDown={e => e.key === "Enter" && loadFields()}
+                placeholder="Module (e.g. Leads)"
+                title="Zoho CRM module API name — e.g. Leads, Contacts, Deals"
+                list="zoho-modules"
+                style={{ width: 160 }}
+              />
+            )}
+            <datalist id="zoho-modules">
+              <option value="Leads" />
+              <option value="Contacts" />
+              <option value="Accounts" />
+              <option value="Deals" />
+              <option value="Activities" />
+              <option value="Tasks" />
+              <option value="Calls" />
+              <option value="Meetings" />
+              <option value="Products" />
+              <option value="Quotes" />
+              <option value="Invoices" />
+              <option value="Purchase_Orders" />
+              <option value="Sales_Orders" />
+              <option value="Campaigns" />
+              <option value="Cases" />
+              <option value="Solutions" />
+            </datalist>
+            <button
+              onClick={() => loadFields()}
+              disabled={loading || selectedTools.length === 0 || requiredParams.some(k => !(toolParams[k] ?? "").trim())}
+              className="btn-connect"
+            >
+              {loading ? <><span className="spinner" /> Loading…</> : fields.length ? "Reload" : "Load Fields"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && <p className="form-error">⚠ {error}</p>}
 
-      {requiredParams.length > 0 && fields.length === 0 && !loading && (
+      {!embedded && requiredParams.length > 0 && fields.length === 0 && !loading && (
         <div className="schema-hint-bar">
           {requiredParams.map(key => {
             const prop = schemaProps[key];
@@ -503,14 +553,16 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog }: Pro
       {fields.length === 0 && !error && !loading && (
         <div className="audit-empty">
           <div className="audit-empty-icon">⊟</div>
-          <p className="audit-empty-title">No data loaded</p>
-          <p className="audit-empty-sub">
-            {requiredParams.length > 0
-              ? `Fill in the required parameter${requiredParams.length > 1 ? "s" : ""} above (${requiredParams.join(", ")}) and click "Load Fields".`
-              : usingFallback
-                ? "Pick the tool that returns CRM field metadata, enter a module name (e.g. Leads), then click Load Fields."
-                : "Enter a module name (e.g. Leads, Contacts, Deals) and click \"Load Fields\" to run the audit."}
-          </p>
+          <p className="audit-empty-title">{embedded ? `Loading fields for ${defaultModule}…` : "No data loaded"}</p>
+          {!embedded && (
+            <p className="audit-empty-sub">
+              {requiredParams.length > 0
+                ? `Fill in the required parameter${requiredParams.length > 1 ? "s" : ""} above (${requiredParams.join(", ")}) and click "Load Fields".`
+                : usingFallback
+                  ? "Pick the tool that returns CRM field metadata, enter a module name (e.g. Leads), then click Load Fields."
+                  : "Enter a module name (e.g. Leads, Contacts, Deals) and click \"Load Fields\" to run the audit."}
+            </p>
+          )}
         </div>
       )}
 

@@ -7,8 +7,17 @@ export const SECTIONS = [
   { id: "workflows" as const,  label: "Workflows",  icon: "⟳", keywords: ["workflow", "automation", "trigger", "rule"] },
   { id: "blueprints" as const, label: "Blueprints", icon: "◈", keywords: ["blueprint", "transition", "stage"] },
   { id: "functions" as const,  label: "Functions",  icon: "ƒ", keywords: ["function", "script", "custom_function", "deluge", "automation_script", "serverless"] },
-  { id: "fields" as const,     label: "Fields",     icon: "⊟", keywords: ["field", "fields", "column", "attribute", "picklist", "lookup"] },
 ] as const;
+
+// Keyword map for tool categorization — includes "fields" even though it's not a sidebar section
+const CATEGORIZE_KEYWORDS: Record<Section, string[]> = {
+  workflows:  ["workflow", "automation", "trigger", "rule"],
+  blueprints: ["blueprint", "transition", "stage"],
+  functions:  ["function", "script", "custom_function", "deluge", "automation_script", "serverless"],
+  fields:     ["field", "fields", "column", "attribute", "picklist", "lookup"],
+  modules:    ["module", "record", "contact", "lead", "deal", "account", "crm"],
+  logs:       [],
+};
 
 // Check specific sections before modules so broad names like "crm" don't swallow everything
 const CATEGORIZE_ORDER: Section[] = ["workflows", "blueprints", "functions", "fields", "modules"];
@@ -21,8 +30,7 @@ export function categorizeTools(tools: McpTool[]): Record<Section, McpTool[]> {
     const hay = `${tool.name} ${tool.description ?? ""}`.toLowerCase();
     let matched = false;
     for (const secId of CATEGORIZE_ORDER) {
-      const sec = SECTIONS.find(s => s.id === secId)!;
-      if (sec.keywords.some(kw => hay.includes(kw))) {
+      if (CATEGORIZE_KEYWORDS[secId].some(kw => hay.includes(kw))) {
         result[secId].push(tool);
         matched = true;
         break;

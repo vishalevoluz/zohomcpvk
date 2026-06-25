@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
+import FieldsAudit from "@/components/FieldsAudit";
+import { categorizeTools } from "@/lib/sections";
 
 interface ZohoModule {
   id?: string;
@@ -135,15 +137,19 @@ type FilterKey = "all" | "hidden" | "unused" | "custom" | "deprecated";
 interface Props {
   config: McpConfig;
   tools: McpTool[];
+  allTools: McpTool[];
   onLog: (log: ExecutionLog) => void;
 }
 
-export default function ModulesAudit({ config, tools, onLog }: Props) {
+export default function ModulesAudit({ config, tools, allTools, onLog }: Props) {
   const [selectedTools, setSelectedTools] = useState<string[]>(tools.length > 0 ? [tools[0].name] : []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [modules, setModules] = useState<ZohoModule[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [expandedModule, setExpandedModule] = useState<string | null>(null);
+
+  const fieldsTools = useMemo(() => categorizeTools(allTools).fields, [allTools]);
 
   useEffect(() => {
     setSelectedTools(tools.length > 0 ? [tools[0].name] : []);
@@ -318,13 +324,16 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
                       <th><span className="th-tip" data-tooltip-below="User profiles that have access to this module">Profiles<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The display order of this module in the CRM navigation">Seq No<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this module">Findings<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Expand to audit all fields in this module">Fields<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
                   <tbody>
                     {displayed.map((m, i) => {
                       const tags = getTags(m);
+                      const modApiName = String(m.api_name ?? m.module_name ?? "");
+                      const isExpanded = expandedModule === modApiName;
                       return (
-                        <tr key={i} className={tags.length ? "row-flagged" : ""}>
+                        <tr key={i} className={`${tags.length ? "row-flagged" : ""} ${isExpanded ? "row-selected" : ""}`}>
                           <td className="cell-name">{getName(m)}</td>
                           <td className="cell-mono fn-id">{String(m.id ?? "—")}</td>
                           <td className="cell-mono">{String(m.api_name ?? "—")}</td>
@@ -356,11 +365,35 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
                                   ))}
                             </div>
                           </td>
+                          <td>
+                            <button
+                              className={`btn-fields ${isExpanded ? "active" : ""}`}
+                              onClick={() => setExpandedModule(isExpanded ? null : modApiName || null)}
+                              title={isExpanded ? "Close fields panel" : `View fields for ${getName(m)}`}
+                            >
+                              {isExpanded ? "▲ Close" : "⊟ Fields"}
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Inline fields panel */}
+            {expandedModule && (
+              <div className="module-fields-inline">
+                <FieldsAudit
+                  embedded
+                  defaultModule={expandedModule}
+                  autoLoad
+                  config={config}
+                  tools={fieldsTools}
+                  allTools={allTools}
+                  onLog={onLog}
+                />
               </div>
             )}
           </div>
