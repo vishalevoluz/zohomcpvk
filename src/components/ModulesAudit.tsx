@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
@@ -148,8 +148,20 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
   const [modules, setModules] = useState<ZohoModule[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [expandedModule, setExpandedModule] = useState<string | null>(null);
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const fieldsTools = useMemo(() => categorizeTools(allTools).fields, [allTools]);
+
+  useEffect(() => {
+    if (!activeMenu) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setActiveMenu(null);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [activeMenu]);
 
   useEffect(() => {
     setSelectedTools(tools.length > 0 ? [tools[0].name] : []);
@@ -325,6 +337,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
                       <th><span className="th-tip" data-tooltip-below="The display order of this module in the CRM navigation">Seq No<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this module">Findings<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Expand to audit all fields in this module">Fields<span className="th-info">i</span></span></th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -333,7 +346,8 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
                       const modApiName = String(m.api_name ?? m.module_name ?? "");
                       const isExpanded = expandedModule === modApiName;
                       return (
-                        <tr key={i} className={`${tags.length ? "row-flagged" : ""} ${isExpanded ? "row-selected" : ""}`}>
+                        <React.Fragment key={i}>
+                          <tr className={`${tags.length ? "row-flagged" : ""} ${isExpanded ? "row-selected" : ""}`}>
                           <td className="cell-name">{getName(m)}</td>
                           <td className="cell-mono fn-id">{String(m.id ?? "—")}</td>
                           <td className="cell-mono">{String(m.api_name ?? "—")}</td>
@@ -374,7 +388,36 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
                               {isExpanded ? "▲ Close" : "⊟ Fields"}
                             </button>
                           </td>
+                          <td className="cell-actions">
+                            <div className="action-menu-wrap" ref={activeMenu === modApiName ? menuRef : null}>
+                              <button
+                                className={`btn-action ${activeMenu === modApiName ? "open" : ""}`}
+                                onClick={e => { e.stopPropagation(); setActiveMenu(activeMenu === modApiName ? null : modApiName); }}
+                                title="Actions"
+                              >⋯</button>
+                              {activeMenu === modApiName && (
+                                <div className="action-dropdown">
+                                  {config.crmBaseUrl ? (
+                                    <button className="action-dropdown-item" onClick={() => { window.open(`${config.crmBaseUrl}/tab/${modApiName}`, "_blank"); setActiveMenu(null); }}>
+                                      <span className="action-icon">↗</span>Open in CRM
+                                    </button>
+                                  ) : (
+                                    <button className="action-dropdown-item" disabled title="Enter your Zoho CRM URL in the connection form to enable this" style={{ opacity: 0.45, cursor: "not-allowed" }}>
+                                      <span className="action-icon">↗</span>Open in CRM
+                                    </button>
+                                  )}
+                                  <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(String(m.api_name ?? "")); setActiveMenu(null); }}>
+                                    <span className="action-icon">⎘</span>Copy API Name
+                                  </button>
+                                  <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(String(m.id ?? "")); setActiveMenu(null); }}>
+                                    <span className="action-icon">⎘</span>Copy Module ID
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </td>
                         </tr>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -399,6 +442,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
           </div>
         </>
       )}
+
     </div>
   );
 }

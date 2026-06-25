@@ -68,10 +68,10 @@ export default function DashboardPage() {
               <ModulesAudit config={config} tools={categorized.modules} allTools={tools} onLog={onLog} />
             </div>
             <div className="main-card" style={{ display: activeSection === "workflows" ? undefined : "none" }}>
-              <WorkflowAudit config={config} tools={categorized.workflows} onLog={onLog} />
+              <WorkflowAudit config={config} tools={categorized.workflows} allTools={tools} onLog={onLog} />
             </div>
             <div className="main-card" style={{ display: activeSection === "blueprints" ? undefined : "none" }}>
-              <BlueprintAudit config={config} tools={categorized.blueprints} onLog={onLog} />
+              <BlueprintAudit config={config} tools={categorized.blueprints} allTools={tools} onLog={onLog} />
             </div>
             <div className="main-card" style={{ display: activeSection === "functions" ? undefined : "none" }}>
               <FunctionAudit config={config} tools={categorized.functions} allTools={tools} onLog={onLog} />

@@ -12,6 +12,7 @@ export interface McpConfig {
   url: string;
   authToken?: string;
   apiKey?: string;
+  crmBaseUrl?: string; // e.g. https://crm.zoho.com/crm/org123456
 }
 
 export interface ExecutionLog {

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
+import EvoAiPopup, { type EvoAiTarget } from "@/components/EvoAiPopup";
 
 interface ZohoWorkflow {
   id?: string;
@@ -183,15 +184,29 @@ type WFFilterKey = "all" | "disabled" | "duplicate" | "conflicting" | "complex";
 interface Props {
   config: McpConfig;
   tools: McpTool[];
+  allTools: McpTool[];
   onLog: (log: ExecutionLog) => void;
 }
 
-export default function WorkflowAudit({ config, tools, onLog }: Props) {
+export default function WorkflowAudit({ config, tools, allTools, onLog }: Props) {
   const [selectedTools, setSelectedTools] = useState<string[]>(tools.length > 0 ? [tools[0].name] : []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [workflows, setWorkflows] = useState<ZohoWorkflow[]>([]);
   const [filter, setFilter] = useState<WFFilterKey>("all");
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [evoAiTarget, setEvoAiTarget] = useState<EvoAiTarget | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!activeMenu) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setActiveMenu(null);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [activeMenu]);
 
   useEffect(() => {
     setSelectedTools(tools.length > 0 ? [tools[0].name] : []);
@@ -359,59 +374,94 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
                       <th><span className="th-tip" data-tooltip-below="When this workflow rule was last modified">Modified Time<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The last time this workflow was triggered on a record">Last Executed<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this workflow">Findings<span className="th-info">i</span></span></th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {displayed.map((w, i) => {
                       const tags = getTags(w);
                       const active = isActive(w);
+                      const rowKey = String(w.id ?? i);
                       return (
-                        <tr key={i} className={tags.length ? "row-flagged" : ""}>
-                          <td className="cell-name">{getName(w)}</td>
-                          <td className="cell-mono fn-id">{String(w.id ?? "—")}</td>
-                          <td>
-                            <span className={`bool-badge ${active ? "yes" : "no"}`}>
-                              {active ? "Active" : "Inactive"}
-                            </span>
-                          </td>
-                          <td className="cell-mono">{getModule(w)}</td>
-                          <td className="cell-trigger">{getTriggerEvents(w)}</td>
-                          <td>
-                            <span className={`bool-badge ${getRepeat(w) === "Yes" ? "no" : getRepeat(w) === "No" ? "yes" : ""}`}>
-                              {getRepeat(w)}
-                            </span>
-                          </td>
-                          <td className="cell-criteria">{getCriteria(w)}</td>
-                          <td>
-                            {getActionsCount(w) > 0
-                              ? <span className={getActionsCount(w) > 5 ? "count-badge danger" : "count-badge"}>{getActionsCount(w)}</span>
-                              : <span className="cell-mono">—</span>}
-                          </td>
-                          <td>
-                            <span className={`bool-badge ${isLocked(w) ? "no" : "yes"}`}>
-                              {isLocked(w) ? "Locked" : "No"}
-                            </span>
-                          </td>
-                          <td className="cell-mono" style={{ fontSize: 12 }}>{getCreatedBy(w)}</td>
-                          <td className="cell-datetime">{formatDateTime(w.created_time as string)}</td>
-                          <td className="cell-mono" style={{ fontSize: 12 }}>{getModifiedBy(w)}</td>
-                          <td className="cell-datetime">{formatDateTime(w.modified_time as string)}</td>
-                          <td className="cell-datetime">{formatDateTime(w.last_executed_time as string)}</td>
-                          <td>
-                            <div className="tag-list">
-                              {tags.length === 0
-                                ? <span className="audit-tag tag-ok" title="No issues detected for this workflow">clean</span>
-                                : tags.map(tag => (
-                                    <span key={tag} className={`audit-tag tag-wf-${tag}`} title={
-                                      tag === "disabled"    ? "This workflow is currently inactive and not triggering on record events." :
-                                      tag === "duplicate"   ? "Another workflow rule shares this exact name — check for redundancy." :
-                                      tag === "conflicting" ? "Another active workflow targets the same module and trigger event — they may fire together and cause duplicate actions." :
-                                      tag === "complex"     ? "This workflow has more than 5 actions or conditions — consider simplifying." : tag
-                                    }>{tag}</span>
-                                  ))}
-                            </div>
-                          </td>
-                        </tr>
+                        <React.Fragment key={rowKey}>
+                          <tr className={tags.length ? "row-flagged" : ""}>
+                            <td className="cell-name">{getName(w)}</td>
+                            <td className="cell-mono fn-id">{String(w.id ?? "—")}</td>
+                            <td>
+                              <span className={`bool-badge ${active ? "yes" : "no"}`}>
+                                {active ? "Active" : "Inactive"}
+                              </span>
+                            </td>
+                            <td className="cell-mono">{getModule(w)}</td>
+                            <td className="cell-trigger">{getTriggerEvents(w)}</td>
+                            <td>
+                              <span className={`bool-badge ${getRepeat(w) === "Yes" ? "no" : getRepeat(w) === "No" ? "yes" : ""}`}>
+                                {getRepeat(w)}
+                              </span>
+                            </td>
+                            <td className="cell-criteria">{getCriteria(w)}</td>
+                            <td>
+                              {getActionsCount(w) > 0
+                                ? <span className={getActionsCount(w) > 5 ? "count-badge danger" : "count-badge"}>{getActionsCount(w)}</span>
+                                : <span className="cell-mono">—</span>}
+                            </td>
+                            <td>
+                              <span className={`bool-badge ${isLocked(w) ? "no" : "yes"}`}>
+                                {isLocked(w) ? "Locked" : "No"}
+                              </span>
+                            </td>
+                            <td className="cell-mono" style={{ fontSize: 12 }}>{getCreatedBy(w)}</td>
+                            <td className="cell-datetime">{formatDateTime(w.created_time as string)}</td>
+                            <td className="cell-mono" style={{ fontSize: 12 }}>{getModifiedBy(w)}</td>
+                            <td className="cell-datetime">{formatDateTime(w.modified_time as string)}</td>
+                            <td className="cell-datetime">{formatDateTime(w.last_executed_time as string)}</td>
+                            <td>
+                              <div className="tag-list">
+                                {tags.length === 0
+                                  ? <span className="audit-tag tag-ok" title="No issues detected for this workflow">clean</span>
+                                  : tags.map(tag => (
+                                      <span key={tag} className={`audit-tag tag-wf-${tag}`} title={
+                                        tag === "disabled"    ? "This workflow is currently inactive and not triggering on record events." :
+                                        tag === "duplicate"   ? "Another workflow rule shares this exact name — check for redundancy." :
+                                        tag === "conflicting" ? "Another active workflow targets the same module and trigger event — they may fire together and cause duplicate actions." :
+                                        tag === "complex"     ? "This workflow has more than 5 actions or conditions — consider simplifying." : tag
+                                      }>{tag}</span>
+                                    ))}
+                              </div>
+                            </td>
+                            <td className="cell-actions">
+                              <div className="action-menu-wrap" ref={activeMenu === rowKey ? menuRef : null}>
+                                <button
+                                  className={`btn-action ${activeMenu === rowKey ? "open" : ""}`}
+                                  onClick={e => { e.stopPropagation(); setActiveMenu(activeMenu === rowKey ? null : rowKey); }}
+                                  title="Actions"
+                                >⋯</button>
+                                {activeMenu === rowKey && (
+                                  <div className="action-dropdown">
+                                    <button className="action-dropdown-item" onClick={() => { setEvoAiTarget({ data: w as Record<string,unknown>, name: getName(w), type: "workflow" }); setActiveMenu(null); }}>
+                                      <span className="action-icon">⚡</span>EvoAi Insights
+                                    </button>
+                                    {config.crmBaseUrl ? (
+                                      <button className="action-dropdown-item" onClick={() => { window.open(`${config.crmBaseUrl}/Automation/ActiveWorkflowRules/detail/${w.id}`, "_blank"); setActiveMenu(null); }}>
+                                        <span className="action-icon">↗</span>Open in CRM
+                                      </button>
+                                    ) : (
+                                      <button className="action-dropdown-item" disabled title="Enter your Zoho CRM URL in the connection form to enable this" style={{ opacity: 0.45, cursor: "not-allowed" }}>
+                                        <span className="action-icon">↗</span>Open in CRM
+                                      </button>
+                                    )}
+                                    <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(getName(w)); setActiveMenu(null); }}>
+                                      <span className="action-icon">⎘</span>Copy Name
+                                    </button>
+                                    <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(String(w.id ?? "")); setActiveMenu(null); }}>
+                                      <span className="action-icon">⎘</span>Copy Workflow ID
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -420,6 +470,15 @@ export default function WorkflowAudit({ config, tools, onLog }: Props) {
             )}
           </div>
         </>
+      )}
+
+      {evoAiTarget && (
+        <EvoAiPopup
+          config={config}
+          tools={allTools}
+          target={evoAiTarget}
+          onClose={() => setEvoAiTarget(null)}
+        />
       )}
     </div>
   );

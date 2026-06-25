@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
+import EvoAiPopup, { type EvoAiTarget } from "@/components/EvoAiPopup";
 
 interface ZohoBPTransition {
   id?: string;
@@ -293,15 +294,29 @@ type BPFilterKey = "all" | "inactive" | "dead_end" | "missing_transitions" | "in
 interface Props {
   config: McpConfig;
   tools: McpTool[];
+  allTools: McpTool[];
   onLog: (log: ExecutionLog) => void;
 }
 
-export default function BlueprintAudit({ config, tools, onLog }: Props) {
+export default function BlueprintAudit({ config, tools, allTools, onLog }: Props) {
   const [selectedTools, setSelectedTools] = useState<string[]>(tools.length > 0 ? [tools[0].name] : []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [blueprints, setBlueprints] = useState<ZohoBlueprint[]>([]);
   const [filter, setFilter] = useState<BPFilterKey>("all");
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [evoAiTarget, setEvoAiTarget] = useState<EvoAiTarget | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!activeMenu) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setActiveMenu(null);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [activeMenu]);
 
   useEffect(() => {
     setSelectedTools(tools.length > 0 ? [tools[0].name] : []);
@@ -458,48 +473,83 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
                       <th><span className="th-tip" data-tooltip-below="The user who last modified this blueprint">Modified By<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="When this blueprint was last modified">Modified Time<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this blueprint">Findings<span className="th-info">i</span></span></th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {displayed.map((bp, i) => {
                       const tags = getTags(bp);
                       const active = isBPActive(bp);
+                      const rowKey = String(bp.id ?? i);
                       return (
-                        <tr key={i} className={tags.length ? "row-flagged" : ""}>
-                          <td className="cell-name">{getBPName(bp)}</td>
-                          <td className="cell-mono fn-id">{String(bp.id ?? "—")}</td>
-                          <td>
-                            <span className={`bool-badge ${active ? "yes" : "no"}`}>
-                              {active ? "Active" : "Inactive"}
-                            </span>
-                          </td>
-                          <td className="cell-mono">{getBPModule(bp)}</td>
-                          <td className="cell-mono">{getBPField(bp)}</td>
-                          <td className="cell-mono">{getBPLayout(bp)}</td>
-                          <td>
-                            <span className={`bool-badge ${bp.supported_clone ? "yes" : "no"}`}>
-                              {bp.supported_clone ? "Yes" : "No"}
-                            </span>
-                          </td>
-                          <td className="cell-mono" style={{ fontSize: 12 }}>{getBPCreatedBy(bp)}</td>
-                          <td className="cell-datetime">{formatDateTime(bp.created_time)}</td>
-                          <td className="cell-mono" style={{ fontSize: 12 }}>{getBPModifiedBy(bp)}</td>
-                          <td className="cell-datetime">{formatDateTime(bp.modified_time)}</td>
-                          <td>
-                            <div className="tag-list">
-                              {tags.length === 0
-                                ? <span className="audit-tag tag-ok" title="No issues detected for this blueprint">clean</span>
-                                : tags.map(tag => (
-                                    <span key={tag} className={`audit-tag tag-bp-${tag}`} title={
-                                      tag === "inactive"            ? "This blueprint is inactive and not enforcing any stage transitions on records." :
-                                      tag === "dead_end"            ? "This blueprint has stages with no outgoing transitions — records can get permanently stuck." :
-                                      tag === "missing_transitions" ? "Some picklist stages in this blueprint have no connected transitions — those stages are unreachable." :
-                                      tag === "incomplete"          ? "This blueprint has transitions with no mandatory fields, validation rules, or actions configured." : tag
-                                    }>{tag.replace(/_/g, " ")}</span>
-                                  ))}
-                            </div>
-                          </td>
-                        </tr>
+                        <React.Fragment key={rowKey}>
+                          <tr className={tags.length ? "row-flagged" : ""}>
+                            <td className="cell-name">{getBPName(bp)}</td>
+                            <td className="cell-mono fn-id">{String(bp.id ?? "—")}</td>
+                            <td>
+                              <span className={`bool-badge ${active ? "yes" : "no"}`}>
+                                {active ? "Active" : "Inactive"}
+                              </span>
+                            </td>
+                            <td className="cell-mono">{getBPModule(bp)}</td>
+                            <td className="cell-mono">{getBPField(bp)}</td>
+                            <td className="cell-mono">{getBPLayout(bp)}</td>
+                            <td>
+                              <span className={`bool-badge ${bp.supported_clone ? "yes" : "no"}`}>
+                                {bp.supported_clone ? "Yes" : "No"}
+                              </span>
+                            </td>
+                            <td className="cell-mono" style={{ fontSize: 12 }}>{getBPCreatedBy(bp)}</td>
+                            <td className="cell-datetime">{formatDateTime(bp.created_time)}</td>
+                            <td className="cell-mono" style={{ fontSize: 12 }}>{getBPModifiedBy(bp)}</td>
+                            <td className="cell-datetime">{formatDateTime(bp.modified_time)}</td>
+                            <td>
+                              <div className="tag-list">
+                                {tags.length === 0
+                                  ? <span className="audit-tag tag-ok" title="No issues detected for this blueprint">clean</span>
+                                  : tags.map(tag => (
+                                      <span key={tag} className={`audit-tag tag-bp-${tag}`} title={
+                                        tag === "inactive"            ? "This blueprint is inactive and not enforcing any stage transitions on records." :
+                                        tag === "dead_end"            ? "This blueprint has stages with no outgoing transitions — records can get permanently stuck." :
+                                        tag === "missing_transitions" ? "Some picklist stages in this blueprint have no connected transitions — those stages are unreachable." :
+                                        tag === "incomplete"          ? "This blueprint has transitions with no mandatory fields, validation rules, or actions configured." : tag
+                                      }>{tag.replace(/_/g, " ")}</span>
+                                    ))}
+                              </div>
+                            </td>
+                            <td className="cell-actions">
+                              <div className="action-menu-wrap" ref={activeMenu === rowKey ? menuRef : null}>
+                                <button
+                                  className={`btn-action ${activeMenu === rowKey ? "open" : ""}`}
+                                  onClick={e => { e.stopPropagation(); setActiveMenu(activeMenu === rowKey ? null : rowKey); }}
+                                  title="Actions"
+                                >⋯</button>
+                                {activeMenu === rowKey && (
+                                  <div className="action-dropdown">
+                                    <button className="action-dropdown-item" onClick={() => { setEvoAiTarget({ data: bp as Record<string,unknown>, name: getBPName(bp), type: "blueprint" }); setActiveMenu(null); }}>
+                                      <span className="action-icon">⚡</span>EvoAi Insights
+                                    </button>
+                                    {config.crmBaseUrl ? (
+                                      <button className="action-dropdown-item" onClick={() => { window.open(`${config.crmBaseUrl}/Automation/Blueprints/detail/${bp.id}`, "_blank"); setActiveMenu(null); }}>
+                                        <span className="action-icon">↗</span>Open in CRM
+                                      </button>
+                                    ) : (
+                                      <button className="action-dropdown-item" disabled title="Enter your Zoho CRM URL in the connection form to enable this" style={{ opacity: 0.45, cursor: "not-allowed" }}>
+                                        <span className="action-icon">↗</span>Open in CRM
+                                      </button>
+                                    )}
+                                    <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(getBPName(bp)); setActiveMenu(null); }}>
+                                      <span className="action-icon">⎘</span>Copy Name
+                                    </button>
+                                    <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(String(bp.id ?? "")); setActiveMenu(null); }}>
+                                      <span className="action-icon">⎘</span>Copy Blueprint ID
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -508,6 +558,15 @@ export default function BlueprintAudit({ config, tools, onLog }: Props) {
             )}
           </div>
         </>
+      )}
+
+      {evoAiTarget && (
+        <EvoAiPopup
+          config={config}
+          tools={allTools}
+          target={evoAiTarget}
+          onClose={() => setEvoAiTarget(null)}
+        />
       )}
     </div>
   );

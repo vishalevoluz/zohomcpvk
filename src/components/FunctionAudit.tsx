@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
+import EvoAiPopup, { type EvoAiTarget } from "@/components/EvoAiPopup";
 
 // Actual Zoho CRM workflow-function shape returned by the MCP tool
 interface ZohoFunction {
@@ -192,6 +193,19 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   const [error, setError] = useState("");
   const [functions, setFunctions] = useState<ZohoFunction[]>([]);
   const [filter, setFilter] = useState<FnFilterKey>("all");
+  const [activeMenu, setActiveMenu] = useState<string | null>(null);
+  const [evoAiTarget, setEvoAiTarget] = useState<EvoAiTarget | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!activeMenu) return;
+    function handleClick(e: MouseEvent) {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setActiveMenu(null);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [activeMenu]);
 
   useEffect(() => {
     const next = tools.length > 0 ? tools : allTools;
@@ -352,6 +366,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                       <th><span className="th-tip" data-tooltip-below="When this function was first created">Created Time<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="When this function was last modified">Modified Time<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this function">Findings<span className="th-info">i</span></span></th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -394,6 +409,28 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                                     ))}
                               </div>
                             </td>
+                            <td className="cell-actions">
+                              <div className="action-menu-wrap" ref={activeMenu === getAssociationId(fn) + i ? menuRef : null}>
+                                <button
+                                  className={`btn-action ${activeMenu === getAssociationId(fn) + i ? "open" : ""}`}
+                                  onClick={e => { e.stopPropagation(); const k = getAssociationId(fn) + i; setActiveMenu(activeMenu === k ? null : k); }}
+                                  title="Actions"
+                                >⋯</button>
+                                {activeMenu === getAssociationId(fn) + i && (
+                                  <div className="action-dropdown">
+                                    <button className="action-dropdown-item" onClick={() => { setEvoAiTarget({ data: fn as Record<string,unknown>, name: getFnName(fn), type: "workflow" }); setActiveMenu(null); }}>
+                                      <span className="action-icon">⚡</span>EvoAi Insights
+                                    </button>
+                                    <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(getFnName(fn)); setActiveMenu(null); }}>
+                                      <span className="action-icon">⎘</span>Copy Name
+                                    </button>
+                                    <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(getFnId(fn)); setActiveMenu(null); }}>
+                                      <span className="action-icon">⎘</span>Copy Function ID
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
                           </tr>
                         </React.Fragment>
                       );
@@ -404,6 +441,15 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
             )}
           </div>
         </>
+      )}
+
+      {evoAiTarget && (
+        <EvoAiPopup
+          config={config}
+          tools={allTools}
+          target={evoAiTarget}
+          onClose={() => setEvoAiTarget(null)}
+        />
       )}
     </div>
   );
