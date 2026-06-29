@@ -6,7 +6,14 @@
       "Bash(findstr :3000)",
       "PowerShell(Get-WmiObject *)",
       "Bash(git rm *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git remote *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash(git checkout *)",
+      "Bash(git commit *)",
+      "Bash(npx tsc *)",
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\(Object.keys\\(d.dependencies||{}\\).join\\('\\\\n'\\)\\)\")"
     ]
   }
 }

@@ -31,9 +31,20 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
         </div>
       )}
 
-      <p className="sidebar-nav-label">Sections</p>
+      <p className="sidebar-nav-label">Dashboard</p>
 
       <nav className="sidebar-nav">
+        <button
+          className={`sidebar-nav-item sidebar-nav-overview ${activeSection === "crm-overview" ? "active" : ""}`}
+          onClick={() => onSelectSection("crm-overview")}
+        >
+          <span className="sidebar-nav-icon">◉</span>
+          <span className="sidebar-nav-text">CRM Overview</span>
+        </button>
+
+        <div className="sidebar-divider" />
+        <p className="sidebar-nav-label" style={{ marginTop: 4 }}>Audit</p>
+
         {SECTIONS.map(sec => {
           const count = categorized[sec.id]?.length ?? 0;
           return (

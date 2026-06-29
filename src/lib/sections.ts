@@ -1,6 +1,6 @@
 import type { McpTool } from "@/types/mcp";
 
-export type Section = "modules" | "workflows" | "blueprints" | "functions" | "fields" | "logs" | "integrations";
+export type Section = "crm-overview" | "modules" | "workflows" | "blueprints" | "functions" | "fields" | "logs" | "integrations";
 
 export const SECTIONS = [
   { id: "modules" as const,    label: "Modules",    icon: "⊞", keywords: ["module", "record", "contact", "lead", "deal", "account", "crm"] },
@@ -25,7 +25,7 @@ const CATEGORIZE_ORDER: Section[] = ["workflows", "blueprints", "functions", "fi
 
 export function categorizeTools(tools: McpTool[]): Record<Section, McpTool[]> {
   const result: Record<Section, McpTool[]> = {
-    modules: [], workflows: [], blueprints: [], functions: [], fields: [], logs: [], integrations: [],
+    "crm-overview": [], modules: [], workflows: [], blueprints: [], functions: [], fields: [], logs: [], integrations: [],
   };
   for (const tool of tools) {
     const hay = `${tool.name} ${tool.description ?? ""}`.toLowerCase();

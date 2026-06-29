@@ -13,6 +13,7 @@ import BlueprintAudit from "@/components/BlueprintAudit";
 import FunctionAudit from "@/components/FunctionAudit";
 import AuditLogs from "@/components/AuditLogs";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
+import CRMOverviewDashboard from "@/components/CRMOverviewDashboard";
 
 export default function DashboardPage() {
   const [config, setConfig] = useState<McpConfig | null>(null);
@@ -27,7 +28,7 @@ export default function DashboardPage() {
   function onConnected(cfg: McpConfig, t: McpTool[]) {
     setConfig(cfg);
     setTools(t);
-    setActiveSection("modules");
+    setActiveSection("crm-overview");
     setSelectedTool(null);
   }
 
@@ -72,6 +73,9 @@ export default function DashboardPage() {
         {config && (
           <>
             {/* Keep audit panels mounted so loaded data survives section switches */}
+            <div style={{ display: activeSection === "crm-overview" ? undefined : "none" }}>
+              <CRMOverviewDashboard config={config} tools={tools} onLog={onLog} />
+            </div>
             <div className="main-card" style={{ display: activeSection === "modules" ? undefined : "none" }}>
               <ModulesAudit config={config} tools={categorized.modules} allTools={tools} onLog={onLog} />
             </div>
@@ -97,7 +101,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {!["modules", "workflows", "blueprints", "functions", "logs", "integrations"].includes(activeSection) && (
+            {!["crm-overview", "modules", "workflows", "blueprints", "functions", "logs", "integrations"].includes(activeSection) && (
               <SectionPanel
                 section={activeSectionDef}
                 tools={categorized[activeSection] ?? []}
