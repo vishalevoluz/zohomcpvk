@@ -11,6 +11,7 @@ export const SECTIONS = [
 
 // Keyword map for tool categorization — includes "fields" even though it's not a sidebar section
 const CATEGORIZE_KEYWORDS: Record<Section, string[]> = {
+  "crm-overview": [],
   workflows:    ["workflow", "automation", "trigger", "rule"],
   blueprints:   ["blueprint", "transition", "stage"],
   functions:    ["function", "script", "custom_function", "deluge", "automation_script", "serverless"],
