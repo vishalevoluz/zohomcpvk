@@ -35,11 +35,11 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
 
       <nav className="sidebar-nav">
         <button
-          className={`sidebar-nav-item sidebar-nav-overview ${activeSection === "crm-overview" ? "active" : ""}`}
-          onClick={() => onSelectSection("crm-overview")}
+          className={`sidebar-nav-item sidebar-nav-overview ${activeSection === "crm-dashboard" ? "active" : ""}`}
+          onClick={() => onSelectSection("crm-dashboard")}
         >
-          <span className="sidebar-nav-icon">◉</span>
-          <span className="sidebar-nav-text">CRM Overview</span>
+          <span className="sidebar-nav-icon">⌂</span>
+          <span className="sidebar-nav-text">CRM Dashboard</span>
         </button>
 
         <div className="sidebar-divider" />

@@ -215,15 +215,23 @@ interface Props {
   autoLoad?: boolean;
 }
 
+// The connected MCP server's canonical "list fields" tool — preferred over
+// whatever happens to be first in the categorized tool list so autofill is deterministic.
+const FIELDS_LIST_TOOL = "getfields";
+function pickDefaultTool(tools: McpTool[]): McpTool | undefined {
+  return tools.find(t => t.name === FIELDS_LIST_TOOL) ?? tools[0];
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function FieldsAudit({ config, tools, allTools = [], onLog, embedded = false, defaultModule, autoLoad = false }: Props) {
   const availableTools = tools.length > 0 ? tools : allTools;
   const usingFallback = tools.length === 0 && allTools.length > 0;
 
-  const [selectedTools, setSelectedTools] = useState<string[]>(
-    availableTools.length > 0 ? [availableTools[0].name] : []
-  );
+  const [selectedTools, setSelectedTools] = useState<string[]>(() => {
+    const t = pickDefaultTool(availableTools);
+    return t ? [t.name] : [];
+  });
   const [toolParams, setToolParams] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -255,7 +263,8 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
 
   useEffect(() => {
     const next = tools.length > 0 ? tools : allTools;
-    setSelectedTools(next.length > 0 ? [next[0].name] : []);
+    const t = pickDefaultTool(next);
+    setSelectedTools(t ? [t.name] : []);
     setFields([]);
     setError("");
   }, [tools, allTools]);

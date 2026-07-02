@@ -188,6 +188,13 @@ function formatDateTime(iso?: string | null): string {
 }
 function findTool(allTools: McpTool[], name: string): McpTool | undefined { return allTools.find(t => t.name === name); }
 
+// The connected MCP server's canonical "list workflow rules" tool — preferred over
+// whatever happens to be first in the categorized tool list so autofill is deterministic.
+const WORKFLOW_LIST_TOOL = "ZohoCRM_getWorkflowRules";
+function pickDefaultTool(tools: McpTool[]): string | undefined {
+  return tools.find(t => t.name === WORKFLOW_LIST_TOOL)?.name ?? tools[0]?.name;
+}
+
 // ─── Tool label map ───────────────────────────────────────────────────────────
 
 const WF_TOOL_LABELS: Record<string, string> = {
@@ -583,7 +590,10 @@ interface Props {
 }
 
 export default function WorkflowAudit({ config, tools, allTools, onLog }: Props) {
-  const [selectedTools, setSelectedTools] = useState<string[]>(tools.length > 0 ? [tools[0].name] : []);
+  const [selectedTools, setSelectedTools] = useState<string[]>(() => {
+    const t = pickDefaultTool(tools);
+    return t ? [t] : [];
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [workflows, setWorkflows] = useState<ZohoWorkflow[]>([]);
@@ -623,7 +633,8 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   }, [activeMenu]);
 
   useEffect(() => {
-    const toolNames = tools.length > 0 ? [tools[0].name] : [];
+    const defaultTool = pickDefaultTool(tools);
+    const toolNames = defaultTool ? [defaultTool] : [];
     setSelectedTools(toolNames);
     setWorkflows([]);
     setError("");

@@ -169,6 +169,13 @@ function hasInvalidBinding(f: ZohoFunction): boolean {
   return isLocked(f);
 }
 
+// The connected MCP server's canonical "list functions" tool — preferred over
+// whatever happens to be first in the categorized tool list so autofill is deterministic.
+const FUNCTIONS_LIST_TOOL = "ZohoCRM_getFunctions";
+function pickDefaultTool(tools: McpTool[]): McpTool | undefined {
+  return tools.find(t => t.name === FUNCTIONS_LIST_TOOL) ?? tools[0];
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type FnFilterKey = "all" | "unused" | "missing_ref" | "locked";
@@ -186,9 +193,10 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   const availableTools = tools.length > 0 ? tools : allTools;
   const usingFallback = tools.length === 0 && allTools.length > 0;
 
-  const [selectedTools, setSelectedTools] = useState<string[]>(
-    availableTools.length > 0 ? [availableTools[0].name] : []
-  );
+  const [selectedTools, setSelectedTools] = useState<string[]>(() => {
+    const t = pickDefaultTool(availableTools);
+    return t ? [t.name] : [];
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [functions, setFunctions] = useState<ZohoFunction[]>([]);
@@ -209,18 +217,24 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
 
   useEffect(() => {
     const next = tools.length > 0 ? tools : allTools;
-    setSelectedTools(next.length > 0 ? [next[0].name] : []);
+    const defaultTool = pickDefaultTool(next);
+    const toolNames = defaultTool ? [defaultTool.name] : [];
+    setSelectedTools(toolNames);
     setFunctions([]);
     setError("");
+    // Auto-load as soon as tools are available (MCP just connected)
+    if (toolNames.length > 0) void loadFunctions(toolNames);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tools, allTools]);
 
-  async function loadFunctions() {
-    if (selectedTools.length === 0) return;
+  async function loadFunctions(overrideTools?: string[]) {
+    const toolsToUse = overrideTools ?? selectedTools;
+    if (toolsToUse.length === 0) return;
     setLoading(true);
     setError("");
     try {
       const all: ZohoFunction[] = [];
-      for (const toolName of selectedTools) {
+      for (const toolName of toolsToUse) {
         const start = Date.now();
         try {
           const output = await executeTool(config, toolName, {});
@@ -238,7 +252,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
         }
       }
       if (all.length === 0) {
-        setError(`No function data found in selected tool${selectedTools.length > 1 ? "s" : ""}.`);
+        setError(`No function data found in selected tool${toolsToUse.length > 1 ? "s" : ""}.`);
       } else {
         setFunctions(all);
         setFilter("all");
@@ -297,7 +311,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
           ) : (
             <span className="no-tools-hint">No tools found — check connection</span>
           )}
-          <button onClick={loadFunctions} disabled={loading || selectedTools.length === 0} className="btn-connect">
+          <button onClick={() => void loadFunctions()} disabled={loading || selectedTools.length === 0} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : functions.length ? "Reload" : "Load Functions"}
           </button>
         </div>

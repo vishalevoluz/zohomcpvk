@@ -11,24 +11,28 @@ import ModulesAudit from "@/components/ModulesAudit";
 import WorkflowAudit from "@/components/WorkflowAudit";
 import BlueprintAudit from "@/components/BlueprintAudit";
 import FunctionAudit from "@/components/FunctionAudit";
+import FieldsExplorer from "@/components/FieldsExplorer";
 import AuditLogs from "@/components/AuditLogs";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
 import CRMOverviewDashboard from "@/components/CRMOverviewDashboard";
+import BusinessView from "@/components/BusinessView";
+import { useCrmEntities } from "@/lib/useCrmEntities";
 
 export default function DashboardPage() {
   const [config, setConfig] = useState<McpConfig | null>(null);
   const [tools, setTools] = useState<McpTool[]>([]);
-  const [activeSection, setActiveSection] = useState<Section>("modules");
+  const [activeSection, setActiveSection] = useState<Section>("crm-dashboard");
   const [logs, setLogs] = useState<ExecutionLog[]>([]);
   const [selectedTool, setSelectedTool] = useState<McpTool | null>(null);
 
   const categorized = useMemo(() => categorizeTools(tools), [tools]);
   const activeSectionDef = SECTIONS.find(s => s.id === activeSection)!;
+  const crm = useCrmEntities(config, tools, onLog);
 
   function onConnected(cfg: McpConfig, t: McpTool[]) {
     setConfig(cfg);
     setTools(t);
-    setActiveSection("crm-overview");
+    setActiveSection("crm-dashboard");
     setSelectedTool(null);
   }
 
@@ -73,8 +77,22 @@ export default function DashboardPage() {
         {config && (
           <>
             {/* Keep audit panels mounted so loaded data survives section switches */}
-            <div style={{ display: activeSection === "crm-overview" ? undefined : "none" }}>
-              <CRMOverviewDashboard config={config} tools={tools} onLog={onLog} />
+            <div style={{ display: activeSection === "crm-dashboard" ? undefined : "none" }}>
+              <BusinessView
+                entityData={crm.entityData}
+                fetchAll={crm.fetchAll}
+                onSelectSection={onSelectSection}
+              />
+              <CRMOverviewDashboard
+                config={config}
+                tools={tools}
+                onLog={onLog}
+                entityData={crm.entityData}
+                fetchEntity={crm.fetchEntity}
+                fetchAll={crm.fetchAll}
+                lastRefresh={crm.lastRefresh}
+                onSelectSection={onSelectSection}
+              />
             </div>
             <div className="main-card" style={{ display: activeSection === "modules" ? undefined : "none" }}>
               <ModulesAudit config={config} tools={categorized.modules} allTools={tools} onLog={onLog} />
@@ -87,6 +105,9 @@ export default function DashboardPage() {
             </div>
             <div className="main-card" style={{ display: activeSection === "functions" ? undefined : "none" }}>
               <FunctionAudit config={config} tools={categorized.functions} allTools={tools} onLog={onLog} />
+            </div>
+            <div className="main-card" style={{ display: activeSection === "fields" ? undefined : "none" }}>
+              <FieldsExplorer config={config} allTools={tools} onLog={onLog} />
             </div>
 
             {activeSection === "logs" && (
@@ -101,7 +122,7 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {!["crm-overview", "modules", "workflows", "blueprints", "functions", "logs", "integrations"].includes(activeSection) && (
+            {!["crm-dashboard", "modules", "workflows", "blueprints", "functions", "fields", "logs", "integrations"].includes(activeSection) && (
               <SectionPanel
                 section={activeSectionDef}
                 tools={categorized[activeSection] ?? []}

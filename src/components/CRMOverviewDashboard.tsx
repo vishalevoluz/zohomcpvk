@@ -1,12 +1,23 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
+import {
+  type CrmEntityType,
+  type EntityState,
+  CRM_ENTITIES,
+  getItemName,
+  getItemStatus,
+  isEntityResolved,
+} from "@/lib/useCrmEntities";
+import type { Section } from "@/lib/sections";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser } from "@/lib/crmPredicates";
+import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions } from "@/lib/businessScore";
+import HealthGauge from "@/components/HealthGauge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type CrmEntityType = "blueprints" | "modules" | "layouts" | "tasks" | "pipelines" | "stages" | "workflows" | "profiles" | "users" | "fields";
 type ReportTab = "changes" | "integrations" | "architecture";
 type FeedbackCategory = "general" | "feature" | "improvement" | "bug";
 
@@ -17,15 +28,6 @@ interface FeedbackEntry {
   rating: number;
   message: string;
   timestamp: string;
-}
-
-interface EntityState {
-  items: unknown[];
-  loading: boolean;
-  error: string | null;
-  toolUsed: string | null;
-  expanded: boolean;
-  lastFetched: number | null;
 }
 
 interface Recommendation {
@@ -47,71 +49,39 @@ interface Props {
   config: McpConfig;
   tools: McpTool[];
   onLog: (log: ExecutionLog) => void;
+  entityData: Record<CrmEntityType, EntityState>;
+  fetchEntity: (type: CrmEntityType) => Promise<void>;
+  fetchAll: () => void;
+  lastRefresh: Date | null;
+  onSelectSection: (s: Section) => void;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+type Severity = "critical" | "warning" | "good";
 
-const CRM_ENTITIES: { type: CrmEntityType; label: string; icon: string; plural: string }[] = [
-  { type: "modules",    label: "Modules",    icon: "⊞", plural: "modules" },
-  { type: "layouts",    label: "Layouts",    icon: "⊟", plural: "layouts" },
-  { type: "pipelines",  label: "Pipelines",  icon: "⇥", plural: "pipelines" },
-  { type: "stages",     label: "Stages",     icon: "◉", plural: "stages" },
-  { type: "workflows",  label: "Workflows",  icon: "⟳", plural: "workflows" },
-  { type: "blueprints", label: "Blueprints", icon: "◈", plural: "blueprints" },
-  { type: "fields",     label: "Fields",     icon: "▤", plural: "fields" },
-  { type: "profiles",   label: "Profiles",   icon: "◑", plural: "profiles" },
-  { type: "users",      label: "Users",      icon: "◎", plural: "users" },
-  { type: "tasks",      label: "Tasks",      icon: "✓", plural: "tasks" },
+interface KpiItem {
+  key: string;
+  label: string;
+  value: number;
+  severity: Severity;
+  note: string;
+}
+
+interface MissingDataItem {
+  key: string;
+  label: string;
+  severity: "critical" | "warning";
+  message: string;
+  targetSection: Section;
+}
+
+const CATEGORY_GROUPS: { key: string; label: string; dims: (keyof HealthScoreDimensions)[] }[] = [
+  { key: "process",    label: "Process Health",  dims: ["processCompleteness"] },
+  { key: "hygiene",    label: "Module Hygiene",  dims: ["dataArchitecture"] },
+  { key: "adoption",   label: "User Adoption",   dims: ["accessSecurity"] },
+  { key: "automation", label: "Automation",      dims: ["automationCoverage", "automationHealth"] },
 ];
 
-const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns: RegExp[] }> = {
-  blueprints: {
-    preferred: ["getBlueprints", "getAllBlueprints", "listBlueprints", "getBlueprintList", "getBlueprintProcesses"],
-    patterns: [/getallblueprint/i, /getblueprint(?!byid|id|record|stage)/i, /listblueprint/i],
-  },
-  modules: {
-    preferred: ["getModules", "getAllModules", "listModules", "getCRMModules", "getAvailableModules"],
-    patterns: [/getmodule(?!field|layout|byid|byname)/i, /listmodule/i, /allmodule/i],
-  },
-  layouts: {
-    // getLayouts is the exact tool name the user added
-    preferred: ["getLayouts", "getAllLayouts", "getModuleLayouts", "listLayouts", "getLayoutList"],
-    patterns: [/getlayout(?!byid)/i, /listlayout/i, /alllayout/i],
-  },
-  tasks: {
-    preferred: ["getTasks", "getAllTasks", "listTasks", "getActivities", "getAllActivities", "getTaskList"],
-    patterns: [/gettask(?!byid)/i, /listtask/i, /alltask/i, /getactivit/i],
-  },
-  pipelines: {
-    // getPipelines is the exact tool name the user added
-    preferred: ["getPipelines", "getAllPipelines", "listPipelines", "getSalesPipelines", "getDealPipelines"],
-    patterns: [/getpipeline(?!byid)/i, /listpipeline/i, /allpipeline/i, /salespipeline/i],
-  },
-  stages: {
-    preferred: ["getStages", "getAllStages", "getDealStages", "getPipelineStages", "listStages"],
-    patterns: [/getstage(?!byid)/i, /liststage/i, /allstage/i, /dealstage/i, /pipelinestage/i],
-  },
-  workflows: {
-    preferred: ["getWorkflowRules", "getWorkflows", "getAllWorkflows", "listWorkflows", "getAutomationWorkflows"],
-    patterns: [/getworkflowrule(?!byid)/i, /listworkflow/i, /allworkflow/i, /getworkflows?$/i],
-  },
-  // ── New tools added by user ─────────────────────────────────────────────────
-  profiles: {
-    // getProfile is the exact tool name the user added
-    preferred: ["getProfile", "getProfiles", "getAllProfiles", "listProfiles", "getCRMProfiles"],
-    patterns: [/getprofile(?!byid|field)/i, /listprofile/i, /allprofile/i, /profile/i],
-  },
-  users: {
-    // getUser is the exact tool name the user added
-    preferred: ["getUser", "getUsers", "getAllUsers", "listUsers", "getCRMUsers", "getUserList"],
-    patterns: [/getuser(?!byid|profile|pref)/i, /listuser/i, /alluser/i],
-  },
-  fields: {
-    // getFields is the exact tool name the user added
-    preferred: ["getFields", "getAllFields", "listFields", "getModuleFields", "getCRMFields"],
-    patterns: [/getfield(?!byid)/i, /listfield/i, /allfield/i, /getfields/i],
-  },
-};
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const ZIA_PATTERNS = [/\bzia\b/i, /recommend/i, /\banalyze\b/i, /\binsight/i, /\bsuggest/i];
 
@@ -130,82 +100,12 @@ const FB_STORAGE_KEY = "zoho-crm-feedback";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function findToolForEntity(tools: McpTool[], type: CrmEntityType): McpTool | null {
-  const { preferred, patterns } = ENTITY_PREFS[type];
-  for (const name of preferred) {
-    const t = tools.find(t => t.name === name);
-    if (t) return t;
-  }
-  return tools.find(t => patterns.some(p => p.test(t.name))) ?? null;
-}
-
 function findZiaTool(tools: McpTool[]): McpTool | null {
   for (const p of ZIA_PATTERNS) {
     const t = tools.find(t => p.test(t.name) || p.test(t.description ?? ""));
     if (t) return t;
   }
   return null;
-}
-
-function extractArray(output: unknown): unknown[] {
-  if (!output) return [];
-  if (Array.isArray(output)) return output;
-  if (typeof output !== "object") return [];
-  const r = output as Record<string, unknown>;
-
-  // Unwrap MCP content wrapper: { content: [{ type: "text", text: "..." }] }
-  if (Array.isArray(r.content)) {
-    for (const c of r.content as Record<string, unknown>[]) {
-      if (c.type === "text" && typeof c.text === "string") {
-        try {
-          const parsed = JSON.parse(c.text);
-          if (Array.isArray(parsed)) return parsed;
-          if (typeof parsed === "object" && parsed !== null) return extractArray(parsed);
-        } catch { /* not JSON */ }
-      }
-    }
-  }
-
-  // Try standard response keys (includes new entity keys)
-  const keys = ["data", "blueprints", "modules", "layouts", "tasks", "pipelines", "stages",
-                 "workflows", "profiles", "users", "fields", "result", "results", "records",
-                 "items", "list", "response"];
-  for (const key of keys) {
-    if (Array.isArray(r[key])) return r[key] as unknown[];
-  }
-  for (const val of Object.values(r)) {
-    if (Array.isArray(val) && val.length > 0) return val;
-  }
-  // Single-object responses (e.g. getProfile / getUser returning one record) — wrap in array
-  const hasId = "id" in r || "userId" in r || "profileId" in r || "name" in r;
-  if (hasId) return [r];
-  return [];
-}
-
-function getItemName(item: unknown, idx: number): string {
-  if (!item || typeof item !== "object") return `Item ${idx + 1}`;
-  const r = item as Record<string, unknown>;
-  return String(
-    r.name ?? r.display_name ?? r.label ?? r.api_name ??
-    r.workflow_name ?? r.blueprint_name ?? r.pipeline_name ??
-    r.stage_name ?? r.title ?? `Item ${idx + 1}`
-  );
-}
-
-function getItemId(item: unknown): string {
-  if (!item || typeof item !== "object") return "";
-  const r = item as Record<string, unknown>;
-  return String(r.id ?? r.workflow_id ?? r.blueprint_id ?? r.pipeline_id ?? "");
-}
-
-function getItemStatus(item: unknown): string | null {
-  if (!item || typeof item !== "object") return null;
-  const r = item as Record<string, unknown>;
-  const raw = r.status ?? r.active ?? r.enabled ?? r.is_active;
-  if (raw === undefined) return null;
-  if (typeof raw === "boolean") return raw ? "Active" : "Inactive";
-  const s = String(raw);
-  return s || null;
 }
 
 function generateRecommendations(
@@ -532,111 +432,184 @@ function formatRelative(date: Date): string {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+function isHiddenModule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  return r.visible === false || r.show_as_tab === false || r.viewable === false;
+}
 
-const INIT_STATE: EntityState = {
-  items: [], loading: false, error: null, toolUsed: null, expanded: true, lastFetched: null,
-};
+function categoryScorePct(dims: HealthScoreDimensions, keys: (keyof HealthScoreDimensions)[]): number {
+  const sum = keys.reduce((s, k) => s + dims[k], 0);
+  return Math.round((sum / (keys.length * 20)) * 100);
+}
 
-function makeInitial(): Record<CrmEntityType, EntityState> {
+function computeKpis(entityData: Record<CrmEntityType, EntityState>): KpiItem[] {
+  const modules = entityData.modules.items;
+  const blueprints = entityData.blueprints.items;
+  const users = entityData.users.items;
+  const layouts = entityData.layouts.items;
+
+  const hiddenCount = modules.filter(isHiddenModule).length;
+  const hiddenPct = modules.length ? Math.round((hiddenCount / modules.length) * 100) : 0;
+  const inactiveBps = blueprints.filter(b => !isActiveWorkflow(b)).length;
+  const activeUsers = users.filter(u => !isInactiveUser(u)).length;
+  const layoutGap = Math.max(0, modules.length - layouts.length);
+
+  return [
+    {
+      key: "modules", label: "Modules", value: modules.length,
+      severity: hiddenPct >= 40 ? "critical" : hiddenPct >= 15 ? "warning" : "good",
+      note: modules.length ? `${hiddenPct}% hidden from users` : "No modules found",
+    },
+    {
+      key: "blueprints", label: "Blueprints", value: blueprints.length,
+      severity: blueprints.length > 0 && inactiveBps === blueprints.length ? "critical" : inactiveBps > 0 ? "warning" : "good",
+      note: blueprints.length ? `${inactiveBps} inactive` : "No blueprints found",
+    },
+    {
+      key: "users", label: "Active Users", value: activeUsers,
+      severity: activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
+      note: `${users.length} total licensed`,
+    },
+    {
+      key: "layouts", label: "Layouts", value: layouts.length,
+      severity: layouts.length === 0 && modules.length > 0 ? "critical" : layoutGap > 0 ? "warning" : "good",
+      note: layoutGap > 0 ? `${layoutGap} module${layoutGap === 1 ? "" : "s"} missing a layout` : "Covers all modules",
+    },
+  ];
+}
+
+function computeModuleVisibility(entityData: Record<CrmEntityType, EntityState>) {
+  const modules = entityData.modules.items;
+  const blueprints = entityData.blueprints.items;
+  const hidden = modules.filter(isHiddenModule).length;
+  const visible = modules.length - hidden;
+  const hiddenPct = modules.length ? Math.round((hidden / modules.length) * 100) : 0;
+  const visiblePct = modules.length ? 100 - hiddenPct : 0;
+  const customCount = modules.filter(isCustomModule).length;
+  const blueprintsActive = blueprints.filter(isActiveWorkflow).length;
+  const blueprintsPct = blueprints.length ? Math.round((blueprintsActive / blueprints.length) * 100) : 0;
   return {
-    blueprints: { ...INIT_STATE },
-    modules:    { ...INIT_STATE },
-    layouts:    { ...INIT_STATE },
-    tasks:      { ...INIT_STATE },
-    pipelines:  { ...INIT_STATE },
-    stages:     { ...INIT_STATE },
-    workflows:  { ...INIT_STATE },
-    profiles:   { ...INIT_STATE },
-    users:      { ...INIT_STATE },
-    fields:     { ...INIT_STATE },
+    total: modules.length, visible, hidden, hiddenPct, visiblePct, customCount,
+    blueprintsActive, blueprintsTotal: blueprints.length, blueprintsPct,
   };
 }
 
-export default function CRMOverviewDashboard({ config, tools, onLog }: Props) {
-  const [entityData, setEntityData] = useState<Record<CrmEntityType, EntityState>>(makeInitial);
+interface ConfigRow {
+  key: CrmEntityType;
+  label: string;
+  value: string;
+  status: string;
+  severity: Severity | "neutral";
+  targetSection: Section | null;
+}
+
+const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Section | null }[] = [
+  { type: "pipelines", label: "Pipelines", targetSection: "modules" },
+  { type: "stages",    label: "Stages",    targetSection: "blueprints" },
+  { type: "workflows", label: "Workflows", targetSection: "workflows" },
+  { type: "blueprints", label: "Blueprints", targetSection: "blueprints" },
+  { type: "fields",    label: "Fields",    targetSection: "fields" },
+  { type: "profiles",  label: "Profiles",  targetSection: null },
+  { type: "users",     label: "Users",     targetSection: null },
+  { type: "tasks",     label: "Tasks",     targetSection: "modules" },
+];
+
+function computeConfigRows(entityData: Record<CrmEntityType, EntityState>): ConfigRow[] {
+  return CONFIG_ROW_DEFS.map(def => {
+    const st = entityData[def.type];
+    if (!isEntityResolved(st)) {
+      return { key: def.type, label: def.label, value: "…", status: "Loading", severity: "neutral" as const, targetSection: def.targetSection };
+    }
+    const count = st.items.length;
+    if (count === 0) {
+      return { key: def.type, label: def.label, value: "N/A", status: "Not found", severity: "critical" as const, targetSection: def.targetSection };
+    }
+
+    let status: string;
+    let severity: Severity;
+    switch (def.type) {
+      case "workflows":
+      case "blueprints": {
+        const inactive = st.items.filter(i => !isActiveWorkflow(i)).length;
+        if (inactive === 0) { status = "Active"; severity = "good"; }
+        else if (inactive === count) { status = `${inactive} inactive`; severity = "critical"; }
+        else { status = `${inactive} inactive`; severity = "warning"; }
+        break;
+      }
+      case "users": {
+        const inactive = st.items.filter(isInactiveUser).length;
+        if (inactive === 0) { status = "Active"; severity = "good"; }
+        else { status = `${inactive} inactive`; severity = "warning"; }
+        break;
+      }
+      case "fields":
+        status = count < 10 ? "Low" : "Configured";
+        severity = count < 10 ? "warning" : "good";
+        break;
+      case "profiles":
+        status = count === 1 ? "Single profile" : "Configured";
+        severity = count === 1 ? "warning" : "good";
+        break;
+      default:
+        status = "Configured";
+        severity = "good";
+    }
+
+    return { key: def.type, label: def.label, value: String(count), status, severity, targetSection: def.targetSection };
+  });
+}
+
+const MISSING_DATA_CHECKS: { type: CrmEntityType; label: string; targetSection: Section; severity: "critical" | "warning" }[] = [
+  { type: "stages",    label: "Stages",    targetSection: "blueprints", severity: "critical" },
+  { type: "tasks",     label: "Tasks",     targetSection: "modules",    severity: "critical" },
+  { type: "fields",    label: "Fields",    targetSection: "fields",     severity: "warning" },
+  { type: "pipelines", label: "Pipelines", targetSection: "modules",    severity: "warning" },
+];
+
+function computeMissingData(entityData: Record<CrmEntityType, EntityState>): MissingDataItem[] {
+  const items: MissingDataItem[] = [];
+  for (const check of MISSING_DATA_CHECKS) {
+    const st = entityData[check.type];
+    if (!isEntityResolved(st) || st.items.length > 0) continue;
+    const message = st.error
+      ? `${check.label} not found — ${st.error}`
+      : `No ${check.label.toLowerCase()} configured`;
+    items.push({ key: check.type, label: check.label, severity: check.severity, message, targetSection: check.targetSection });
+  }
+  return items;
+}
+
+function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label: string; onRetry: () => void }) {
+  if (state.loading) {
+    return <p className="business-view-hint"><span className="spinner" /> Loading {label.toLowerCase()}…</p>;
+  }
+  if (state.error) {
+    return (
+      <div className="panel-empty-error">
+        <p className="business-view-hint">⚠ {state.error}{state.toolUsed ? ` (via ${state.toolUsed})` : " — no matching tool found"}</p>
+        <button className="btn-secondary" onClick={onRetry}>Retry</button>
+      </div>
+    );
+  }
+  return <p className="business-view-hint">No {label.toLowerCase()} found.</p>;
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+export default function CRMOverviewDashboard({ config, tools, onLog, entityData, fetchEntity, fetchAll, lastRefresh, onSelectSection }: Props) {
   const [activeTab, setActiveTab] = useState<ReportTab>("changes");
   const [ziaMessages, setZiaMessages] = useState<ZiaMessage[]>([]);
   const [ziaInput, setZiaInput] = useState("");
   const [ziaLoading, setZiaLoading] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
-  const hasFetched = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const ziaChatRef = useRef<HTMLDivElement>(null);
   const [feedbackEntries, setFeedbackEntries] = useState<FeedbackEntry[]>([]);
   const [feedbackForm, setFeedbackForm] = useState<{ name: string; category: FeedbackCategory; rating: number; message: string }>({
     name: "", category: "general", rating: 0, message: "",
   });
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "success">("idle");
-
-  const fetchEntity = useCallback(async (type: CrmEntityType) => {
-    const tool = findToolForEntity(tools, type);
-
-    setEntityData(prev => ({
-      ...prev,
-      [type]: { ...prev[type], loading: true, error: null, toolUsed: tool?.name ?? null },
-    }));
-
-    if (!tool) {
-      setEntityData(prev => ({
-        ...prev,
-        [type]: { ...prev[type], loading: false, error: "No matching tool found", toolUsed: null },
-      }));
-      return;
-    }
-
-    const start = Date.now();
-    try {
-      const output = await executeTool(config, tool.name, {});
-      const items = extractArray(output);
-      const durationMs = Date.now() - start;
-
-      onLog({
-        id: Math.random().toString(36).slice(2),
-        tool: tool.name,
-        input: {},
-        output,
-        status: "success",
-        durationMs,
-        timestamp: new Date(),
-      });
-
-      setEntityData(prev => ({
-        ...prev,
-        [type]: { ...prev[type], loading: false, items, error: null, toolUsed: tool.name, lastFetched: Date.now() },
-      }));
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Failed to fetch";
-      onLog({
-        id: Math.random().toString(36).slice(2),
-        tool: tool.name,
-        input: {},
-        output: null,
-        status: "error",
-        errorMessage: msg,
-        durationMs: Date.now() - start,
-        timestamp: new Date(),
-      });
-      setEntityData(prev => ({
-        ...prev,
-        [type]: { ...prev[type], loading: false, error: msg, toolUsed: tool.name },
-      }));
-    }
-  }, [config, tools, onLog]);
-
-  const fetchAll = useCallback(() => {
-    hasFetched.current = true;
-    setLastRefresh(new Date());
-    CRM_ENTITIES.forEach(e => fetchEntity(e.type));
-    setRefreshTick(t => t + 1);
-  }, [fetchEntity]);
-
-  // Auto-fetch when tools are available
-  useEffect(() => {
-    if (!hasFetched.current && tools.length > 0) {
-      fetchAll();
-    }
-  }, [tools, fetchAll]);
 
   // Tick for relative-time display
   useEffect(() => {
@@ -644,15 +617,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog }: Props) {
     return () => clearInterval(id);
   }, []);
 
-  const toggleExpand = (type: CrmEntityType) => {
-    setEntityData(prev => ({
-      ...prev,
-      [type]: { ...prev[type], expanded: !prev[type].expanded },
-    }));
-  };
-
-  async function sendToZia() {
-    const q = ziaInput.trim();
+  async function sendToZia(overrideText?: string) {
+    const q = (overrideText ?? ziaInput).trim();
     if (!q || ziaLoading) return;
     setZiaInput("");
     setZiaMessages(prev => [...prev, { role: "user", content: q }]);
@@ -743,6 +709,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog }: Props) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [ziaMessages]);
 
+  function askZiaAbout(rec: Recommendation) {
+    ziaChatRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    sendToZia(`How do I fix "${rec.title}"? ${rec.description} Give me concrete remediation steps.`);
+  }
+
   void refreshTick; // used for relative time updates
 
   const recommendations = generateRecommendations(entityData, tools);
@@ -751,6 +722,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog }: Props) {
   const loadingCount = CRM_ENTITIES.filter(e => entityData[e.type].loading).length;
   const loadedCount = CRM_ENTITIES.filter(e => entityData[e.type].lastFetched !== null).length;
   const ziaTool = findZiaTool(tools);
+
+  const healthResolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t]));
+  const healthScore = computeHealthScore(entityData);
+  const kpis = computeKpis(entityData);
+  const moduleVis = computeModuleVisibility(entityData);
+  const missingData = computeMissingData(entityData);
+  const configRows = computeConfigRows(entityData);
+  const blueprintItems = entityData.blueprints.items;
+  const profileItems = entityData.profiles.items;
+  const userItemsForPanel = entityData.users.items;
 
   // Load persisted feedback on mount
   useEffect(() => {
@@ -814,7 +795,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog }: Props) {
         <div className="crm-header-left">
           <span className="crm-header-icon">◉</span>
           <div>
-            <h2 className="crm-header-title">CRM Overview Dashboard</h2>
+            <h2 className="crm-header-title">Data & Recommendations</h2>
             <p className="crm-header-sub">
               {loadingCount > 0
                 ? `Loading ${loadingCount} of ${CRM_ENTITIES.length} data sources…`
@@ -831,118 +812,199 @@ export default function CRMOverviewDashboard({ config, tools, onLog }: Props) {
         </div>
       </div>
 
-      {/* ── Stats row ───────────────────────────────────────────────────────── */}
-      <div className="crm-stats-row">
-        {CRM_ENTITIES.map(e => {
-          const st = entityData[e.type];
-          return (
-            <div key={e.type} className={`crm-stat ${st.loading ? "crm-stat-loading" : ""}`}>
-              <span className="crm-stat-icon">{e.icon}</span>
-              <div className="crm-stat-info">
-                <span className="crm-stat-label">{e.label}</span>
-                {st.loading ? (
-                  <span className="crm-stat-count crm-stat-loading-val">…</span>
-                ) : st.error && st.items.length === 0 ? (
-                  <span className="crm-stat-count crm-stat-err">—</span>
-                ) : (
-                  <span className="crm-stat-count">{st.items.length.toLocaleString()}</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      {/* ── KPI strip ───────────────────────────────────────────────────────── */}
+      <div className="kpi-strip">
+        {kpis.map(k => (
+          <div key={k.key} className={`kpi-tile kpi-${k.severity}`}>
+            <span className="kpi-tile-label">{k.label}</span>
+            <span className="kpi-tile-value">{k.value.toLocaleString()}</span>
+            <span className="kpi-tile-note">{k.note}</span>
+          </div>
+        ))}
       </div>
 
-      {/* ── Split layout ────────────────────────────────────────────────────── */}
-      <div className="crm-split">
-
-        {/* Left: Current CRM */}
-        <div className="crm-left">
-          <p className="crm-panel-label">Current CRM</p>
-          <div className="crm-entities">
-            {CRM_ENTITIES.map(e => {
-              const st = entityData[e.type];
+      {/* ── Health score / module visibility / missing data ───────────────────── */}
+      <div className="crm-insights-row">
+        <div className="business-view-section health-gauge-card crm-health-card">
+          <h3 className="business-view-section-title">CRM Health Score</h3>
+          <HealthGauge score={healthScore.total} zone={healthScore.zone} resolved={healthResolved} />
+          <p className={`health-gauge-verdict ${healthResolved ? `zone-${healthScore.zone}` : ""}`}>
+            {healthResolved ? healthScore.verdict : "Reading your CRM setup…"}
+          </p>
+          <div className="health-subscores">
+            {CATEGORY_GROUPS.map(g => {
+              const pct = healthResolved ? categoryScorePct(healthScore.dimensions, g.dims) : 0;
               return (
-                <div key={e.type} className="crm-entity">
-                  <div className="crm-entity-header" onClick={() => toggleExpand(e.type)}>
-                    <span className="crm-entity-icon">{e.icon}</span>
-                    <span className="crm-entity-label">{e.label}</span>
-                    <div className="crm-entity-meta">
-                      {st.loading ? (
-                        <span className="spinner" style={{ width: 10, height: 10 }} />
-                      ) : st.error && st.items.length === 0 ? (
-                        <span className="crm-entity-badge crm-badge-error" title={st.error}>
-                          {st.toolUsed ? "Err" : "N/A"}
-                        </span>
-                      ) : (
-                        <span className="crm-entity-badge">{st.items.length}</span>
-                      )}
-                    </div>
-                    <button
-                      className="crm-entity-refresh"
-                      onClick={ev => { ev.stopPropagation(); fetchEntity(e.type); }}
-                      disabled={st.loading}
-                      title={`Refresh ${e.label}`}
-                    >↺</button>
-                    <span className="crm-entity-chevron">{st.expanded ? "▴" : "▾"}</span>
-                  </div>
-
-                  {st.expanded && (
-                    <div className="crm-entity-body">
-                      {st.loading ? (
-                        <div className="crm-entity-state">
-                          <span className="spinner" />
-                          <span>Fetching via <code>{st.toolUsed}</code>…</span>
-                        </div>
-                      ) : st.error && st.items.length === 0 ? (
-                        <div className="crm-entity-state crm-entity-err">
-                          <span>⚠ {st.error}</span>
-                          {!st.toolUsed && (
-                            <span className="crm-entity-hint">
-                              Expected tool: <code>{ENTITY_PREFS[e.type].preferred[0]}</code>
-                            </span>
-                          )}
-                        </div>
-                      ) : st.items.length === 0 ? (
-                        <div className="crm-entity-state crm-entity-empty">
-                          No {e.plural} found
-                        </div>
-                      ) : (
-                        <ul className="crm-item-list">
-                          {st.items.slice(0, 8).map((item, idx) => {
-                            const name = getItemName(item, idx);
-                            const id = getItemId(item);
-                            const status = getItemStatus(item);
-                            const isActive = status === "Active" || status === "true";
-                            return (
-                              <li key={idx} className="crm-item">
-                                <span className="crm-item-dot" />
-                                <span className="crm-item-name" title={id || name}>{name}</span>
-                                {status && (
-                                  <span className={`crm-item-status ${isActive ? "crm-status-active" : "crm-status-inactive"}`}>
-                                    {status}
-                                  </span>
-                                )}
-                              </li>
-                            );
-                          })}
-                          {st.items.length > 8 && (
-                            <li className="crm-item-more">+{st.items.length - 8} more {e.plural}</li>
-                          )}
-                        </ul>
-                      )}
-                      {st.toolUsed && !st.loading && (
-                        <p className="crm-tool-used">via <code>{st.toolUsed}</code></p>
-                      )}
-                    </div>
-                  )}
+                <div key={g.key} className="health-subscore-row" style={{ cursor: "default" }}>
+                  <span className="health-subscore-label">{g.label}</span>
+                  <span className="health-subscore-track">
+                    <span className="health-subscore-fill" style={{ width: `${pct}%` }} />
+                  </span>
+                  <span className="health-subscore-value">{healthResolved ? `${pct}%` : "—"}</span>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* Right: Zia Recommendations */}
+        <div className="business-view-section crm-vis-card">
+          <h3 className="business-view-section-title">Module Visibility</h3>
+          <div className="module-vis-bar">
+            <div className="module-vis-fill" style={{ width: `${100 - moduleVis.hiddenPct}%` }} />
+          </div>
+          {moduleVis.total === 0 ? (
+            <p className="business-view-hint">No modules found.</p>
+          ) : (
+            <div className="module-breakdown">
+              <div className="module-breakdown-row">
+                <span className="module-breakdown-label">Visible to users</span>
+                <span className="module-breakdown-value good">{moduleVis.visible} ({moduleVis.visiblePct}%)</span>
+              </div>
+              <div className="module-breakdown-row">
+                <span className="module-breakdown-label">Hidden modules</span>
+                <span className="module-breakdown-value critical">{moduleVis.hidden} ({moduleVis.hiddenPct}%)</span>
+              </div>
+              <div className="module-breakdown-row">
+                <span className="module-breakdown-label">Custom modules</span>
+                <span className="module-breakdown-value">{moduleVis.customCount} active</span>
+              </div>
+              <div className="module-breakdown-row">
+                <span className="module-breakdown-label">Blueprints active</span>
+                <span className="module-breakdown-value">
+                  {moduleVis.blueprintsTotal === 0 ? "N/A" : `${moduleVis.blueprintsActive} of ${moduleVis.blueprintsTotal} (${moduleVis.blueprintsPct}%)`}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="business-view-section crm-missing-card">
+          <h3 className="business-view-section-title">Missing Data</h3>
+          {missingData.length === 0 ? (
+            <p className="business-view-hint">No critical data gaps detected.</p>
+          ) : (
+            missingData.map(item => (
+              <div key={item.key} className={`missing-data-row sev-${item.severity}`}>
+                <span className="missing-data-msg">{item.message}</span>
+                <button className="btn-secondary missing-data-fix" onClick={() => onSelectSection(item.targetSection)}>
+                  Fix
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ── CRM Configuration summary ──────────────────────────────────────────── */}
+      <div className="business-view-section">
+        <h3 className="business-view-section-title">CRM Configuration</h3>
+        <div className="config-grid">
+          {configRows.map(row => {
+            const clickable = row.targetSection !== null;
+            return (
+              <div
+                key={row.key}
+                className={`config-tile config-${row.severity} ${clickable ? "clickable" : ""}`}
+                onClick={clickable ? () => onSelectSection(row.targetSection as Section) : undefined}
+              >
+                <span className="config-tile-label">{row.label}</span>
+                <span className="config-tile-value">{row.value}</span>
+                <span className="config-tile-status">{row.status}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Blueprints / Profiles / Users panels ───────────────────────────────── */}
+      <div className="crm-panels-row">
+        <div className="business-view-section crm-panel-card">
+          <h3 className="business-view-section-title">Blueprints</h3>
+          {blueprintItems.length === 0 ? (
+            <PanelEmptyState state={entityData.blueprints} label="Blueprints" onRetry={() => fetchEntity("blueprints")} />
+          ) : (
+            <>
+              <ul className="panel-item-list">
+                {blueprintItems.slice(0, 8).map((item, idx) => {
+                  const active = isActiveWorkflow(item);
+                  return (
+                    <li key={idx} className="panel-item-row">
+                      <span className="panel-item-name">{getItemName(item, idx)}</span>
+                      <span className={`panel-item-badge ${active ? "badge-active" : "badge-inactive"}`}>
+                        {active ? "Active" : "Inactive"}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {blueprintItems.length > 8 && (
+                <p className="panel-more">+{blueprintItems.length - 8} more</p>
+              )}
+              <button className="btn-secondary panel-remediate-btn" onClick={() => onSelectSection("blueprints")}>
+                Get remediation help
+              </button>
+            </>
+          )}
+        </div>
+
+        <div className="business-view-section crm-panel-card">
+          <h3 className="business-view-section-title">Profiles</h3>
+          {profileItems.length === 0 ? (
+            <PanelEmptyState state={entityData.profiles} label="Profiles" onRetry={() => fetchEntity("profiles")} />
+          ) : (
+            <ul className="panel-item-list">
+              {profileItems.map((item, idx) => {
+                const name = getItemName(item, idx);
+                const admin = isAdminProfile(item);
+                return (
+                  <li key={idx} className="panel-item-row">
+                    <span className="panel-avatar">{name.charAt(0).toUpperCase()}</span>
+                    <span className="panel-item-body">
+                      <span className="panel-item-name">{name}</span>
+                      <span className="panel-item-sub">{admin ? "Full system access" : "Standard access"}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+
+        <div className="business-view-section crm-panel-card">
+          <h3 className="business-view-section-title">Users</h3>
+          {userItemsForPanel.length === 0 ? (
+            <PanelEmptyState state={entityData.users} label="Users" onRetry={() => fetchEntity("users")} />
+          ) : (
+            <ul className="panel-item-list">
+              {userItemsForPanel.map((item, idx) => {
+                const name = getItemName(item, idx);
+                const r = (item ?? {}) as Record<string, unknown>;
+                const profileName = typeof r.profile === "object" && r.profile
+                  ? String((r.profile as Record<string, unknown>).name ?? "—")
+                  : String(r.role ?? "—");
+                const status = getItemStatus(item);
+                return (
+                  <li key={idx} className="panel-item-row">
+                    <span className="panel-avatar">{name.charAt(0).toUpperCase()}</span>
+                    <span className="panel-item-body">
+                      <span className="panel-item-name">{name}</span>
+                      <span className="panel-item-sub">{profileName}</span>
+                    </span>
+                    {status && (
+                      <span className={`panel-item-badge ${status === "Active" ? "badge-active" : "badge-inactive"}`}>
+                        {status}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* ── Zia Recommendations ─────────────────────────────────────────────── */}
+      <div className="crm-recs-section">
         <div className="crm-right">
           <div className="crm-right-header">
             <p className="crm-panel-label">Zia Recommendations</p>
@@ -984,13 +1046,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog }: Props) {
                     </span>
                   </div>
                   <p className="zia-rec-desc">{rec.description}</p>
+                  <button className="btn-secondary zia-rec-remediate" onClick={() => askZiaAbout(rec)}>
+                    Get remediation steps →
+                  </button>
                 </div>
               ))
             )}
           </div>
 
           {/* Ask Zia chat */}
-          <div className="zia-chat">
+          <div className="zia-chat" ref={ziaChatRef}>
             <p className="zia-chat-label">
               Ask Zia
               {ziaTool
@@ -1030,7 +1095,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog }: Props) {
               />
               <button
                 className="btn-connect"
-                onClick={sendToZia}
+                onClick={() => sendToZia()}
                 disabled={ziaLoading || !ziaInput.trim() || tools.length === 0}
               >
                 {ziaLoading ? <span className="spinner" /> : "Ask"}

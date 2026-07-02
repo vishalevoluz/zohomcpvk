@@ -13,7 +13,14 @@
       "Bash(git checkout *)",
       "Bash(git commit *)",
       "Bash(npx tsc *)",
-      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\(Object.keys\\(d.dependencies||{}\\).join\\('\\\\n'\\)\\)\")"
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\(Object.keys\\(d.dependencies||{}\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(npm i *)",
+      "Bash(vercel login *)",
+      "Bash(npm run *)",
+      "Bash(taskkill *)",
+      "Skill(run)",
+      "PowerShell(Stop-Process *)",
+      "Bash(npx eslint *)"
     ]
   }
 }
