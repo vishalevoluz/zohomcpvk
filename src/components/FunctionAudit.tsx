@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
-import EvoAiPopup, { type EvoAiTarget } from "@/components/EvoAiPopup";
 
 // Actual Zoho CRM workflow-function shape returned by the MCP tool
 interface ZohoFunction {
@@ -202,7 +201,6 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   const [functions, setFunctions] = useState<ZohoFunction[]>([]);
   const [filter, setFilter] = useState<FnFilterKey>("all");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [evoAiTarget, setEvoAiTarget] = useState<EvoAiTarget | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -432,9 +430,6 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                                 >⋯</button>
                                 {activeMenu === getAssociationId(fn) + i && (
                                   <div className="action-dropdown">
-                                    <button className="action-dropdown-item" onClick={() => { setEvoAiTarget({ data: fn as Record<string,unknown>, name: getFnName(fn), type: "function" }); setActiveMenu(null); }}>
-                                      <span className="action-icon">⚡</span>EvoAi Insights
-                                    </button>
                                     <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(getFnName(fn)); setActiveMenu(null); }}>
                                       <span className="action-icon">⎘</span>Copy Name
                                     </button>
@@ -455,15 +450,6 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
             )}
           </div>
         </>
-      )}
-
-      {evoAiTarget && (
-        <EvoAiPopup
-          config={config}
-          tools={allTools}
-          target={evoAiTarget}
-          onClose={() => setEvoAiTarget(null)}
-        />
       )}
     </div>
   );

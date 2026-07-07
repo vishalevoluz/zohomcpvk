@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
-import EvoAiPopup, { type EvoAiTarget } from "@/components/EvoAiPopup";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -599,7 +598,6 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   const [workflows, setWorkflows] = useState<ZohoWorkflow[]>([]);
   const [filter, setFilter] = useState<WFFilterKey>("all");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [evoAiTarget, setEvoAiTarget] = useState<EvoAiTarget | null>(null);
   const [detailWf, setDetailWf] = useState<ZohoWorkflow | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -938,9 +936,6 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
                                         <button className="action-dropdown-item" onClick={() => { setDetailWf(w); setActiveMenu(null); }}>
                                           <span className="action-icon">⟳</span>View Details
                                         </button>
-                                        <button className="action-dropdown-item" onClick={() => { setEvoAiTarget({ data: w as Record<string,unknown>, name: getName(w), type: "workflow" }); setActiveMenu(null); }}>
-                                          <span className="action-icon">⚡</span>EvoAi Insights
-                                        </button>
                                         {config.crmBaseUrl ? (
                                           <button className="action-dropdown-item" onClick={() => { window.open(`${config.crmBaseUrl}/Automation/ActiveWorkflowRules/detail/${w.id}`, "_blank"); setActiveMenu(null); }}>
                                             <span className="action-icon">↗</span>Open in CRM
@@ -1068,10 +1063,6 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
             setDetailWf(null);
           }}
         />
-      )}
-
-      {evoAiTarget && (
-        <EvoAiPopup config={config} tools={allTools} target={evoAiTarget} onClose={() => setEvoAiTarget(null)} />
       )}
     </div>
   );

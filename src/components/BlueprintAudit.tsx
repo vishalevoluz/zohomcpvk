@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
-import EvoAiPopup, { type EvoAiTarget } from "@/components/EvoAiPopup";
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -1029,7 +1028,6 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
   const [blueprints, setBlueprints] = useState<ZohoBlueprint[]>([]);
   const [filter, setFilter] = useState<BPFilterKey>("all");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const [evoAiTarget, setEvoAiTarget] = useState<EvoAiTarget | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Meta
@@ -1503,9 +1501,6 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
                                         <button className="action-dropdown-item" onClick={() => { setDetailBp(bp); setActiveMenu(null); }}>
                                           <span className="action-icon">◈</span>View Details
                                         </button>
-                                        <button className="action-dropdown-item" onClick={() => { setEvoAiTarget({ data: bp as Record<string,unknown>, name: getBPName(bp), type: "blueprint" }); setActiveMenu(null); }}>
-                                          <span className="action-icon">⚡</span>EvoAi Insights
-                                        </button>
                                         {!active && findTool(allTools, "activateBlueprint") && (
                                           <button className="action-dropdown-item" onClick={() => { setConfirmDialog({ type: "activate", bp, moveRecords: false, cloneType: "standalone" }); setActiveMenu(null); }}>
                                             <span className="action-icon">▶</span>Activate
@@ -1573,16 +1568,6 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
           onChange={updates => setConfirmDialog(prev => prev ? { ...prev, ...updates } : null)}
           onClose={() => setConfirmDialog(null)}
           loading={actionLoading}
-        />
-      )}
-
-      {/* EvoAi popup */}
-      {evoAiTarget && (
-        <EvoAiPopup
-          config={config}
-          tools={allTools}
-          target={evoAiTarget}
-          onClose={() => setEvoAiTarget(null)}
         />
       )}
     </div>

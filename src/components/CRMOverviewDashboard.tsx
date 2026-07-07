@@ -83,7 +83,11 @@ const CATEGORY_GROUPS: { key: string; label: string; dims: (keyof HealthScoreDim
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const ZIA_PATTERNS = [/\bzia\b/i, /recommend/i, /\banalyze\b/i, /\binsight/i, /\bsuggest/i];
+// No \b around these — tool names are camelCase/PascalCase (e.g. "getZiaInsights"),
+// so a word-boundary regex never matches inside the concatenated identifier.
+const ZIA_PATTERNS = [/zia/i, /recommend/i, /analy[sz]/i, /insight/i, /suggest/i];
+
+const QUERY_KEYS = ["query", "question", "prompt", "text", "message", "input", "search", "context"];
 
 const FB_CATEGORIES: { value: FeedbackCategory; label: string; icon: string }[] = [
   { value: "general",     label: "General",         icon: "◎" },
@@ -100,7 +104,38 @@ const FB_STORAGE_KEY = "zoho-crm-feedback";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function hasQueryField(tool: McpTool): boolean {
+  const props = tool.inputSchema?.properties ?? {};
+  return Object.keys(props).some(k => QUERY_KEYS.includes(k.toLowerCase()));
+}
+
+// Zoho API errors often come back as a JSON string inside the tool's text
+// output (e.g. {"code":"MANDATORY_NOT_FOUND",...}) — show it as a readable
+// message instead of dumping the raw JSON into the chat.
+function formatZiaResponseText(text: string): string {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const r = parsed as Record<string, unknown>;
+      if (r.status === "error" || (r.code && r.message)) {
+        const details = r.details && typeof r.details === "object"
+          ? Object.entries(r.details as Record<string, unknown>).map(([k, v]) => `${k}: ${v}`).join(", ")
+          : "";
+        return `⚠ ${String(r.message ?? "Request failed")}${r.code ? ` (${r.code})` : ""}${details ? `\n${details}` : ""}`;
+      }
+    }
+  } catch { /* not JSON, show as-is */ }
+  return text;
+}
+
 function findZiaTool(tools: McpTool[]): McpTool | null {
+  // Prefer a Zia-ish tool that actually accepts free text — avoids matching a
+  // structured CRUD tool (e.g. one requiring a "recommendations" record array)
+  // whose name/description merely contains a matching keyword.
+  for (const p of ZIA_PATTERNS) {
+    const t = tools.find(t => (p.test(t.name) || p.test(t.description ?? "")) && hasQueryField(t));
+    if (t) return t;
+  }
   for (const p of ZIA_PATTERNS) {
     const t = tools.find(t => p.test(t.name) || p.test(t.description ?? ""));
     if (t) return t;
@@ -572,6 +607,9 @@ function computeMissingData(entityData: Record<CrmEntityType, EntityState>): Mis
   for (const check of MISSING_DATA_CHECKS) {
     const st = entityData[check.type];
     if (!isEntityResolved(st) || st.items.length > 0) continue;
+    // No matching tool means we simply have no visibility into this entity —
+    // that's a tooling gap, not a real "missing data" finding, so don't flag it.
+    if (!st.toolUsed) continue;
     const message = st.error
       ? `${check.label} not found — ${st.error}`
       : `No ${check.label.toLowerCase()} configured`;
@@ -603,13 +641,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [ziaInput, setZiaInput] = useState("");
   const [ziaLoading, setZiaLoading] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const ziaChatRef = useRef<HTMLDivElement>(null);
+  const chatMessagesRef = useRef<HTMLDivElement>(null);
   const [feedbackEntries, setFeedbackEntries] = useState<FeedbackEntry[]>([]);
   const [feedbackForm, setFeedbackForm] = useState<{ name: string; category: FeedbackCategory; rating: number; message: string }>({
     name: "", category: "general", rating: 0, message: "",
   });
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "success">("idle");
+  const [remediation, setRemediation] = useState<Record<string, { loading: boolean; text: string }>>({});
 
   // Tick for relative-time display
   useEffect(() => {
@@ -617,27 +655,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     return () => clearInterval(id);
   }, []);
 
-  async function sendToZia(overrideText?: string) {
-    const q = (overrideText ?? ziaInput).trim();
-    if (!q || ziaLoading) return;
-    setZiaInput("");
-    setZiaMessages(prev => [...prev, { role: "user", content: q }]);
-
-    const ziaTool = findZiaTool(tools);
-    const tool = ziaTool ?? tools[0];
-
-    if (!tool) {
-      setZiaMessages(prev => [...prev, {
-        role: "zia",
-        content: "No MCP tools available. Please ensure your MCP server is connected.",
-      }]);
-      return;
-    }
-
-    setZiaLoading(true);
-    setZiaMessages(prev => [...prev, { role: "zia", content: "", isLoading: true }]);
-
-    // Build rich CRM context from all loaded entities
+  function buildCrmContext(): string {
     const ctxLines: string[] = ["=== CRM OVERVIEW ==="];
     for (const e of CRM_ENTITIES) {
       const st = entityData[e.type];
@@ -648,70 +666,120 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         .join(", ");
       ctxLines.push(`${e.label} (${st.items.length}): ${names}${st.items.length > 5 ? ", …" : ""}`);
     }
-    // Profiles detail
     const profItems = entityData.profiles.items;
     if (profItems.length > 0) {
       ctxLines.push(`Profile Names: ${profItems.map((p, i) => getItemName(p, i)).join(", ")}`);
     }
-    // Users detail
     const userItems = entityData.users.items;
     if (userItems.length > 0) {
       ctxLines.push(`Users (${userItems.length}): ${userItems.slice(0, 3).map((u, i) => getItemName(u, i)).join(", ")}${userItems.length > 3 ? ", …" : ""}`);
     }
-    // Pipelines detail
     const pipeItems = entityData.pipelines.items;
     if (pipeItems.length > 0) {
       ctxLines.push(`Pipeline Names: ${pipeItems.map((p, i) => getItemName(p, i)).join(", ")}`);
     }
-    const crmContext = ctxLines.join("\n");
+    return ctxLines.join("\n");
+  }
 
+  // Fills every property the tool's schema exposes (not just a free-text query
+  // field) so structural tools like a "ZiaRecommendation" create/action tool
+  // can still be called — e.g. a "recommendations" array field gets [{id}].
+  function buildZiaParams(tool: McpTool, question: string, recId?: string, recName?: string): Record<string, unknown> {
     const props = tool.inputSchema?.properties ?? {};
+    const required: string[] = tool.inputSchema?.required ?? [];
+    const allKeys = [...new Set([...required, ...Object.keys(props)])];
+    const fullText = `${question}\n\n${buildCrmContext()}`;
     const params: Record<string, unknown> = {};
-    const queryKey = Object.keys(props).find(k =>
-      ["query", "question", "prompt", "text", "message", "input", "search", "context"].includes(k.toLowerCase())
-    );
-    if (queryKey) {
-      params[queryKey] = `${q}\n\n${crmContext}`;
+
+    for (const key of allKeys) {
+      const lk = key.toLowerCase();
+      const propType = props[key]?.type ?? "string";
+      if (QUERY_KEYS.includes(lk)) {
+        params[key] = fullText;
+      } else if (lk === "recommendations" || (propType === "array" && lk.includes("recommend"))) {
+        params[key] = recId ? [{ id: recId }] : [];
+      } else if (lk === "id" || lk.endsWith("_id")) {
+        params[key] = recId ?? "";
+      } else if (lk.includes("name") && !lk.includes("api")) {
+        params[key] = recName ?? "";
+      } else if (propType === "array") {
+        params[key] = [];
+      } else if (propType === "object") {
+        params[key] = {};
+      } else {
+        params[key] = "";
+      }
     }
+    return params;
+  }
+
+  // Runs a question against the best available Zia-ish tool. Prefers a tool
+  // with genuine free-text input, but falls back to whatever Zia/recommend
+  // tool is connected — filling its full schema generically — rather than
+  // refusing to use it. Returns the formatted answer, or throws on failure.
+  async function runZiaQuery(question: string, recId?: string, recName?: string): Promise<string> {
+    const tool = findZiaTool(tools) ?? tools[0];
+    if (!tool) throw new Error("No MCP tools available. Please ensure your MCP server is connected.");
+
+    const params = buildZiaParams(tool, question, recId, recName);
+    const output = await executeTool(config, tool.name, params);
+    let text = "";
+    if (typeof output === "string") {
+      text = output;
+    } else if (output && typeof output === "object") {
+      const r = output as Record<string, unknown>;
+      if (Array.isArray(r.content)) {
+        text = (r.content as Record<string, unknown>[])
+          .filter(c => c.type === "text")
+          .map(c => String(c.text))
+          .join("\n");
+      } else {
+        text = String(r.message ?? r.result ?? r.text ?? JSON.stringify(output, null, 2));
+      }
+    }
+    return formatZiaResponseText(text) || "No response received from tool.";
+  }
+
+  async function sendToZia(overrideText?: string) {
+    const q = (overrideText ?? ziaInput).trim();
+    if (!q || ziaLoading) return;
+    setZiaInput("");
+    setZiaMessages(prev => [...prev, { role: "user", content: q }]);
+    setZiaLoading(true);
+    setZiaMessages(prev => [...prev, { role: "zia", content: "", isLoading: true }]);
 
     try {
-      const output = await executeTool(config, tool.name, params);
-      let text = "";
-      if (typeof output === "string") {
-        text = output;
-      } else if (output && typeof output === "object") {
-        const r = output as Record<string, unknown>;
-        if (Array.isArray(r.content)) {
-          text = (r.content as Record<string, unknown>[])
-            .filter(c => c.type === "text")
-            .map(c => String(c.text))
-            .join("\n");
-        } else {
-          text = String(r.message ?? r.result ?? r.text ?? JSON.stringify(output, null, 2));
-        }
-      }
-      setZiaMessages(prev => [
-        ...prev.slice(0, -1),
-        { role: "zia", content: text || "No response received from tool." },
-      ]);
+      const text = await runZiaQuery(q);
+      setZiaMessages(prev => [...prev.slice(0, -1), { role: "zia", content: text }]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Tool call failed";
-      setZiaMessages(prev => [
-        ...prev.slice(0, -1),
-        { role: "zia", content: `Error: ${msg}` },
-      ]);
+      setZiaMessages(prev => [...prev.slice(0, -1), { role: "zia", content: `⚠ ${msg}` }]);
     } finally {
       setZiaLoading(false);
     }
   }
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // Scroll only within the chat's own message list — never the page —
+    // and only once there's actually something to show (skip the empty initial mount).
+    if (ziaMessages.length === 0) return;
+    const el = chatMessagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [ziaMessages]);
 
-  function askZiaAbout(rec: Recommendation) {
-    ziaChatRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    sendToZia(`How do I fix "${rec.title}"? ${rec.description} Give me concrete remediation steps.`);
+  // Remediation answers render inline on the recommendation card itself —
+  // routing them into the shared Ask Zia chat (further down the page) meant
+  // clicking the button either forced an unwanted scroll or landed the user
+  // among unrelated Reports/Feedback content instead of the actual answer.
+  async function askZiaAbout(rec: Recommendation) {
+    setRemediation(prev => ({ ...prev, [rec.id]: { loading: true, text: "" } }));
+    try {
+      const text = await runZiaQuery(`How do I fix "${rec.title}"? ${rec.description} Give me concrete remediation steps.`, rec.id, rec.title);
+      setRemediation(prev => ({ ...prev, [rec.id]: { loading: false, text } }));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Tool call failed";
+      setRemediation(prev => ({ ...prev, [rec.id]: { loading: false, text: `⚠ ${msg}` } }));
+    }
   }
 
   void refreshTick; // used for relative time updates
@@ -765,25 +833,45 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     try { localStorage.setItem(FB_STORAGE_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
   }
 
+  function formatReportAsText(category: ReportTab, catRecs: Recommendation[]): string {
+    const lines: string[] = [];
+    const categoryLabel = category === "changes" ? "Changes" : category === "integrations" ? "Integrations" : "Architecture";
+    lines.push(`ZOHO CRM ${categoryLabel.toUpperCase()} REPORT`);
+    lines.push(`Generated: ${new Date().toISOString()}`);
+    lines.push("=".repeat(60));
+
+    lines.push("");
+    lines.push("CRM SUMMARY");
+    lines.push("-".repeat(60));
+    CRM_ENTITIES.forEach(e => {
+      const state = entityData[e.type];
+      const status = state.error ? `ERROR — ${state.error}` : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
+      lines.push(`${e.label.padEnd(14)} ${status}${state.toolUsed ? `  (via ${state.toolUsed})` : ""}`);
+    });
+
+    lines.push("");
+    lines.push(`RECOMMENDATIONS (${catRecs.length})`);
+    lines.push("-".repeat(60));
+    if (catRecs.length === 0) {
+      lines.push("No recommendations in this category.");
+    } else {
+      catRecs.forEach((r, i) => {
+        lines.push("");
+        lines.push(`[${i + 1}] ${r.title}  (${r.severity.toUpperCase()})`);
+        lines.push(r.description);
+      });
+    }
+
+    return lines.join("\n");
+  }
+
   function downloadReport(category: ReportTab) {
     const catRecs = recommendations.filter(r => r.category === category);
-    const report = {
-      generated: new Date().toISOString(),
-      category,
-      crmSummary: Object.fromEntries(
-        CRM_ENTITIES.map(e => [e.type, {
-          count: entityData[e.type].items.length,
-          toolUsed: entityData[e.type].toolUsed,
-          error: entityData[e.type].error,
-        }])
-      ),
-      recommendations: catRecs,
-    };
-    const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
+    const blob = new Blob([formatReportAsText(category, catRecs)], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `zoho-crm-${category}-report-${Date.now()}.json`;
+    a.download = `zoho-crm-${category}-report-${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -879,15 +967,21 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
 
         <div className="business-view-section crm-missing-card">
-          <h3 className="business-view-section-title">Missing Data</h3>
+          <div className="missing-data-header">
+            <h3 className="business-view-section-title" style={{ marginBottom: 0 }}>Missing Data</h3>
+            {missingData.length > 0 && <span className="crm-fb-count">{missingData.length}</span>}
+          </div>
+          <p className="business-view-hint" style={{ padding: "4px 0 8px" }}>
+            Flags CRM areas — stages, tasks, fields, pipelines — that have no data configured yet, so you can spot and address gaps.
+          </p>
           {missingData.length === 0 ? (
             <p className="business-view-hint">No critical data gaps detected.</p>
           ) : (
             missingData.map(item => (
               <div key={item.key} className={`missing-data-row sev-${item.severity}`}>
                 <span className="missing-data-msg">{item.message}</span>
-                <button className="btn-secondary missing-data-fix" onClick={() => onSelectSection(item.targetSection)}>
-                  Fix
+                <button className="btn-secondary missing-data-view" onClick={() => onSelectSection(item.targetSection)}>
+                  View
                 </button>
               </div>
             ))
@@ -1036,26 +1130,36 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             {filteredRecs.length === 0 ? (
               <div className="zia-recs-empty">No recommendations for this category.</div>
             ) : (
-              filteredRecs.map(rec => (
-                <div key={rec.id} className={`zia-rec zia-rec-${rec.severity}`}>
-                  <div className="zia-rec-header">
-                    <span className="zia-rec-icon">{rec.icon}</span>
-                    <span className="zia-rec-title">{rec.title}</span>
-                    <span className={`zia-rec-sev sev-${rec.severity}`}>
-                      {rec.severity === "high" ? "HIGH" : rec.severity === "medium" ? "MED" : "LOW"}
-                    </span>
+              filteredRecs.map(rec => {
+                const rem = remediation[rec.id];
+                return (
+                  <div key={rec.id} className={`zia-rec zia-rec-${rec.severity}`}>
+                    <div className="zia-rec-header">
+                      <span className="zia-rec-icon">{rec.icon}</span>
+                      <span className="zia-rec-title">{rec.title}</span>
+                      <span className={`zia-rec-sev sev-${rec.severity}`}>
+                        {rec.severity === "high" ? "HIGH" : rec.severity === "medium" ? "MED" : "LOW"}
+                      </span>
+                    </div>
+                    <p className="zia-rec-desc">{rec.description}</p>
+                    <button
+                      className="btn-secondary zia-rec-remediate"
+                      onClick={() => askZiaAbout(rec)}
+                      disabled={rem?.loading}
+                    >
+                      {rem?.loading ? <span className="spinner" /> : rem ? "↺ Get remediation steps →" : "Get remediation steps →"}
+                    </button>
+                    {rem && !rem.loading && (
+                      <div className="zia-rec-remediation">{rem.text}</div>
+                    )}
                   </div>
-                  <p className="zia-rec-desc">{rec.description}</p>
-                  <button className="btn-secondary zia-rec-remediate" onClick={() => askZiaAbout(rec)}>
-                    Get remediation steps →
-                  </button>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
           {/* Ask Zia chat */}
-          <div className="zia-chat" ref={ziaChatRef}>
+          <div className="zia-chat">
             <p className="zia-chat-label">
               Ask Zia
               {ziaTool
@@ -1065,7 +1169,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   : null
               }
             </p>
-            <div className="zia-chat-messages">
+            <div className="zia-chat-messages" ref={chatMessagesRef}>
               {ziaMessages.length === 0 ? (
                 <div className="zia-chat-empty">
                   Ask Zia anything about your CRM — process gaps, optimization ideas, or specific entities.
@@ -1081,7 +1185,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   </div>
                 ))
               )}
-              <div ref={messagesEndRef} />
             </div>
             <div className="zia-input-row">
               <input
@@ -1142,7 +1245,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   )}
                 </ul>
                 <button className="btn-secondary crm-report-btn" onClick={() => downloadReport(cat)}>
-                  ↓ Download JSON Report
+                  ↓ Download TXT Report
                 </button>
               </div>
             );

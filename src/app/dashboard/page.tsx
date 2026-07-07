@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useLayoutEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { SECTIONS, categorizeTools, type Section } from "@/lib/sections";
 import ConnectionForm from "@/components/ConnectionForm";
@@ -16,7 +16,7 @@ import AuditLogs from "@/components/AuditLogs";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
 import CRMOverviewDashboard from "@/components/CRMOverviewDashboard";
 import BusinessView from "@/components/BusinessView";
-import { useCrmEntities } from "@/lib/useCrmEntities";
+import { useCrmEntities, CRM_ENTITIES, isEntityResolved } from "@/lib/useCrmEntities";
 
 export default function DashboardPage() {
   const [config, setConfig] = useState<McpConfig | null>(null);
@@ -28,6 +28,20 @@ export default function DashboardPage() {
   const categorized = useMemo(() => categorizeTools(tools), [tools]);
   const activeSectionDef = SECTIONS.find(s => s.id === activeSection)!;
   const crm = useCrmEntities(config, tools, onLog);
+
+  const resolvedEntityCount = CRM_ENTITIES.filter(e => isEntityResolved(crm.entityData[e.type])).length;
+  const isPrefetching = !!config && resolvedEntityCount < CRM_ENTITIES.length;
+
+  const wasConnected = useRef(false);
+  useLayoutEffect(() => {
+    // Newly-mounted dashboard content pushes page height way past the connect
+    // form's — keep the viewport pinned where the user was instead of letting
+    // the browser jump it around as that content streams in.
+    if (config && !wasConnected.current) {
+      window.scrollTo({ top: 0 });
+    }
+    wasConnected.current = !!config;
+  }, [config]);
 
   function onConnected(cfg: McpConfig, t: McpTool[]) {
     setConfig(cfg);
@@ -66,7 +80,26 @@ export default function DashboardPage() {
       <div className="app-main">
         {/* Connection bar — always visible at the top */}
         {config ? (
-          <ConnectedStatus config={config} onDisconnect={onDisconnect} />
+          <>
+            <ConnectedStatus config={config} onDisconnect={onDisconnect} />
+            {isPrefetching && (
+              <div className="connect-progress">
+                <span className="spinner" />
+                <span className="connect-progress-label">
+                  Loading {resolvedEntityCount}/{CRM_ENTITIES.length} data sources…
+                </span>
+                <div className="connect-progress-track">
+                  <div
+                    className="connect-progress-fill"
+                    style={{ width: `${(resolvedEntityCount / CRM_ENTITIES.length) * 100}%` }}
+                  />
+                </div>
+                <span className="connect-progress-pct">
+                  {Math.round((resolvedEntityCount / CRM_ENTITIES.length) * 100)}%
+                </span>
+              </div>
+            )}
+          </>
         ) : (
           <div className="main-connection">
             <p className="main-connection-label">Connection</p>

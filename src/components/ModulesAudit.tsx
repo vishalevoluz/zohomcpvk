@@ -175,18 +175,24 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
 
   useEffect(() => {
     const t = pickDefaultTool(tools);
-    setSelectedTools(t ? [t.name] : []);
+    const toolNames = t ? [t.name] : [];
+    setSelectedTools(toolNames);
     setModules([]);
     setError("");
-  }, [tools]);
+    // Auto-load as soon as tools are available (MCP just connected)
+    if (toolNames.length > 0) {
+      void loadModules(toolNames);
+    }
+  }, [tools]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadModules() {
-    if (selectedTools.length === 0) return;
+  async function loadModules(overrideTools?: string[]) {
+    const toolsToUse = overrideTools ?? selectedTools;
+    if (toolsToUse.length === 0) return;
     setLoading(true);
     setError("");
     try {
       const allMods: ZohoModule[] = [];
-      for (const toolName of selectedTools) {
+      for (const toolName of toolsToUse) {
         const start = Date.now();
         try {
           const output = await executeTool(config, toolName, {});
@@ -199,7 +205,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
         }
       }
       if (allMods.length === 0) {
-        setError(`No module data found in selected tool${selectedTools.length > 1 ? "s" : ""}.`);
+        setError(`No module data found in selected tool${toolsToUse.length > 1 ? "s" : ""}.`);
       } else {
         setModules(allMods);
         setFilter("all");
@@ -271,7 +277,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
           ) : (
             <span className="no-tools-hint">No module tools found — check connection</span>
           )}
-          <button onClick={loadModules} disabled={loading || selectedTools.length === 0} className="btn-connect">
+          <button onClick={() => void loadModules()} disabled={loading || selectedTools.length === 0} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : modules.length ? "Reload" : "Load Modules"}
           </button>
         </div>

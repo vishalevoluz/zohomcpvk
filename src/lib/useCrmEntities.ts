@@ -6,7 +6,7 @@ import { executeTool } from "@/lib/zohoMcp";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type CrmEntityType = "blueprints" | "modules" | "layouts" | "tasks" | "pipelines" | "stages" | "workflows" | "profiles" | "users" | "fields";
+export type CrmEntityType = "blueprints" | "modules" | "layouts" | "tasks" | "pipelines" | "stages" | "workflows" | "profiles" | "users" | "roles" | "fields";
 
 export interface EntityState {
   items: unknown[];
@@ -29,6 +29,7 @@ export const CRM_ENTITIES: { type: CrmEntityType; label: string; icon: string; p
   { type: "fields",     label: "Fields",     icon: "▤", plural: "fields" },
   { type: "profiles",   label: "Profiles",   icon: "◑", plural: "profiles" },
   { type: "users",      label: "Users",      icon: "◎", plural: "users" },
+  { type: "roles",      label: "Roles",      icon: "◒", plural: "roles" },
   { type: "tasks",      label: "Tasks",      icon: "✓", plural: "tasks" },
 ];
 
@@ -68,6 +69,10 @@ export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns
   users: {
     preferred: ["getUser", "getUsers", "getAllUsers", "listUsers", "getCRMUsers", "getUserList"],
     patterns: [/getuser(?!byid|profile|pref)/i, /listuser/i, /alluser/i],
+  },
+  roles: {
+    preferred: ["getRole", "getRoles", "getAllRoles", "listRoles", "getCRMRoles", "getRoleList"],
+    patterns: [/getrole(?!byid)/i, /listrole/i, /allrole/i, /role/i],
   },
   fields: {
     preferred: ["getFields", "getAllFields", "listFields", "getModuleFields", "getCRMFields"],
@@ -121,13 +126,26 @@ export function extractArray(output: unknown): unknown[] {
   return [];
 }
 
+function nestedName(val: unknown): string | undefined {
+  if (!val || typeof val !== "object") return undefined;
+  const r = val as Record<string, unknown>;
+  const n = r.name ?? r.display_label ?? r.field_label ?? r.plural_label;
+  return typeof n === "string" && n ? n : undefined;
+}
+
 export function getItemName(item: unknown, idx: number): string {
   if (!item || typeof item !== "object") return `Item ${idx + 1}`;
   const r = item as Record<string, unknown>;
+  const fullName = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
   return String(
     r.name ?? r.display_name ?? r.label ?? r.api_name ??
     r.workflow_name ?? r.blueprint_name ?? r.pipeline_name ??
-    r.stage_name ?? r.title ?? `Item ${idx + 1}`
+    r.stage_name ?? r.title ?? r.full_name ?? (fullName || undefined) ??
+    r.email ??
+    // Zoho Blueprint list responses don't always carry a top-level name —
+    // fall back to the driving field/layout/process label before giving up.
+    nestedName(r.process_info) ?? nestedName(r.field) ?? nestedName(r.layout) ??
+    `Item ${idx + 1}`
   );
 }
 
@@ -168,6 +186,7 @@ function makeInitial(): Record<CrmEntityType, EntityState> {
     workflows:  { ...INIT_STATE },
     profiles:   { ...INIT_STATE },
     users:      { ...INIT_STATE },
+    roles:      { ...INIT_STATE },
     fields:     { ...INIT_STATE },
   };
 }
