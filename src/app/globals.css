@@ -2171,18 +2171,84 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .panel-remediate-btn { margin-top: 10px; align-self: flex-start; }
 .panel-empty-error { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 
-.zia-rec-remediate { margin-top: 8px; padding: 4px 10px; font-size: 12px; }
+.zia-rec-remediate {
+  margin-top: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: transparent;
+}
+.zia-rec-remediate:hover:not(:disabled) { opacity: 0.85; background: var(--color-accent-bg); }
+
+@keyframes zia-rec-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .zia-rec-remediation {
-  margin-top: 8px;
-  padding: 10px 12px;
+  margin-top: 10px;
+  padding: 12px 14px 10px;
   border: 0.5px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
   border-radius: var(--radius-md);
-  background: var(--color-bg);
+  background: linear-gradient(180deg, var(--color-accent-bg) 0%, var(--color-bg) 70%);
   font-size: 13px;
-  line-height: 1.5;
   color: var(--color-text);
+  animation: zia-rec-fade-in 0.22s ease;
+}
+
+.zia-rec-remediation-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.zia-rec-remediation-icon { font-size: 12px; }
+
+.zia-rec-remediation-body {
+  line-height: 1.6;
   white-space: pre-wrap;
+  color: var(--color-text);
+}
+
+.zia-rec-token-usage {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 0.5px dashed var(--color-border);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.zia-rec-token-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.zia-rec-token-detail,
+.zia-rec-token-model {
+  font-size: 10.5px;
+  color: var(--color-text-tertiary);
+}
+
+.zia-rec-token-model::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--color-text-tertiary);
 }
 
 /* Module visibility breakdown */

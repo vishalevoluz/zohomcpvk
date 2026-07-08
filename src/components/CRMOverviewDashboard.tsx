@@ -647,7 +647,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     name: "", category: "general", rating: 0, message: "",
   });
   const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "success">("idle");
-  const [remediation, setRemediation] = useState<Record<string, { loading: boolean; text: string }>>({});
+  const [remediation, setRemediation] = useState<Record<string, {
+    loading: boolean;
+    text: string;
+    usage?: { inputTokens: number; outputTokens: number; model: string };
+  }>>({});
 
   // Tick for relative-time display
   useEffect(() => {
@@ -771,13 +775,25 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // routing them into the shared Ask Zia chat (further down the page) meant
   // clicking the button either forced an unwanted scroll or landed the user
   // among unrelated Reports/Feedback content instead of the actual answer.
+  //
+  // This is the only place in the dashboard that calls Claude directly rather
+  // than a connected Zia/MCP tool: "how do I fix this" is a pure explain task
+  // with no need to touch live CRM data, so it doesn't depend on the guesswork
+  // in findZiaTool/runZiaQuery (which can fall back to an unrelated, possibly
+  // mutating tool if no genuine Zia tool is connected).
   async function askZiaAbout(rec: Recommendation) {
     setRemediation(prev => ({ ...prev, [rec.id]: { loading: true, text: "" } }));
     try {
-      const text = await runZiaQuery(`How do I fix "${rec.title}"? ${rec.description} Give me concrete remediation steps.`, rec.id, rec.title);
-      setRemediation(prev => ({ ...prev, [rec.id]: { loading: false, text } }));
+      const res = await fetch("/api/remediation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: rec.title, description: rec.description, context: buildCrmContext() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setRemediation(prev => ({ ...prev, [rec.id]: { loading: false, text: data.text, usage: data.usage } }));
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Tool call failed";
+      const msg = e instanceof Error ? e.message : "Remediation request failed";
       setRemediation(prev => ({ ...prev, [rec.id]: { loading: false, text: `⚠ ${msg}` } }));
     }
   }
@@ -1150,7 +1166,24 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                       {rem?.loading ? <span className="spinner" /> : rem ? "↺ Get remediation steps →" : "Get remediation steps →"}
                     </button>
                     {rem && !rem.loading && (
-                      <div className="zia-rec-remediation">{rem.text}</div>
+                      <div className="zia-rec-remediation">
+                        <div className="zia-rec-remediation-header">
+                          <span className="zia-rec-remediation-icon">✦</span>
+                          <span>Remediation steps</span>
+                        </div>
+                        <div className="zia-rec-remediation-body">{rem.text}</div>
+                        {rem.usage && (
+                          <div className="zia-rec-token-usage">
+                            <span className="zia-rec-token-pill">
+                              {rem.usage.inputTokens + rem.usage.outputTokens} tokens
+                            </span>
+                            <span className="zia-rec-token-detail">
+                              {rem.usage.inputTokens} in · {rem.usage.outputTokens} out
+                            </span>
+                            <span className="zia-rec-token-model">{rem.usage.model}</span>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                 );
