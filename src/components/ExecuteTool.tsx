@@ -76,14 +76,28 @@ export default function ExecuteTool({ config, tools, selectedTool, onLog }: Prop
       {currentTool?.inputSchema?.properties && (
         <div className="schema-hints">
           <p className="field-label">Parameters</p>
-          {Object.entries(currentTool.inputSchema.properties).map(([k, v]) => (
-            <div key={k} className="schema-row">
-              <code className="param-name">{k}</code>
-              <span className="param-type">{v.type}</span>
-              {currentTool.inputSchema?.required?.includes(k) && <span className="required-badge">required</span>}
-              {v.description && <span className="param-desc">{v.description}</span>}
-            </div>
-          ))}
+          {Object.entries(currentTool.inputSchema.properties).flatMap(([k, v]) => {
+            // Some servers group params by request location (path_variables/query_params/
+            // body/headers) instead of a flat bag — show the nested params, not the group.
+            if (v.type === "object" && v.properties) {
+              return Object.entries(v.properties).map(([nk, nv]) => (
+                <div key={`${k}.${nk}`} className="schema-row">
+                  <code className="param-name">{k}.{nk}</code>
+                  <span className="param-type">{nv.type}</span>
+                  {v.required?.includes(nk) && <span className="required-badge">required</span>}
+                  {nv.description && <span className="param-desc">{nv.description}</span>}
+                </div>
+              ));
+            }
+            return [(
+              <div key={k} className="schema-row">
+                <code className="param-name">{k}</code>
+                <span className="param-type">{v.type}</span>
+                {currentTool.inputSchema?.required?.includes(k) && <span className="required-badge">required</span>}
+                {v.description && <span className="param-desc">{v.description}</span>}
+              </div>
+            )];
+          })}
         </div>
       )}
 

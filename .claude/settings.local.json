@@ -20,7 +20,14 @@
       "Bash(taskkill *)",
       "Skill(run)",
       "PowerShell(Stop-Process *)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3002/dashboard --max-time 5)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/dashboard --max-time 5)",
+      "Bash(env)",
+      "Bash(curl *)",
+      "Bash(tasklist *)",
+      "Bash(node *)",
+      "Bash(npx next *)"
     ]
   }
 }

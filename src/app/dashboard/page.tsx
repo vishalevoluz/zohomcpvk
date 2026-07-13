@@ -17,6 +17,9 @@ import IntegrationsPanel from "@/components/IntegrationsPanel";
 import CRMOverviewDashboard from "@/components/CRMOverviewDashboard";
 import BusinessView from "@/components/BusinessView";
 import { useCrmEntities, CRM_ENTITIES, isEntityResolved } from "@/lib/useCrmEntities";
+import { useCrmRecordSamples } from "@/lib/useCrmRecordSamples";
+import { usePipelineStages } from "@/lib/usePipelineStages";
+import { findDealsApiName } from "@/lib/flowMapModel";
 
 export default function DashboardPage() {
   const [config, setConfig] = useState<McpConfig | null>(null);
@@ -28,6 +31,22 @@ export default function DashboardPage() {
   const categorized = useMemo(() => categorizeTools(tools), [tools]);
   const activeSectionDef = SECTIONS.find(s => s.id === activeSection)!;
   const crm = useCrmEntities(config, tools, onLog);
+  const crmRecords = useCrmRecordSamples(
+    config,
+    tools,
+    crm.entityData.modules.items,
+    isEntityResolved(crm.entityData.modules),
+    crm.entityData.blueprints.items,
+    onLog,
+  );
+  const dealsApiName = findDealsApiName(crm.entityData);
+  const pipelineStages = usePipelineStages(config, tools, dealsApiName, onLog);
+
+  function fetchAllData() {
+    crm.fetchAll();
+    crmRecords.refetch();
+    pipelineStages.refetch();
+  }
 
   const resolvedEntityCount = CRM_ENTITIES.filter(e => isEntityResolved(crm.entityData[e.type])).length;
   const isPrefetching = !!config && resolvedEntityCount < CRM_ENTITIES.length;
@@ -113,7 +132,9 @@ export default function DashboardPage() {
             <div style={{ display: activeSection === "crm-dashboard" ? undefined : "none" }}>
               <BusinessView
                 entityData={crm.entityData}
-                fetchAll={crm.fetchAll}
+                recordSamples={crmRecords.data}
+                pipelineStages={pipelineStages.data}
+                fetchAll={fetchAllData}
                 onSelectSection={onSelectSection}
               />
               <CRMOverviewDashboard
@@ -122,7 +143,7 @@ export default function DashboardPage() {
                 onLog={onLog}
                 entityData={crm.entityData}
                 fetchEntity={crm.fetchEntity}
-                fetchAll={crm.fetchAll}
+                fetchAll={fetchAllData}
                 lastRefresh={crm.lastRefresh}
                 onSelectSection={onSelectSection}
               />

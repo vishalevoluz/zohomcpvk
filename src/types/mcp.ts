@@ -1,9 +1,21 @@
+// Some MCP servers (e.g. Zoho's) don't expose a flat property bag — they group
+// arguments by request location (path_variables / query_params / body / headers),
+// each itself a nested object schema. `properties`/`required` model that recursively.
+export interface McpSchemaProperty {
+  type: string;
+  description?: string;
+  example?: unknown;
+  enum?: unknown[];
+  properties?: Record<string, McpSchemaProperty>;
+  required?: string[];
+}
+
 export interface McpTool {
   name: string;
   description?: string;
   inputSchema?: {
     type: string;
-    properties?: Record<string, { type: string; description?: string; example?: unknown }>;
+    properties?: Record<string, McpSchemaProperty>;
     required?: string[];
   };
 }

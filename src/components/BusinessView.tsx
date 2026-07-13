@@ -5,13 +5,15 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
 import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions } from "@/lib/businessScore";
-import { buildFlowMap, FLOW_MAP_ENTITIES, type FlowNode, type FlowLane } from "@/lib/flowMapModel";
+import { buildFlowMap, buildFlowReport, FLOW_MAP_ENTITIES, type FlowNode, type FlowLane, type RecordSampleStageId, type RecordSampleState, type PipelineStagesState } from "@/lib/flowMapModel";
 import { evaluateCostCards } from "@/lib/costCards";
 import { computeTopActions } from "@/lib/priorityActions";
 import HealthGauge from "@/components/HealthGauge";
 
 interface Props {
   entityData: Record<CrmEntityType, EntityState>;
+  recordSamples: Record<RecordSampleStageId, RecordSampleState>;
+  pipelineStages: PipelineStagesState;
   fetchAll: () => void;
   onSelectSection: (s: Section) => void;
 }
@@ -82,12 +84,13 @@ const LANE_ROW_H = 64;
 const LANE_GAP = 22;
 const LANE_BLOCK_H = LANE_LABEL_H + LANE_ROW_H + LANE_GAP;
 const COL_W = 168;
+const MAX_COL_W = 260;
 const NODE_W = 148;
 const NODE_H = 52;
 const MARGIN_L = 20;
 const MARGIN_R = 40;
 
-function nodeX(node: FlowNode): number { return MARGIN_L + node.col * COL_W; }
+function nodeX(node: FlowNode, colW: number): number { return MARGIN_L + node.col * colW; }
 function nodeY(node: FlowNode): number {
   const laneIdx = FLOW_LANES.findIndex(l => l.id === node.lane);
   return laneIdx * LANE_BLOCK_H + LANE_LABEL_H;
@@ -126,19 +129,50 @@ function CostCard({ card }: { card: { id: string; icon: string; headline: string
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function BusinessView({ entityData, fetchAll, onSelectSection }: Props) {
+export default function BusinessView({ entityData, recordSamples, pipelineStages, fetchAll, onSelectSection }: Props) {
   const [displayScore, setDisplayScore] = useState(0);
   const [costCardsExpanded, setCostCardsExpanded] = useState(false);
   const [selectedFlowNodeId, setSelectedFlowNodeId] = useState<string | null>(null);
   const [flowExpanded, setFlowExpanded] = useState(false);
+  const [flowMinimized, setFlowMinimized] = useState(false);
+  const [flowContainerWidth, setFlowContainerWidth] = useState(0);
   const priorityRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const flowScrollRef = useRef<HTMLDivElement | null>(null);
+  const flowScrollInitialized = useRef(false);
 
   const healthResolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t]));
   const healthScore = useMemo(() => computeHealthScore(entityData), [entityData]);
   const flowResolved = FLOW_MAP_ENTITIES.some(t => isEntityResolved(entityData[t]));
-  const flowMap = useMemo(() => buildFlowMap(entityData), [entityData]);
+  const flowMap = useMemo(
+    () => buildFlowMap(entityData, recordSamples, pipelineStages),
+    [entityData, recordSamples, pipelineStages],
+  );
   const costCards = useMemo(() => evaluateCostCards(entityData), [entityData]);
   const priorityResult = useMemo(() => computeTopActions(entityData), [entityData]);
+  const flowReport = useMemo(() => buildFlowReport(flowMap), [flowMap]);
+
+  useEffect(() => {
+    const el = flowScrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) setFlowContainerWidth(entry.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [flowExpanded]);
+
+  // Force the diagram to open fully left-aligned on first paint (and while
+  // still loading) rather than trusting the browser's default scroll
+  // position, which can start mid-scroll when the canvas is wider than the
+  // viewport. Stop re-forcing it once real nodes have rendered so a later
+  // data refresh doesn't yank the view back if the user scrolled manually.
+  useEffect(() => {
+    if (flowScrollInitialized.current) return;
+    const el = flowScrollRef.current;
+    if (!el) return;
+    el.scrollLeft = 0;
+    if (flowMap.nodes.length > 0) flowScrollInitialized.current = true;
+  }, [flowMap]);
 
   useEffect(() => {
     if (!healthResolved) { setDisplayScore(0); return; }
@@ -154,8 +188,22 @@ export default function BusinessView({ entityData, fetchAll, onSelectSection }: 
 
   const selectedNode = flowMap.nodes.find(n => n.id === selectedFlowNodeId) ?? null;
 
-  const flowWidth = MARGIN_L + MARGIN_R + (Math.max(0, ...flowMap.nodes.map(n => n.col)) + 1) * COL_W;
+  const numCols = Math.max(0, ...flowMap.nodes.map(n => n.col)) + 1;
+  // Stretch column spacing to fill the available card width (capped so nodes
+  // don't end up absurdly far apart on very wide screens), so the diagram
+  // fills the card edge-to-edge instead of sitting cramped on the left.
+  const colW = flowContainerWidth > 0
+    ? Math.min(MAX_COL_W, Math.max(COL_W, (flowContainerWidth - MARGIN_L - MARGIN_R) / numCols))
+    : COL_W;
+  const flowWidth = MARGIN_L + MARGIN_R + numCols * colW;
   const flowHeight = FLOW_LANES.length * LANE_BLOCK_H;
+  // Only center the canvas when it actually fits inside the viewport. Centering
+  // an overflowing flex child via `justify-content: center` clips its start
+  // edge outside the reachable scroll range in most browsers — the diagram's
+  // leftmost column (Leads, Contacts) would render partly off-screen with no
+  // way to scroll to it. Left-align instead whenever the canvas is wider than
+  // its container so scrollLeft: 0 always shows the true left edge.
+  const flowFits = flowContainerWidth > 0 && flowWidth <= flowContainerWidth;
 
   return (
     <div className="business-view">
@@ -200,14 +248,23 @@ export default function BusinessView({ entityData, fetchAll, onSelectSection }: 
       </div>
 
       {/* ── 2. Business Process Flow Map ── */}
-      <div className={`business-view-section flow-map-card ${flowExpanded ? "expanded" : ""}`}>
+      <div className={`business-view-section flow-map-card ${flowExpanded ? "expanded" : ""} ${flowMinimized ? "minimized" : ""}`}>
         <div className="flow-map-toolbar">
           <SectionTitle text="How a Lead Moves Through Your Business" tooltip="How does a lead move through my business end to end — where does it break down, and what's automated vs. manual?" />
-          <button className="flow-map-expand-btn" title={flowExpanded ? "Collapse" : "Expand"} onClick={() => setFlowExpanded(v => !v)}>
-            {flowExpanded ? "⤡" : "⤢"}
-          </button>
+          <div className="flow-map-toolbar-actions">
+            <button className="flow-map-expand-btn" title={flowMinimized ? "Restore" : "Minimize"} onClick={() => setFlowMinimized(v => !v)}>
+              {flowMinimized ? "▸" : "▾"}
+            </button>
+            {!flowMinimized && (
+              <button className="flow-map-expand-btn" title={flowExpanded ? "Collapse" : "Expand"} onClick={() => setFlowExpanded(v => !v)}>
+                {flowExpanded ? "⤡" : "⤢"}
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flow-map-scroll">
+        {!flowMinimized && (
+        <>
+        <div className="flow-map-scroll" ref={flowScrollRef} style={{ justifyContent: flowFits ? "center" : "flex-start" }}>
           <div className="flow-map-canvas" style={{ width: flowWidth, height: flowHeight }}>
             {FLOW_LANES.map((lane, i) => (
               <div key={lane.id} className="flow-lane-label" style={{ top: i * LANE_BLOCK_H }}>{lane.label}</div>
@@ -217,11 +274,12 @@ export default function BusinessView({ entityData, fetchAll, onSelectSection }: 
                 const from = flowMap.nodes.find(n => n.id === edge.from);
                 const to = flowMap.nodes.find(n => n.id === edge.to);
                 if (!from || !to) return null;
-                const x1 = nodeX(from) + NODE_W / 2, y1 = nodeY(from) + NODE_H;
-                const x2 = nodeX(to) + NODE_W / 2, y2 = nodeY(to);
+                const x1 = nodeX(from, colW) + NODE_W / 2, y1 = nodeY(from) + NODE_H;
+                const x2 = nodeX(to, colW) + NODE_W / 2, y2 = nodeY(to);
                 const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
                 return (
                   <g key={edge.id} className={`flow-edge-${edge.kind}`}>
+                    {edge.detail && <title>{edge.detail}</title>}
                     <path d={edgePath(x1, y1, x2, y2)} />
                     {edge.kind === "broken" && (
                       <text x={midX} y={midY} textAnchor="middle" className="flow-edge-break-mark">✕</text>
@@ -234,7 +292,7 @@ export default function BusinessView({ entityData, fetchAll, onSelectSection }: 
               <button
                 key={node.id}
                 className={`flow-node status-${node.status} ${selectedFlowNodeId === node.id ? "selected" : ""}`}
-                style={{ left: nodeX(node), top: nodeY(node), width: NODE_W, height: NODE_H }}
+                style={{ left: nodeX(node, colW), top: nodeY(node), width: NODE_W, height: NODE_H }}
                 onClick={() => setSelectedFlowNodeId(node.id === selectedFlowNodeId ? null : node.id)}
                 data-tooltip={node.detail}
               >
@@ -251,12 +309,57 @@ export default function BusinessView({ entityData, fetchAll, onSelectSection }: 
               <span className={`flow-node-detail-status status-${selectedNode.status}`}>{statusLabel(selectedNode.status)}</span>
             </div>
             <p>{selectedNode.detail}</p>
+            {selectedNode.evidence && selectedNode.evidence.length > 0 && (
+              <ul className="flow-node-evidence">
+                {selectedNode.evidence.map((line, i) => <li key={i}>{line}</li>)}
+              </ul>
+            )}
             {selectedNode.targetSection && (
               <button className="btn-secondary" onClick={() => onSelectSection(selectedNode.targetSection as Section)}>
                 View in Audit
               </button>
             )}
           </div>
+        )}
+
+        {/* ── Report: plain-text summary of the same connection facts ── */}
+        <div className="flow-report">
+          <h4 className="flow-report-title">Report</h4>
+          <div className="flow-report-rows">
+            {flowReport.rows.map(row => (
+              <div key={row.id} className="flow-report-row">
+                <span className={`flow-report-dot status-${row.status}`} />
+                <div className="flow-report-row-body">
+                  <div className="flow-report-row-head">
+                    <strong>{row.label}</strong>
+                    <span className="flow-report-row-status">{statusLabel(row.status)}</span>
+                  </div>
+                  <p>{row.detail}</p>
+                  {row.automation && (
+                    <p className="flow-report-automation">
+                      <span className={`flow-report-dot small status-${row.automation.status}`} />
+                      Automation: {row.automation.detail}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div className="flow-report-row">
+              <span className={`flow-report-dot status-${flowReport.pipeline.status}`} />
+              <div className="flow-report-row-body">
+                <div className="flow-report-row-head">
+                  <strong>Pipeline Stages</strong>
+                  <span className="flow-report-row-status">{statusLabel(flowReport.pipeline.status)}</span>
+                </div>
+                <p>{flowReport.pipeline.detail}</p>
+                {flowReport.pipeline.stageNames.length > 0 && (
+                  <p className="flow-report-pipeline-chain">{flowReport.pipeline.stageNames.join(" → ")}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+        </>
         )}
       </div>
 

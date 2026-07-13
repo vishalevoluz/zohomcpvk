@@ -63,3 +63,21 @@ export function workflowReferencesModule(workflow: unknown, apiName: string): bo
   // Fallback for payload shapes where the module reference isn't under a known key
   return JSON.stringify(workflow ?? {}).toLowerCase().includes(apiName.toLowerCase());
 }
+
+// Blueprint list items carry the same shape of module reference as workflows
+// (a "module" key, string or {api_name}) — reuse the same matching logic.
+export function blueprintsForModule(blueprints: unknown[], apiName: string): unknown[] {
+  return blueprints.filter(bp => workflowReferencesModule(bp, apiName));
+}
+
+// The field a blueprint transitions records through (e.g. "Stage" for Deals,
+// "Status" for Tasks) — used to read each sampled record's current blueprint
+// state without a per-record blueprint API call.
+export function findBlueprintFieldApiName(blueprints: unknown[], apiName: string): string | null {
+  for (const bp of blueprintsForModule(blueprints, apiName)) {
+    const field = (bp as Record<string, unknown> | null)?.field as Record<string, unknown> | undefined;
+    const fieldApiName = field?.api_name;
+    if (typeof fieldApiName === "string" && fieldApiName) return fieldApiName;
+  }
+  return null;
+}
