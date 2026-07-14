@@ -286,13 +286,6 @@ function findTool(allTools: McpTool[], name: string): McpTool | undefined {
   return allTools.find(t => t.name === name);
 }
 
-// The connected MCP server's canonical "list blueprints" tool — preferred over
-// whatever happens to be first in the categorized tool list so autofill is deterministic.
-const BLUEPRINT_LIST_TOOL = "getBlueprint";
-function pickDefaultTool(tools: McpTool[]): string | undefined {
-  return tools.find(t => t.name === BLUEPRINT_LIST_TOOL)?.name ?? tools[0]?.name;
-}
-
 // ─── Analysis ────────────────────────────────────────────────────────────────
 
 interface BPAnalysis {
@@ -1019,10 +1012,7 @@ interface Props {
 // ─── Main BlueprintAudit component ───────────────────────────────────────────
 
 export default function BlueprintAudit({ config, tools, allTools, onLog }: Props) {
-  const [selectedTools, setSelectedTools] = useState<string[]>(() => {
-    const t = pickDefaultTool(tools);
-    return t ? [t] : [];
-  });
+  const [selectedTools, setSelectedTools] = useState<string[]>(() => tools.map(t => t.name));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [blueprints, setBlueprints] = useState<ZohoBlueprint[]>([]);
@@ -1067,8 +1057,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
   }, [activeMenu]);
 
   useEffect(() => {
-    const defaultTool = pickDefaultTool(tools);
-    const toolNames = defaultTool ? [defaultTool] : [];
+    const toolNames = tools.map(t => t.name);
     setSelectedTools(toolNames);
     setBlueprints([]);
     setError("");

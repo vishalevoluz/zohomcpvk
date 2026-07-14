@@ -48,13 +48,6 @@ interface ZohoModule {
   [key: string]: unknown;
 }
 
-// The connected MCP server's canonical "list modules" tool — preferred over
-// whatever happens to be first in the categorized tool list so the default is deterministic.
-const MODULES_LIST_TOOL = "ZohoCRM_getModules";
-function pickDefaultTool(tools: McpTool[]): McpTool | undefined {
-  return tools.find(t => t.name === MODULES_LIST_TOOL) ?? tools[0];
-}
-
 const STANDARD_MODULES = new Set([
   "Leads","Contacts","Accounts","Deals","Tasks","Events","Calls","Activities",
   "Notes","Attachments","Cases","Solutions","Products","Price_Books","Quotes",
@@ -149,10 +142,7 @@ interface Props {
 }
 
 export default function ModulesAudit({ config, tools, allTools, onLog }: Props) {
-  const [selectedTools, setSelectedTools] = useState<string[]>(() => {
-    const t = pickDefaultTool(tools);
-    return t ? [t.name] : [];
-  });
+  const [selectedTools, setSelectedTools] = useState<string[]>(() => tools.map(t => t.name));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [modules, setModules] = useState<ZohoModule[]>([]);
@@ -174,8 +164,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
   }, [activeMenu]);
 
   useEffect(() => {
-    const t = pickDefaultTool(tools);
-    const toolNames = t ? [t.name] : [];
+    const toolNames = tools.map(t => t.name);
     setSelectedTools(toolNames);
     setModules([]);
     setError("");

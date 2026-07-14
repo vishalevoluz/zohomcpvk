@@ -168,13 +168,6 @@ function hasInvalidBinding(f: ZohoFunction): boolean {
   return isLocked(f);
 }
 
-// The connected MCP server's canonical "list functions" tool — preferred over
-// whatever happens to be first in the categorized tool list so autofill is deterministic.
-const FUNCTIONS_LIST_TOOL = "ZohoCRM_getFunctions";
-function pickDefaultTool(tools: McpTool[]): McpTool | undefined {
-  return tools.find(t => t.name === FUNCTIONS_LIST_TOOL) ?? tools[0];
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type FnFilterKey = "all" | "unused" | "missing_ref" | "locked";
@@ -192,10 +185,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   const availableTools = tools.length > 0 ? tools : allTools;
   const usingFallback = tools.length === 0 && allTools.length > 0;
 
-  const [selectedTools, setSelectedTools] = useState<string[]>(() => {
-    const t = pickDefaultTool(availableTools);
-    return t ? [t.name] : [];
-  });
+  const [selectedTools, setSelectedTools] = useState<string[]>(() => availableTools.map(t => t.name));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [functions, setFunctions] = useState<ZohoFunction[]>([]);
@@ -215,8 +205,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
 
   useEffect(() => {
     const next = tools.length > 0 ? tools : allTools;
-    const defaultTool = pickDefaultTool(next);
-    const toolNames = defaultTool ? [defaultTool.name] : [];
+    const toolNames = next.map(t => t.name);
     setSelectedTools(toolNames);
     setFunctions([]);
     setError("");
