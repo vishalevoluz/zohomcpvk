@@ -938,11 +938,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           <div className="health-subscores">
             {CATEGORY_GROUPS.map(g => {
               const pct = healthResolved ? categoryScorePct(healthScore.dimensions, g.dims) : 0;
+              const dimensionZone = pct <= 0 ? "empty" : pct >= 75 ? "healthy" : "yellow";
+              const fillPct = pct <= 0 ? 100 : pct;
               return (
                 <div key={g.key} className="health-subscore-row" style={{ cursor: "default" }}>
                   <span className="health-subscore-label">{g.label}</span>
                   <span className="health-subscore-track">
-                    <span className="health-subscore-fill" style={{ width: `${pct}%` }} />
+                    <span
+                      className={`health-subscore-fill ${healthResolved ? `zone-${dimensionZone}` : ""}`}
+                      style={{ width: `${fillPct}%` }}
+                    />
                   </span>
                   <span className="health-subscore-value">{healthResolved ? `${pct}%` : "—"}</span>
                 </div>

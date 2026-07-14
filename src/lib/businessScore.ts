@@ -63,11 +63,25 @@ function scoreAutomationHealth(workflows: unknown[]): number {
   return Math.max(0, 20 - Math.min(20, inactive));
 }
 
+// Same healthy/needs-attention/at-risk/critical banding used for the overall
+// score (80/60/40 out of 100), scaled to whatever max a given score is out of —
+// so per-dimension bars (out of 20) land in the same zones as the total would.
+export function zoneForValue(score: number, max: number): HealthZone {
+  const pct = max > 0 ? (score / max) * 100 : 0;
+  if (pct >= 80) return "healthy";
+  if (pct >= 60) return "needs-attention";
+  if (pct >= 40) return "at-risk";
+  return "critical";
+}
+
 function zoneForTotal(total: number): { zone: HealthZone; verdict: string; color: string } {
-  if (total >= 80) return { zone: "healthy", verdict: "Your CRM is well-configured and running efficiently.", color: "#16A34A" };
-  if (total >= 60) return { zone: "needs-attention", verdict: "Your CRM has gaps that are likely costing you leads or time.", color: "#D97706" };
-  if (total >= 40) return { zone: "at-risk", verdict: "Significant issues detected. These are impacting your sales process.", color: "#EA580C" };
-  return { zone: "critical", verdict: "Your CRM has serious problems. Immediate action recommended.", color: "#DC2626" };
+  const zone = zoneForValue(total, 100);
+  switch (zone) {
+    case "healthy": return { zone, verdict: "Your CRM is well-configured and running efficiently.", color: "#16A34A" };
+    case "needs-attention": return { zone, verdict: "Your CRM has gaps that are likely costing you leads or time.", color: "#D97706" };
+    case "at-risk": return { zone, verdict: "Significant issues detected. These are impacting your sales process.", color: "#EA580C" };
+    case "critical": return { zone, verdict: "Your CRM has serious problems. Immediate action recommended.", color: "#DC2626" };
+  }
 }
 
 export function computeHealthScore(entityData: Record<CrmEntityType, EntityState>): HealthScoreResult {

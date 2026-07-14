@@ -228,6 +228,10 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
         <div className="health-subscores">
           {(Object.keys(DIMENSION_LABELS) as (keyof HealthScoreDimensions)[]).map(key => {
             const value = healthScore.dimensions[key];
+            // A 0 score means 0% width, which leaves nothing to paint any color onto —
+            // show a full gray bar instead so "empty" is visible rather than blank.
+            const dimensionZone = value <= 0 ? "empty" : value >= 15 ? "healthy" : "yellow";
+            const fillPct = value <= 0 ? 100 : (value / 20) * 100;
             return (
               <button
                 key={key}
@@ -238,7 +242,10 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
               >
                 <span className="health-subscore-label">{DIMENSION_LABELS[key]}</span>
                 <span className="health-subscore-track">
-                  <span className="health-subscore-fill" style={{ width: healthResolved ? `${(value / 20) * 100}%` : "0%" }} />
+                  <span
+                    className={`health-subscore-fill ${healthResolved ? `zone-${dimensionZone}` : ""}`}
+                    style={{ width: healthResolved ? `${fillPct}%` : "0%" }}
+                  />
                 </span>
                 <span className="health-subscore-value">{healthResolved ? `${value}/20` : "—"}</span>
               </button>

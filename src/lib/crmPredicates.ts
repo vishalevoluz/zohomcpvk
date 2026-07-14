@@ -5,6 +5,13 @@
 export function isActiveWorkflow(item: unknown): boolean {
   if (!item || typeof item !== "object") return true;
   const r = item as Record<string, unknown>;
+  // Zoho's workflow rules API nests it as status: { active: boolean } rather than
+  // a flat string/boolean — check that shape first, then fall back to the flatter
+  // shapes other MCP servers/entities may use.
+  if (r.status && typeof r.status === "object") {
+    const active = (r.status as Record<string, unknown>).active;
+    if (typeof active === "boolean") return active;
+  }
   if (r.status === "Inactive" || r.active === false || r.enabled === false) return false;
   return true;
 }

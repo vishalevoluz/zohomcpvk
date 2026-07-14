@@ -28,6 +28,7 @@
   --bv-critical: #DC2626;
   --bv-configured: #2563EB;
   --bv-empty: #9CA3AF;
+  --bv-yellow: #EAB308;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -3476,11 +3477,18 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   overflow: hidden;
 }
 .health-subscore-fill {
+  display: block;
   height: 100%;
   background: var(--color-accent);
   border-radius: 999px;
-  transition: width 0.6s ease-out;
+  transition: width 0.6s ease-out, background 0.4s;
 }
+.health-subscore-fill.zone-healthy { background: var(--bv-healthy); }
+.health-subscore-fill.zone-needs-attention { background: var(--bv-warning); }
+.health-subscore-fill.zone-at-risk { background: var(--bv-at-risk); }
+.health-subscore-fill.zone-critical { background: var(--bv-critical); }
+.health-subscore-fill.zone-empty { background: var(--bv-empty); }
+.health-subscore-fill.zone-yellow { background: var(--bv-yellow); }
 .health-subscore-value { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-text-secondary); text-align: right; }
 
 /* Business Process Flow Map */

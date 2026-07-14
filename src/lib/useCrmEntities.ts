@@ -199,6 +199,8 @@ export function useCrmEntities(
   const [entityData, setEntityData] = useState<Record<CrmEntityType, EntityState>>(makeInitial);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const hasFetched = useRef(false);
+  const configKey = config ? `${config.url}::${config.crmBaseUrl ?? ""}::${config.authToken ?? ""}::${config.apiKey ?? ""}` : null;
+  const lastConfigKey = useRef<string | null>(null);
 
   const fetchEntity = useCallback(async (type: CrmEntityType) => {
     if (!config) return;
@@ -262,6 +264,17 @@ export function useCrmEntities(
     setLastRefresh(new Date());
     CRM_ENTITIES.forEach(e => fetchEntity(e.type));
   }, [config, fetchEntity]);
+
+  // A new/different MCP connection (org switch, reconnect) must not keep
+  // showing the previous org's cached items and score — reset so the
+  // auto-fetch effect below re-runs against the new connection.
+  useEffect(() => {
+    if (configKey !== lastConfigKey.current) {
+      lastConfigKey.current = configKey;
+      hasFetched.current = false;
+      setEntityData(makeInitial());
+    }
+  }, [configKey]);
 
   // Auto-fetch when tools are available
   useEffect(() => {
