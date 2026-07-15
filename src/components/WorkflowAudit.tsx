@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
+import ScopeHint from "@/components/ScopeHint";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -808,7 +809,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
         </div>
       )}
 
-      {error && <p className="form-error">⚠ {error}</p>}
+      {error && <ScopeHint scopes={["getWorkflowRules"]} />}
 
       {(workflows.length > 0 || hasConnectedTool || hasCreateTool) && (
         <div className="bp-tabs">

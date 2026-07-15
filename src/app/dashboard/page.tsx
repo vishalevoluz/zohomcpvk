@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useMemo, useRef, useLayoutEffect } from "react";
+import { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { SECTIONS, categorizeTools, type Section } from "@/lib/sections";
 import ConnectionForm from "@/components/ConnectionForm";
+import { ServerUrlSteps, ServerUrlScopes } from "@/components/ServerUrlGuide";
 import ConnectedStatus from "@/components/ConnectedStatus";
 import Sidebar from "@/components/Sidebar";
 import SectionPanel from "@/components/SectionPanel";
@@ -51,6 +52,14 @@ export default function DashboardPage() {
   const resolvedEntityCount = CRM_ENTITIES.filter(e => isEntityResolved(crm.entityData[e.type])).length;
   const isPrefetching = !!config && resolvedEntityCount < CRM_ENTITIES.length;
 
+  // Gates the CRM Dashboard tab behind a single loading screen for the initial
+  // load only — once all data sources have resolved once, it stays revealed
+  // even if a later manual refresh sets isPrefetching back to true.
+  const [dashboardReady, setDashboardReady] = useState(false);
+  useEffect(() => {
+    if (config && !isPrefetching) setDashboardReady(true);
+  }, [config, isPrefetching]);
+
   const wasConnected = useRef(false);
   useLayoutEffect(() => {
     // Newly-mounted dashboard content pushes page height way past the connect
@@ -67,12 +76,14 @@ export default function DashboardPage() {
     setTools(t);
     setActiveSection("crm-dashboard");
     setSelectedTool(null);
+    setDashboardReady(false);
   }
 
   function onDisconnect() {
     setConfig(null);
     setTools([]);
     setSelectedTool(null);
+    setDashboardReady(false);
   }
 
   function onSelectSection(s: Section) {
@@ -120,9 +131,22 @@ export default function DashboardPage() {
             )}
           </>
         ) : (
-          <div className="main-connection">
-            <p className="main-connection-label">Connection</p>
-            <ConnectionForm onConnected={onConnected} />
+          <div className="connect-layout">
+            <div className="connect-layout-left">
+              <div className="main-connection">
+                <p className="main-connection-label">Connection</p>
+                <ConnectionForm onConnected={onConnected} />
+                <ServerUrlSteps />
+              </div>
+            </div>
+            <div className="connect-layout-right">
+              <div className="connect-prompt">
+                <div className="connect-prompt-icon">⚡</div>
+                <h2 className="connect-prompt-title">Connect to your Zoho MCP server</h2>
+                <p className="connect-prompt-sub">Enter your MCP URL above to load modules, workflows, fields, blueprints, and functions.</p>
+              </div>
+              <ServerUrlScopes />
+            </div>
           </div>
         )}
 
@@ -130,23 +154,39 @@ export default function DashboardPage() {
           <>
             {/* Keep audit panels mounted so loaded data survives section switches */}
             <div style={{ display: activeSection === "crm-dashboard" ? undefined : "none" }}>
-              <BusinessView
-                entityData={crm.entityData}
-                recordSamples={crmRecords.data}
-                pipelineStages={pipelineStages.data}
-                fetchAll={fetchAllData}
-                onSelectSection={onSelectSection}
-              />
-              <CRMOverviewDashboard
-                config={config}
-                tools={tools}
-                onLog={onLog}
-                entityData={crm.entityData}
-                fetchEntity={crm.fetchEntity}
-                fetchAll={fetchAllData}
-                lastRefresh={crm.lastRefresh}
-                onSelectSection={onSelectSection}
-              />
+              {dashboardReady ? (
+                <>
+                  <BusinessView
+                    entityData={crm.entityData}
+                    recordSamples={crmRecords.data}
+                    pipelineStages={pipelineStages.data}
+                    fetchAll={fetchAllData}
+                    onSelectSection={onSelectSection}
+                  />
+                  <CRMOverviewDashboard
+                    config={config}
+                    tools={tools}
+                    onLog={onLog}
+                    entityData={crm.entityData}
+                    fetchEntity={crm.fetchEntity}
+                    fetchAll={fetchAllData}
+                    lastRefresh={crm.lastRefresh}
+                    onSelectSection={onSelectSection}
+                  />
+                </>
+              ) : (
+                <div className="dashboard-loading">
+                  <span className="spinner dashboard-loading-spinner" />
+                  <p className="dashboard-loading-title">Loading your CRM Dashboard…</p>
+                  <p className="dashboard-loading-sub">{resolvedEntityCount}/{CRM_ENTITIES.length} data sources loaded</p>
+                  <div className="dashboard-loading-track">
+                    <div
+                      className="dashboard-loading-fill"
+                      style={{ width: `${(resolvedEntityCount / CRM_ENTITIES.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             <div className="main-card" style={{ display: activeSection === "modules" ? undefined : "none" }}>
               <ModulesAudit config={config} tools={categorized.modules} allTools={tools} onLog={onLog} />
@@ -187,16 +227,6 @@ export default function DashboardPage() {
               />
             )}
           </>
-        )}
-
-        {!config && (
-          <div className="connect-prompt">
-            <div className="connect-prompt-inner">
-              <div className="connect-prompt-icon">⚡</div>
-              <h2 className="connect-prompt-title">Connect to your Zoho MCP server</h2>
-              <p className="connect-prompt-sub">Enter your MCP URL above to load modules, workflows, fields, blueprints, and functions.</p>
-            </div>
-          </div>
         )}
       </div>
     </div>

@@ -33,20 +33,26 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-bg: #1c1c1a;
-    --color-bg-secondary: #242422;
-    --color-bg-tertiary: #2c2c2a;
-    --color-text: #f0efed;
-    --color-text-secondary: #a0a09b;
-    --color-text-tertiary: #6b6b67;
+    --color-bg: rgba(255,255,255,0.05);
+    --color-bg-secondary: rgba(255,255,255,0.035);
+    --color-bg-tertiary: rgba(255,255,255,0.07);
+    --color-text: #F5F5F7;
+    --color-text-secondary: #B6B6C2;
+    --color-text-tertiary: #85858F;
     --color-border: rgba(255,255,255,0.10);
-    --color-border-strong: rgba(255,255,255,0.20);
-    --color-accent: #85B7EB;
-    --color-accent-bg: #042C53;
+    --color-border-strong: rgba(255,255,255,0.22);
+    --color-accent: #A855F7;
+    --color-accent-bg: rgba(168,85,247,0.16);
+    --color-accent-2: #FF7A45;
+    --color-accent-2-bg: rgba(255,122,69,0.16);
     --color-success: #97C459;
-    --color-success-bg: #173404;
+    --color-success-bg: rgba(151,196,89,0.14);
     --color-danger: #F09595;
-    --color-danger-bg: #501313;
+    --color-danger-bg: rgba(240,149,149,0.14);
+    --color-warning-bg: rgba(217,119,6,0.16);
+    --radius-lg: 16px;
+    --glow-purple: rgba(138,43,226,0.32);
+    --glow-orange: rgba(255,87,34,0.22);
   }
 }
 
@@ -221,6 +227,35 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   font-size: 13px;
   color: var(--color-danger);
   margin-top: 8px;
+}
+
+.scope-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--color-accent-bg);
+  border: 0.5px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+}
+.scope-hint-icon {
+  flex-shrink: 0;
+}
+.scope-hint a {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+.scope-hint code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-accent);
+  background: var(--color-bg);
+  border-radius: 4px;
+  padding: 1px 6px;
 }
 
 /* Metrics */
@@ -822,6 +857,50 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   100% { background-position: 0 0; }
 }
 
+/* ─── Dashboard loading gate ─────────────────────────────────── */
+.dashboard-loading {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 4rem 1rem;
+  text-align: center;
+}
+.dashboard-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border-width: 3px;
+  margin-bottom: 8px;
+}
+.dashboard-loading-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+.dashboard-loading-sub {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.dashboard-loading-track {
+  width: 220px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.dashboard-loading-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-accent), #4A9FE0, var(--color-accent));
+  background-size: 200% 100%;
+  animation: connect-progress-stripe 1.4s linear infinite;
+  transition: width 0.3s ease;
+}
+
 /* ─── Connected status bar ───────────────────────────────────── */
 .connected-status {
   display: flex;
@@ -1004,37 +1083,223 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   box-shadow: 0 2px 8px rgba(24, 95, 165, 0.1), 0 0 0 3px var(--color-accent-bg);
 }
 
-/* ─── Connect prompt ─────────────────────────────────────────── */
-.connect-prompt {
-  flex: 1;
+/* ─── Server URL guide ───────────────────────────────────────── */
+.server-guide {
+  margin-top: 16px;
+  border-top: 0.5px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.server-guide-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.server-guide-header-icon {
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 3rem 1rem;
+  font-size: 14px;
+  background: linear-gradient(135deg, var(--color-accent-bg), var(--color-bg-tertiary));
+  border: 0.5px solid var(--color-accent);
 }
 
-.connect-prompt-inner {
+.server-guide-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.server-guide-subtitle {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin-top: 2px;
+}
+
+.server-guide-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 2px;
+  position: relative;
+}
+
+.server-guide-step {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  padding-bottom: 16px;
+}
+
+.server-guide-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 24px;
+  bottom: 0;
+  width: 1.5px;
+  background: linear-gradient(var(--color-accent) 0%, var(--color-border) 100%);
+  opacity: 0.5;
+}
+
+.server-guide-step a {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.server-guide-step-text strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.server-guide-step code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
+.server-guide-step-num {
+  flex-shrink: 0;
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+  z-index: 1;
+}
+
+.server-guide-step-text {
+  padding-top: 3px;
+}
+
+.server-guide-scopes-card {
+  background: var(--color-bg-secondary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+}
+
+.server-guide-scopes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.server-guide-scopes-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary);
+}
+
+.server-guide-copy-btn {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 0.5px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.server-guide-copy-btn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.server-guide-scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scope-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border: 0.5px solid transparent;
+  border-radius: 5px;
+  padding: 3px 8px;
+  transition: border-color 0.15s;
+}
+.scope-chip:hover {
+  border-color: var(--color-accent);
+}
+
+/* ─── Connect layout (two-column pre-connect screen) ─────────── */
+.connect-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+}
+
+.connect-layout-left {
+  flex: 1 1 480px;
+  min-width: 320px;
+}
+
+.connect-layout-right {
+  flex: 1 1 340px;
+  min-width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@media (max-width: 860px) {
+  .connect-layout {
+    flex-direction: column;
+  }
+}
+
+/* ─── Connect prompt ─────────────────────────────────────────── */
+.connect-prompt {
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 1.25rem;
   text-align: center;
-  max-width: 380px;
 }
 
 .connect-prompt-icon {
-  font-size: 36px;
-  margin-bottom: 1rem;
+  font-size: 32px;
+  margin-bottom: 0.75rem;
   opacity: 0.4;
 }
 
 .connect-prompt-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 500;
   color: var(--color-text);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .connect-prompt-sub {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text-secondary);
-  line-height: 1.6;
+  line-height: 1.55;
 }
 
 /* ─── Section layout ─────────────────────────────────────────── */
@@ -3753,4 +4018,77 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 @media (max-width: 720px) {
   .priority-action-card { flex-wrap: wrap; }
   .business-view { padding: 1rem; }
+}
+
+/* ─── Cinematic dark theme: glass surfaces + purple/orange glow ─
+   Placed last so it wins the cascade over every earlier unconditional
+   rule for the same selectors (equal specificity, later source wins). */
+@media (prefers-color-scheme: dark) {
+  body {
+    background:
+      radial-gradient(1100px 700px at 10% -10%, rgba(138,43,226,0.22), transparent 60%),
+      radial-gradient(900px 650px at 108% 22%, rgba(255,87,34,0.16), transparent 55%),
+      radial-gradient(800px 600px at 42% 118%, rgba(138,43,226,0.14), transparent 55%),
+      #0B0C10;
+    background-attachment: fixed;
+  }
+
+  .sidebar,
+  .section,
+  .main-connection,
+  .connect-prompt,
+  .connected-status,
+  .main-card,
+  .intg-card,
+  .server-guide-scopes-card,
+  .kpi-tile,
+  .crm-report-card,
+  .cost-card,
+  .config-tile,
+  .business-view-section,
+  .zia-msg-zia,
+  .zia-rec,
+  .tab-content,
+  .connect-progress {
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+
+  .main-card:hover {
+    border-color: var(--color-accent);
+    box-shadow: 0 8px 32px var(--glow-purple), 0 0 0 3px var(--color-accent-bg);
+  }
+  .main-card:active {
+    box-shadow: 0 4px 16px var(--glow-purple), 0 0 0 3px var(--color-accent-bg);
+  }
+
+  .btn-connect {
+    background: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+    color: #fff;
+    box-shadow: 0 4px 20px var(--glow-purple);
+  }
+  .btn-connect:hover {
+    opacity: 1;
+    box-shadow: 0 6px 26px var(--glow-purple), 0 0 20px var(--glow-orange);
+  }
+
+  .spinner {
+    border-color: rgba(255,255,255,0.25);
+    border-top-color: currentColor;
+  }
+
+  .sidebar-nav-item.active .sidebar-nav-count {
+    background: rgba(168,85,247,0.20);
+    color: var(--color-accent);
+  }
+
+  .server-guide-header-icon {
+    background: linear-gradient(135deg, var(--color-accent-bg), var(--color-accent-2-bg));
+    box-shadow: 0 0 16px var(--glow-purple);
+  }
+
+  .server-guide-step-num {
+    background: linear-gradient(135deg, var(--color-accent), var(--color-accent-2));
+    box-shadow: 0 0 12px var(--glow-purple);
+  }
 }

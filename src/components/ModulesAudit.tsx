@@ -5,6 +5,7 @@ import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
 import FieldsAudit from "@/components/FieldsAudit";
+import ScopeHint from "@/components/ScopeHint";
 import { categorizeTools } from "@/lib/sections";
 
 interface ZohoModule {
@@ -272,7 +273,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
         </div>
       </div>
 
-      {error && <p className="form-error">⚠ {error}</p>}
+      {error && <ScopeHint scopes={["getModules"]} />}
 
       {modules.length === 0 && !error && !loading && (
         <div className="audit-empty">

@@ -22,13 +22,12 @@ export interface HealthScoreResult {
 function scoreAutomationCoverage(modules: unknown[], workflows: unknown[]): number {
   if (modules.length === 0) return 20;
   const activeWorkflows = workflows.filter(isActiveWorkflow);
-  let missing = 0;
+  let covered = 0;
   for (const m of modules) {
     const apiName = moduleApiName(m);
-    const covered = apiName && activeWorkflows.some(w => workflowReferencesModule(w, apiName));
-    if (!covered) missing++;
+    if (apiName && activeWorkflows.some(w => workflowReferencesModule(w, apiName))) covered++;
   }
-  return Math.max(0, 20 - missing * 2);
+  return Math.round(20 * (covered / modules.length));
 }
 
 function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], stages: unknown[]): number {

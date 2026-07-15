@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
+import ScopeHint from "@/components/ScopeHint";
 
 // Actual Zoho CRM workflow-function shape returned by the MCP tool
 interface ZohoFunction {
@@ -304,7 +305,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
         </div>
       </div>
 
-      {error && <p className="form-error">⚠ {error}</p>}
+      {error && <ScopeHint scopes={["getFunctions"]} />}
 
       {functions.length === 0 && !error && !loading && (
         <div className="audit-empty">
