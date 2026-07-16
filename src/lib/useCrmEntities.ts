@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
-import { executeTool } from "@/lib/zohoMcp";
+import { executeTool, findParamLocations, findParam, setParam } from "@/lib/zohoMcp";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -126,6 +126,28 @@ export function extractArray(output: unknown): unknown[] {
   return [];
 }
 
+// Zoho list APIs page at up to 200 records and signal more via info.more_records —
+// without checking this, fetchEntity would silently only ever see page 1, making
+// anything past record #200 (e.g. a workflow rule for a specific module) invisible
+// to the whole app even though it exists in the org.
+function extractPageInfo(output: unknown): { moreRecords: boolean } | null {
+  if (!output || typeof output !== "object") return null;
+  let r = output as Record<string, unknown>;
+  if (Array.isArray(r.content)) {
+    for (const item of r.content as Record<string, unknown>[]) {
+      if (item.type === "text" && typeof item.text === "string") {
+        try {
+          const parsed = JSON.parse(item.text);
+          if (parsed && typeof parsed === "object") { r = parsed as Record<string, unknown>; break; }
+        } catch { /* not JSON */ }
+      }
+    }
+  }
+  const info = r.info as Record<string, unknown> | undefined;
+  if (!info) return null;
+  return { moreRecords: info.more_records === true };
+}
+
 function nestedName(val: unknown): string | undefined {
   if (!val || typeof val !== "object") return undefined;
   const r = val as Record<string, unknown>;
@@ -134,12 +156,19 @@ function nestedName(val: unknown): string | undefined {
 }
 
 export function getItemName(item: unknown, idx: number): string {
+  // Some list endpoints (e.g. pipelines/stages on certain MCP servers) return
+  // plain string/number entries rather than objects — without this, every
+  // such entry silently fell through to the "Item N" placeholder regardless
+  // of its actual value.
+  if (typeof item === "string") return item || `Item ${idx + 1}`;
+  if (typeof item === "number") return String(item);
   if (!item || typeof item !== "object") return `Item ${idx + 1}`;
   const r = item as Record<string, unknown>;
   const fullName = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
   return String(
-    r.name ?? r.display_name ?? r.label ?? r.api_name ??
-    r.workflow_name ?? r.blueprint_name ?? r.pipeline_name ??
+    r.name ?? r.display_name ?? r.display_label ?? r.label ?? r.api_name ??
+    r.workflow_name ?? r.blueprint_name ?? r.pipeline_name ?? r.layout_name ??
+    r.rule_name ?? r.process_name ??
     r.stage_name ?? r.title ?? r.full_name ?? (fullName || undefined) ??
     r.email ??
     // Zoho Blueprint list responses don't always carry a top-level name —
@@ -219,21 +248,35 @@ export function useCrmEntities(
       return;
     }
 
-    const start = Date.now();
+    const MAX_PAGES = 10; // safety cap — 10 * 200 = up to 2000 records
+    const outerStart = Date.now();
     try {
-      const output = await executeTool(config, tool.name, {});
-      const items = extractArray(output);
-      const durationMs = Date.now() - start;
+      // Tool schemas vary by server (flat "page" vs. grouped under query_params,
+      // or no pagination support at all) — resolve the real location instead of
+      // guessing a flat "page" key, same as useCrmRecordSamples.ts does.
+      const pageLoc = findParam(findParamLocations(tool), /^page$/i);
 
-      onLog({
-        id: Math.random().toString(36).slice(2),
-        tool: tool.name,
-        input: {},
-        output,
-        status: "success",
-        durationMs,
-        timestamp: new Date(),
-      });
+      let items: unknown[] = [];
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const start = Date.now();
+        const input: Record<string, unknown> = {};
+        if (page > 1 && pageLoc) setParam(input, pageLoc, page);
+        const output = await executeTool(config, tool.name, input);
+        const pageItems = extractArray(output);
+        items = items.concat(pageItems);
+
+        onLog({
+          id: Math.random().toString(36).slice(2),
+          tool: tool.name,
+          input,
+          output,
+          status: "success",
+          durationMs: Date.now() - start,
+          timestamp: new Date(),
+        });
+
+        if (!pageLoc || pageItems.length === 0 || !extractPageInfo(output)?.moreRecords) break;
+      }
 
       setEntityData(prev => ({
         ...prev,
@@ -248,7 +291,7 @@ export function useCrmEntities(
         output: null,
         status: "error",
         errorMessage: msg,
-        durationMs: Date.now() - start,
+        durationMs: Date.now() - outerStart,
         timestamp: new Date(),
       });
       setEntityData(prev => ({

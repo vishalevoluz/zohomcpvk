@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import jsPDF from "jspdf";
+import autoTable, { type RowInput } from "jspdf-autotable";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import {
@@ -849,47 +851,346 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     try { localStorage.setItem(FB_STORAGE_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
   }
 
-  function formatReportAsText(category: ReportTab, catRecs: Recommendation[]): string {
-    const lines: string[] = [];
-    const categoryLabel = category === "changes" ? "Changes" : category === "integrations" ? "Integrations" : "Architecture";
-    lines.push(`ZOHO CRM ${categoryLabel.toUpperCase()} REPORT`);
-    lines.push(`Generated: ${new Date().toISOString()}`);
-    lines.push("=".repeat(60));
-
-    lines.push("");
-    lines.push("CRM SUMMARY");
-    lines.push("-".repeat(60));
-    CRM_ENTITIES.forEach(e => {
-      const state = entityData[e.type];
-      const status = state.error ? `ERROR — ${state.error}` : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
-      lines.push(`${e.label.padEnd(14)} ${status}${state.toolUsed ? `  (via ${state.toolUsed})` : ""}`);
-    });
-
-    lines.push("");
-    lines.push(`RECOMMENDATIONS (${catRecs.length})`);
-    lines.push("-".repeat(60));
-    if (catRecs.length === 0) {
-      lines.push("No recommendations in this category.");
-    } else {
-      catRecs.forEach((r, i) => {
-        lines.push("");
-        lines.push(`[${i + 1}] ${r.title}  (${r.severity.toUpperCase()})`);
-        lines.push(r.description);
-      });
-    }
-
-    return lines.join("\n");
+  function categoryLabelOf(category: ReportTab): string {
+    return category === "changes" ? "Changes" : category === "integrations" ? "Integrations" : "Architecture";
   }
 
   function downloadReport(category: ReportTab) {
     const catRecs = recommendations.filter(r => r.category === category);
-    const blob = new Blob([formatReportAsText(category, catRecs)], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `zoho-crm-${category}-report-${Date.now()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const doc = buildReportPdf(`Recommended ${categoryLabelOf(category)}`, [
+      { label: categoryLabelOf(category), recs: catRecs, headingOverride: "Recommendations" },
+    ]);
+    doc.save(`zoho-crm-${category}-report-${Date.now()}.pdf`);
+  }
+
+  function downloadFullReport() {
+    const sections = (["changes", "integrations", "architecture"] as ReportTab[]).map(cat => ({
+      label: categoryLabelOf(cat),
+      recs: recommendations.filter(r => r.category === cat),
+    }));
+    const doc = buildReportPdf("Full CRM Audit Report", sections);
+    doc.save(`zoho-crm-full-report-${Date.now()}.pdf`);
+  }
+
+  function buildReportPdf(
+    headerTitle: string,
+    sections: { label: string; recs: Recommendation[]; headingOverride?: string }[]
+  ) {
+    const ACCENT = "#185FA5";
+    const TEXT = "#1A1A1A";
+    const TEXT_MUTED = "#6B7280";
+    const DANGER = "#A32D2D";
+    const DANGER_BG = "#FCEBEB";
+    const WARNING = "#854F0B";
+    const WARNING_BG = "#FAEEDA";
+    const SUCCESS = "#3B6D11";
+    const SUCCESS_BG = "#EAF3DE";
+    const BORDER = "#E2E8F0";
+    const BG_ALT = "#F7F9FC";
+
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 42;
+    const contentWidth = pageWidth - margin * 2;
+    let y = 0;
+
+    function drawHeader() {
+      doc.setFillColor(ACCENT);
+      doc.rect(0, 0, pageWidth, 96, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.setTextColor("#DCEBFA");
+      doc.text("ZOHO CRM AUDIT", margin, 34);
+      doc.setFontSize(20);
+      doc.setTextColor("#FFFFFF");
+      doc.text(headerTitle, margin, 60);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor("#DCEBFA");
+      doc.text(`Generated ${new Date().toLocaleString()}`, margin, 80);
+      y = 130;
+    }
+
+    // autoTable adds its own pages independently of ensureSpace below, so the
+    // page number must always be read live rather than tracked in a variable —
+    // a manual counter would drift out of sync the moment a table spans pages.
+    function drawFooter() {
+      doc.setDrawColor(BORDER);
+      doc.setLineWidth(0.5);
+      doc.line(margin, pageHeight - 40, pageWidth - margin, pageHeight - 40);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(TEXT_MUTED);
+      doc.text("Zoho CRM Audit Tool", margin, pageHeight - 24);
+      doc.text(`Page ${doc.getNumberOfPages()}`, pageWidth - margin, pageHeight - 24, { align: "right" });
+    }
+
+    function ensureSpace(h: number) {
+      if (y + h > pageHeight - 56) {
+        drawFooter();
+        doc.addPage();
+        drawHeader();
+      }
+    }
+
+    function prettyStatus(s: string | null): string {
+      if (!s) return "—";
+      return s.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function statusColor(label: string): string {
+      const s = label.toLowerCase();
+      if (s === "inactive" || s === "system hidden") return DANGER;
+      if (s === "user hidden") return WARNING;
+      if (s === "active" || s === "visible") return SUCCESS;
+      return TEXT_MUTED;
+    }
+
+    drawHeader();
+
+    // ── KPI strip ──
+    const totalItems = CRM_ENTITIES.reduce((sum, e) => sum + entityData[e.type].items.length, 0);
+    const errorCount = CRM_ENTITIES.filter(e => !!entityData[e.type].error).length;
+    const allRecs = sections.flatMap(s => s.recs);
+    const highCount = allRecs.filter(r => r.severity === "high").length;
+    const kpis: { label: string; value: string; color: string }[] = [
+      { label: "Total CRM Items", value: totalItems.toLocaleString(), color: ACCENT },
+      { label: "Data Source Errors", value: String(errorCount), color: errorCount > 0 ? DANGER : SUCCESS },
+      { label: "Recommendations", value: String(allRecs.length), color: ACCENT },
+      { label: "High Severity", value: String(highCount), color: highCount > 0 ? DANGER : SUCCESS },
+    ];
+    const kpiGap = 10;
+    const kpiWidth = (contentWidth - kpiGap * (kpis.length - 1)) / kpis.length;
+    const kpiHeight = 46;
+    kpis.forEach((k, i) => {
+      const x = margin + i * (kpiWidth + kpiGap);
+      doc.setDrawColor(BORDER);
+      doc.setLineWidth(0.75);
+      doc.roundedRect(x, y - 14, kpiWidth, kpiHeight, 4, 4, "S");
+      doc.setFillColor(k.color);
+      doc.rect(x, y - 14, 3, kpiHeight, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(k.color);
+      doc.text(k.value, x + 12, y + 8);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.5);
+      doc.setTextColor(TEXT_MUTED);
+      doc.text(k.label, x + 12, y + 22);
+    });
+    y += kpiHeight + 24;
+
+    // ── CRM Summary ──
+    ensureSpace(30);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(TEXT);
+    doc.text("CRM Summary", margin, y);
+    y += 10;
+    doc.setDrawColor(ACCENT);
+    doc.setLineWidth(1.4);
+    doc.line(margin, y, margin + 36, y);
+    y += 22;
+
+    const MAX_TABLE_ROWS = 300;
+    const statusColX = margin + 160;
+
+    CRM_ENTITIES.forEach(e => {
+      const state = entityData[e.type];
+      const isError = !!state.error;
+
+      // Tool name is measured first (fixed at the right edge) so the status/error
+      // column below can be wrapped to whatever width is actually left over —
+      // drawing both at a fixed x with unbounded text is what let a long error
+      // message run straight into the "via <tool>" label.
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      const toolText = state.toolUsed ? `via ${state.toolUsed}` : "";
+      const toolWidth = toolText ? doc.getTextWidth(toolText) : 0;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      const statusRaw = isError
+        ? `Error — ${state.error}`
+        : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
+      const availStatusWidth = pageWidth - margin - 8 - statusColX - (toolWidth ? toolWidth + 14 : 0);
+      const statusLines = doc.splitTextToSize(statusRaw, Math.max(availStatusWidth, 90)) as string[];
+      const headerHeight = Math.max(statusLines.length, 1) * 13 + 6;
+
+      ensureSpace(headerHeight + 10);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(TEXT);
+      doc.text(e.label, margin + 8, y);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9.5);
+      doc.setTextColor(isError ? DANGER : TEXT);
+      let sy = y;
+      statusLines.forEach(line => {
+        doc.text(line, statusColX, sy);
+        sy += 13;
+      });
+
+      if (toolText) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(TEXT_MUTED);
+        doc.text(toolText, pageWidth - margin - 8, y, { align: "right" });
+      }
+
+      y += headerHeight;
+
+      // Actual item list (not just the count) rendered as a real table — large
+      // entities (300+ modules/fields on a real org) read as an unscannable
+      // wall of comma-separated text otherwise, and a table paginates itself.
+      if (!isError && state.items.length > 0) {
+        const shown = state.items.slice(0, MAX_TABLE_ROWS);
+        const rows: RowInput[] = shown.map((it, idx) => [
+          String(idx + 1),
+          getItemName(it, idx),
+          prettyStatus(getItemStatus(it)),
+        ]);
+        const truncated = state.items.length - shown.length;
+        if (truncated > 0) {
+          rows.push([
+            { content: `+${truncated} more not shown`, colSpan: 3, styles: { fontStyle: "italic", textColor: TEXT_MUTED, halign: "left" } },
+          ]);
+        }
+
+        autoTable(doc, {
+          startY: y,
+          head: [["#", "Name", "Status"]],
+          body: rows,
+          margin: { left: margin, right: margin, top: 108, bottom: 56 },
+          styles: {
+            font: "helvetica",
+            fontSize: 8.5,
+            cellPadding: 4,
+            textColor: TEXT,
+            lineColor: BORDER,
+            lineWidth: 0.5,
+            overflow: "linebreak",
+          },
+          headStyles: { fillColor: ACCENT, textColor: "#FFFFFF", fontStyle: "bold", fontSize: 8.5 },
+          alternateRowStyles: { fillColor: BG_ALT },
+          columnStyles: {
+            0: { cellWidth: 24, halign: "center", textColor: TEXT_MUTED },
+            2: { cellWidth: 96 },
+          },
+          didParseCell: data => {
+            if (data.section === "body" && data.column.index === 2 && typeof data.cell.raw === "string") {
+              data.cell.styles.textColor = statusColor(data.cell.raw);
+            }
+          },
+          // autoTable paginates a big table on its own, invisibly to our manual
+          // ensureSpace()/drawFooter() calls — without these hooks, every page
+          // it adds mid-table would be missing the banner and/or footer.
+          willDrawPage: () => drawHeader(),
+          didDrawPage: () => drawFooter(),
+        });
+
+        y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 18;
+      } else {
+        y += 12;
+      }
+    });
+
+    // ── Recommendations (one section per category) ──
+    sections.forEach((section, sIdx) => {
+      const catRecs = section.recs;
+      const headingText = section.headingOverride ?? `${section.label} Recommendations`;
+
+      y += 22;
+      ensureSpace(46);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(TEXT);
+      doc.text(headingText, margin, y);
+      const headingWidth = doc.getTextWidth(`${headingText} `);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(TEXT_MUTED);
+      doc.text(`(${catRecs.length})`, margin + headingWidth + 4, y);
+      y += 10;
+      doc.setDrawColor(ACCENT);
+      doc.setLineWidth(1.4);
+      doc.line(margin, y, margin + 36, y);
+      y += 26;
+
+      if (catRecs.length === 0) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(10);
+        doc.setTextColor(TEXT_MUTED);
+        doc.text("No recommendations in this category.", margin, y);
+        y += 20;
+      } else {
+        catRecs.forEach((r, i) => {
+          const sevColor = r.severity === "high" ? DANGER : r.severity === "medium" ? WARNING : SUCCESS;
+          const sevBg = r.severity === "high" ? DANGER_BG : r.severity === "medium" ? WARNING_BG : SUCCESS_BG;
+
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10.5);
+          const titleLines = doc.splitTextToSize(`${i + 1}. ${r.title}`, contentWidth - 100) as string[];
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          const descLines = doc.splitTextToSize(r.description, contentWidth - 28) as string[];
+          const blockHeight = 22 + titleLines.length * 14 + 6 + descLines.length * 13 + 12;
+
+          ensureSpace(blockHeight + 14);
+
+          const blockTop = y - 14;
+          doc.setDrawColor(BORDER);
+          doc.setLineWidth(0.75);
+          doc.roundedRect(margin, blockTop, contentWidth, blockHeight, 4, 4, "S");
+          doc.setFillColor(sevColor);
+          doc.rect(margin, blockTop, 3, blockHeight, "F");
+
+          // severity badge
+          const badgeLabel = r.severity.toUpperCase();
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(7.5);
+          const badgeWidth = doc.getTextWidth(badgeLabel) + 14;
+          const badgeX = margin + contentWidth - badgeWidth - 12;
+          doc.setFillColor(sevBg);
+          doc.roundedRect(badgeX, blockTop + 10, badgeWidth, 15, 3, 3, "F");
+          doc.setTextColor(sevColor);
+          doc.text(badgeLabel, badgeX + badgeWidth / 2, blockTop + 20, { align: "center" });
+
+          // title (wraps above the badge column)
+          doc.setTextColor(TEXT);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(10.5);
+          let ty = y;
+          titleLines.forEach((line: string) => {
+            doc.text(line, margin + 14, ty);
+            ty += 14;
+          });
+
+          // description
+          ty += 6;
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(9);
+          doc.setTextColor(TEXT_MUTED);
+          descLines.forEach((line: string) => {
+            doc.text(line, margin + 14, ty);
+            ty += 13;
+          });
+
+          y = blockTop + blockHeight + 16;
+        });
+      }
+
+      if (sIdx < sections.length - 1) {
+        ensureSpace(20);
+      }
+    });
+
+    drawFooter();
+    return doc;
   }
 
   return (
@@ -912,6 +1213,9 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           {loadingCount > 0 && <span className="spinner" />}
           <button className="btn-secondary" onClick={fetchAll} disabled={loadingCount > 0}>
             ↺ Refresh All
+          </button>
+          <button className="btn-connect" onClick={downloadFullReport}>
+            ↓ Download Full Report (PDF)
           </button>
         </div>
       </div>
@@ -1283,7 +1587,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   )}
                 </ul>
                 <button className="btn-secondary crm-report-btn" onClick={() => downloadReport(cat)}>
-                  ↓ Download TXT Report
+                  ↓ Download PDF Report
                 </button>
               </div>
             );
