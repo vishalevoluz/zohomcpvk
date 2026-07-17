@@ -60,7 +60,14 @@ export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns
   },
   workflows: {
     preferred: ["getWorkflowRules", "getWorkflows", "getAllWorkflows", "listWorkflows", "getAutomationWorkflows"],
-    patterns: [/getworkflowrule(?!byid)/i, /listworkflow/i, /allworkflow/i, /getworkflows?$/i],
+    // Anchored to end-of-name: servers that prefix tool names (e.g. "ZohoCRM_")
+    // skip the exact-name `preferred` list above and fall through to these
+    // patterns. An unanchored "getworkflowrule" also matches sibling tools
+    // like getWorkflowRuleUsage/getWorkflowRulesCount, which sort earlier in
+    // the tool list and get picked by .find() first — calling them with no
+    // rule ID fails, and the failure text was misread as a fake "workflow"
+    // matching zero modules, making every module look automation-free.
+    patterns: [/getworkflowrules$/i, /listworkflow/i, /allworkflow/i, /getworkflows?$/i],
   },
   profiles: {
     preferred: ["getProfile", "getProfiles", "getAllProfiles", "listProfiles", "getCRMProfiles"],
@@ -250,13 +257,17 @@ export function useCrmEntities(
 
     const MAX_PAGES = 10; // safety cap — 10 * 200 = up to 2000 records
     const outerStart = Date.now();
+    // Declared outside the try so a mid-pagination failure (page 2+ throwing)
+    // can still report whatever pages already succeeded, instead of losing
+    // real page-1 data and reporting a false "zero records" resolved state —
+    // that previously made every module look automation-free on the flow map.
+    let items: unknown[] = [];
     try {
       // Tool schemas vary by server (flat "page" vs. grouped under query_params,
       // or no pagination support at all) — resolve the real location instead of
       // guessing a flat "page" key, same as useCrmRecordSamples.ts does.
       const pageLoc = findParam(findParamLocations(tool), /^page$/i);
 
-      let items: unknown[] = [];
       for (let page = 1; page <= MAX_PAGES; page++) {
         const start = Date.now();
         const input: Record<string, unknown> = {};
@@ -296,7 +307,10 @@ export function useCrmEntities(
       });
       setEntityData(prev => ({
         ...prev,
-        [type]: { ...prev[type], loading: false, error: msg, toolUsed: tool.name },
+        // Keep whatever pages were already fetched — partial real data beats
+        // a false "resolved with zero records" state for downstream consumers
+        // like the flow map's automation-coverage check.
+        [type]: { ...prev[type], loading: false, items, error: msg, toolUsed: tool.name, lastFetched: items.length > 0 ? Date.now() : prev[type].lastFetched },
       }));
     }
   }, [config, tools, onLog]);
