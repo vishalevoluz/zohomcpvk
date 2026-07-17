@@ -27,7 +27,17 @@
       "Bash(curl *)",
       "Bash(tasklist *)",
       "Bash(node *)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(powershell -Command \"Get-CimInstance Win32_Process -Filter \\\\\"CommandLine LIKE '%next dev%'\\\\\" | Select-Object ProcessId, CommandLine\")",
+      "Bash(where chromium-cli *)",
+      "Bash(where chrome.exe)",
+      "Bash(powershell -Command \"Get-Command chromium-cli -ErrorAction SilentlyContinue\")",
+      "Read(//c/Program Files/Google/Chrome/Application/**)",
+      "Read(//c/Program Files \\\\\\(x86\\\\\\)/Google/Chrome/Application/**)",
+      "Bash(\"/c/Program Files/Google/Chrome/Application/chrome.exe\" --headless=new --disable-gpu --no-sandbox --force-color-profile=srgb --force-dark-mode --enable-features=WebContentsForceDark --screenshot=\"C:\\\\Users\\\\ABC\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-ABC-Downloads-zoho-mcp-app-zoho-mcp-app\\\\2fb9e552-bc80-4594-9641-cd32d9aa840a\\\\scratchpad\\\\dashboard-dark.png\" --window-size=1280,500 \"http://localhost:3005/dashboard?t=3\")",
+      "Bash(\"/c/Program Files/Google/Chrome/Application/chrome.exe\" --headless=new --disable-gpu --no-sandbox --blink-settings=preferredColorScheme=1 --screenshot=\"C:\\\\Users\\\\ABC\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-ABC-Downloads-zoho-mcp-app-zoho-mcp-app\\\\2fb9e552-bc80-4594-9641-cd32d9aa840a\\\\scratchpad\\\\dashboard-dark2.png\" --window-size=1280,500 \"http://localhost:3005/dashboard?t=4\")",
+      "Bash(rm -rf .next/trace)",
+      "Bash(PORT=3009 npm run dev)"
     ]
   }
 }
