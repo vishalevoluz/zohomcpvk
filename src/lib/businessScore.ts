@@ -1,5 +1,6 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, moduleApiName, workflowReferencesModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, workflowReferencesModule } from "@/lib/crmPredicates";
+import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
 export interface HealthScoreDimensions {
   automationCoverage: number;
@@ -20,14 +21,17 @@ export interface HealthScoreResult {
 }
 
 function scoreAutomationCoverage(modules: unknown[], workflows: unknown[]): number {
-  if (modules.length === 0) return 20;
+  // Measured against the lead-to-deal lifecycle modules the flow map's own
+  // "automation layer" checks (Leads, Campaigns, Contacts, Deals) rather than
+  // every module in the org. Orgs can have hundreds of custom/junction modules
+  // that were never candidates for a workflow rule in the first place — dividing
+  // by all of them makes real coverage round down to 0 no matter how many of the
+  // modules that actually matter are automated.
+  const coreApiNames = automationCoverageApiNames(modules);
+  if (coreApiNames.length === 0) return 20;
   const activeWorkflows = workflows.filter(isActiveWorkflow);
-  let covered = 0;
-  for (const m of modules) {
-    const apiName = moduleApiName(m);
-    if (apiName && activeWorkflows.some(w => workflowReferencesModule(w, apiName))) covered++;
-  }
-  return Math.round(20 * (covered / modules.length));
+  const covered = coreApiNames.filter(apiName => activeWorkflows.some(w => workflowReferencesModule(w, apiName))).length;
+  return Math.round(20 * (covered / coreApiNames.length));
 }
 
 function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], stages: unknown[]): number {
@@ -57,9 +61,15 @@ function scoreDataArchitecture(fields: unknown[], modules: unknown[]): number {
 }
 
 function scoreAutomationHealth(workflows: unknown[]): number {
+  // A percentage of total, matching what the dimension's own tooltip promises
+  // ("what share of your existing workflows are actually turned on"). The old
+  // formula subtracted a flat inactive count capped at 20 — any org with 20+
+  // inactive rules (common once workflows accumulate over years) permanently
+  // bottomed out at 0 regardless of how many were active, so activating more
+  // workflows never moved this dimension at all.
   if (workflows.length === 0) return 20;
-  const inactive = workflows.filter(w => !isActiveWorkflow(w)).length;
-  return Math.max(0, 20 - Math.min(20, inactive));
+  const active = workflows.filter(isActiveWorkflow).length;
+  return Math.round(20 * (active / workflows.length));
 }
 
 // Same healthy/needs-attention/at-risk/critical banding used for the overall

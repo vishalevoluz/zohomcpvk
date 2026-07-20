@@ -5,6 +5,7 @@ import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
+import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -1003,6 +1004,14 @@ function ConfirmActionDialog({
 
 type BPFilterKey = "all" | "inactive" | "dead_end" | "missing_transitions" | "incomplete";
 
+const BLUEPRINT_COLUMNS: ColumnFilterDef<ZohoBlueprint>[] = [
+  { key: "status", label: "Status", getValue: bp => isBPActive(bp) ? "Active" : "Inactive" },
+  { key: "module", label: "Module", getValue: bp => getBPModule(bp) },
+  { key: "field",  label: "Field",  getValue: bp => getBPField(bp) },
+  { key: "layout", label: "Layout", getValue: bp => getBPLayout(bp) },
+  { key: "clone",  label: "Clone",  getValue: bp => bp.supported_clone ? "Yes" : "No" },
+];
+
 interface Props {
   config: McpConfig;
   tools: McpTool[];
@@ -1019,6 +1028,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
   const [blueprints, setBlueprints] = useState<ZohoBlueprint[]>([]);
   const [filter, setFilter] = useState<BPFilterKey>("all");
   const [search, setSearch] = useState("");
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -1066,6 +1076,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
     setMeta(null);
     setMetaError("");
     setRecordCounts({});
+    setColumnFilters({});
     setActionMessage(null);
     // Auto-load as soon as tools are available (MCP just connected)
     if (toolNames.length > 0) {
@@ -1107,6 +1118,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
       } else {
         setBlueprints(all);
         setFilter("all");
+        setColumnFilters({});
         setRecordCounts({});
       }
     } finally {
@@ -1225,12 +1237,13 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
     incomplete,
   };
   const bySeverity = filterMap[filter];
-  const displayed = search.trim()
+  const bySearch = search.trim()
     ? bySeverity.filter(bp => {
         const q = search.trim().toLowerCase();
         return getBPName(bp).toLowerCase().includes(q) || getBPModule(bp).toLowerCase().includes(q);
       })
     : bySeverity;
+  const displayed = applyColumnFilters(bySearch, BLUEPRINT_COLUMNS, columnFilters);
 
   function getTags(bp: ZohoBlueprint): BPFilterKey[] {
     const tags: BPFilterKey[] = [];
@@ -1411,6 +1424,12 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
                     )}
                   </div>
                 </div>
+
+                <ColumnFilterChips items={bySearch} columns={BLUEPRINT_COLUMNS} active={columnFilters} onChange={(key, val) => setColumnFilters(prev => {
+                  const next = { ...prev };
+                  if (val) next[key] = val; else delete next[key];
+                  return next;
+                })} />
 
                 {displayed.length === 0 ? (
                   <div className="empty-state">

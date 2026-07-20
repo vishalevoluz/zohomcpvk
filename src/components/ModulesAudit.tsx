@@ -7,6 +7,7 @@ import MultiToolSelect from "@/components/MultiToolSelect";
 import FieldsAudit from "@/components/FieldsAudit";
 import ScopeHint from "@/components/ScopeHint";
 import { categorizeTools } from "@/lib/sections";
+import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
 interface ZohoModule {
   id?: string;
@@ -135,6 +136,19 @@ function getProfiles(m: ZohoModule): string {
 
 type FilterKey = "all" | "hidden" | "unused" | "custom" | "deprecated";
 
+const MODULE_COLUMNS: ColumnFilterDef<ZohoModule>[] = [
+  { key: "generated_type", label: "Generated Type", getValue: m => String(m.generated_type ?? "—") },
+  { key: "status",         label: "Status",         getValue: m => String(m.status ?? "—") },
+  { key: "viewable",       label: "Viewable",        getValue: m => (m.viewable ?? m.visible) !== false ? "Yes" : "No" },
+  { key: "show_as_tab",    label: "Show as Tab",     getValue: m => m.show_as_tab ? "Yes" : "No" },
+  { key: "creatable",      label: "Creatable",       getValue: m => m.creatable ? "Yes" : "No" },
+  { key: "editable",       label: "Editable",        getValue: m => m.editable ? "Yes" : "No" },
+  { key: "deletable",      label: "Deletable",       getValue: m => m.deletable ? "Yes" : "No" },
+  { key: "api_supported",  label: "API Supported",   getValue: m => m.api_supported ? "Yes" : "No" },
+  { key: "blueprint_support", label: "Blueprint Support", getValue: m => m.isBlueprintSupported ? "Yes" : "No" },
+  { key: "quick_create",   label: "Quick Create",    getValue: m => m.quick_create ? "Yes" : "No" },
+];
+
 interface Props {
   config: McpConfig;
   tools: McpTool[];
@@ -149,6 +163,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
   const [modules, setModules] = useState<ZohoModule[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [expandedModule, setExpandedModule] = useState<string | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -170,6 +185,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
     setSelectedTools(toolNames);
     setModules([]);
     setError("");
+    setColumnFilters({});
     // Auto-load as soon as tools are available (MCP just connected)
     if (toolNames.length > 0) {
       void loadModules(toolNames);
@@ -200,6 +216,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
       } else {
         setModules(allMods);
         setFilter("all");
+        setColumnFilters({});
       }
     } finally {
       setLoading(false);
@@ -234,12 +251,13 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
   };
 
   const bySeverity = filterMap[filter];
-  const displayed = search.trim()
+  const bySearch = search.trim()
     ? bySeverity.filter(m => {
         const q = search.trim().toLowerCase();
         return getName(m).toLowerCase().includes(q) || String(m.api_name ?? "").toLowerCase().includes(q);
       })
     : bySeverity;
+  const displayed = applyColumnFilters(bySearch, MODULE_COLUMNS, columnFilters);
 
   function getTags(m: ZohoModule): FilterKey[] {
     const tags: FilterKey[] = [];
@@ -333,6 +351,12 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
                 )}
               </div>
             </div>
+
+            <ColumnFilterChips items={bySearch} columns={MODULE_COLUMNS} active={columnFilters} onChange={(key, val) => setColumnFilters(prev => {
+              const next = { ...prev };
+              if (val) next[key] = val; else delete next[key];
+              return next;
+            })} />
 
             {displayed.length === 0 ? (
               <div className="empty-state">

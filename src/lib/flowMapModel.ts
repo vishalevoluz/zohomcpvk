@@ -122,6 +122,23 @@ export function findDealsApiName(entityData: Record<CrmEntityType, EntityState>)
   return mod ? moduleApiName(mod) : null;
 }
 
+// The modules the flow map's own "automation layer" checks (Leads, Campaigns,
+// Contacts, Deals — see STAGE_DEFINITIONS' wantsAutomation flag). Reused by
+// businessScore.ts so the dashboard's Automation Coverage dimension measures
+// coverage of the same lead-to-deal lifecycle modules the flow map already
+// visualizes, instead of every module the org happens to have (which for orgs
+// with hundreds of custom/junction modules makes a whole-catalog percentage
+// meaningless — 2 real automations out of 300+ modules always rounds to 0).
+export function automationCoverageApiNames(modules: unknown[]): string[] {
+  return STAGE_DEFINITIONS
+    .filter(s => s.wantsAutomation)
+    .map(stage => {
+      const mod = findModuleForStage(modules, stage);
+      return mod ? moduleApiName(mod) : null;
+    })
+    .filter((name): name is string => !!name);
+}
+
 function moduleLabel(m: Record<string, unknown>): string {
   return String(m.plural_label ?? m.singular_label ?? m.module_name ?? m.api_name ?? "");
 }

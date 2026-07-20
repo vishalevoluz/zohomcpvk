@@ -5,6 +5,7 @@ import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
+import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -575,6 +576,14 @@ function WorkflowDetailModal({
 type WFFilterKey = "all" | "disabled" | "duplicate" | "conflicting" | "complex";
 type WFMainTab = "workflows" | "connected" | "create";
 
+const WORKFLOW_COLUMNS: ColumnFilterDef<ZohoWorkflow>[] = [
+  { key: "status",   label: "Status",       getValue: w => isActive(w) ? "Active" : "Inactive" },
+  { key: "module",   label: "Module",       getValue: w => getModule(w) },
+  { key: "trigger",  label: "Execute When", getValue: w => getTriggerEvents(w) },
+  { key: "repeat",   label: "Repeat",       getValue: w => getRepeat(w) },
+  { key: "locked",   label: "Locked",       getValue: w => isLocked(w) ? "Locked" : "No" },
+];
+
 interface Props {
   config: McpConfig;
   tools: McpTool[];
@@ -589,6 +598,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   const [workflows, setWorkflows] = useState<ZohoWorkflow[]>([]);
   const [filter, setFilter] = useState<WFFilterKey>("all");
   const [search, setSearch] = useState("");
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [detailWf, setDetailWf] = useState<ZohoWorkflow | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -630,6 +640,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
     setRulesCount(null);
     setActionMessage(null);
     setConnectedWfs([]);
+    setColumnFilters({});
     if (toolNames.length > 0) {
       void loadWorkflows(toolNames);
       if (findTool(allTools, "getWorkflowRulesCount")) void loadRulesCount();
@@ -660,7 +671,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
         }
       }
       if (all.length === 0) setError(`No workflow data found in selected tool${toolsToUse.length > 1 ? "s" : ""}.`);
-      else { setWorkflows(all); setFilter("all"); }
+      else { setWorkflows(all); setFilter("all"); setColumnFilters({}); }
     } finally { setLoading(false); }
   }
 
@@ -731,12 +742,13 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   const complex = workflows.filter(w => getActionsCount(w) > 5 || getCriteriaCount(w) > 5);
   const filterMap: Record<WFFilterKey, ZohoWorkflow[]> = { all: workflows, disabled, duplicate, conflicting, complex };
   const bySeverity = filterMap[filter];
-  const displayed = search.trim()
+  const bySearch = search.trim()
     ? bySeverity.filter(w => {
         const q = search.trim().toLowerCase();
         return getName(w).toLowerCase().includes(q) || getModule(w).toLowerCase().includes(q);
       })
     : bySeverity;
+  const displayed = applyColumnFilters(bySearch, WORKFLOW_COLUMNS, columnFilters);
 
   function getTags(w: ZohoWorkflow): WFFilterKey[] {
     const tags: WFFilterKey[] = [];
@@ -873,6 +885,13 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
                     {filter !== "all" && <button className="btn-secondary" onClick={() => setFilter("all")}>Clear filter</button>}
                   </div>
                 </div>
+
+                <ColumnFilterChips items={bySearch} columns={WORKFLOW_COLUMNS} active={columnFilters} onChange={(key, val) => setColumnFilters(prev => {
+                  const next = { ...prev };
+                  if (val) next[key] = val; else delete next[key];
+                  return next;
+                })} />
+
                 {displayed.length === 0 ? (
                   <div className="empty-state">
                     {search.trim() ? `No workflows match "${search.trim()}".` : `No ${filter} workflows found — good!`}

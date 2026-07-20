@@ -5,6 +5,7 @@ import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
+import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
 // Actual Zoho CRM workflow-function shape returned by the MCP tool
 interface ZohoFunction {
@@ -173,6 +174,13 @@ function hasInvalidBinding(f: ZohoFunction): boolean {
 
 type FnFilterKey = "all" | "unused" | "missing_ref" | "locked";
 
+const FUNCTION_COLUMNS: ColumnFilterDef<ZohoFunction>[] = [
+  { key: "module",       label: "Module",       getValue: f => getModule(f) },
+  { key: "feature_type", label: "Feature Type", getValue: f => getFeatureType(f) },
+  { key: "language",     label: "Language",     getValue: f => getLanguage(f) },
+  { key: "associated",   label: "Associated",   getValue: f => isAssociated(f) ? "Yes" : "No" },
+];
+
 interface Props {
   config: McpConfig;
   tools: McpTool[];
@@ -192,6 +200,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   const [functions, setFunctions] = useState<ZohoFunction[]>([]);
   const [filter, setFilter] = useState<FnFilterKey>("all");
   const [search, setSearch] = useState("");
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -211,6 +220,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
     setSelectedTools(toolNames);
     setFunctions([]);
     setError("");
+    setColumnFilters({});
     // Auto-load as soon as tools are available (MCP just connected)
     if (toolNames.length > 0) void loadFunctions(toolNames);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -245,6 +255,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
       } else {
         setFunctions(all);
         setFilter("all");
+        setColumnFilters({});
       }
     } finally {
       setLoading(false);
@@ -262,9 +273,10 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
     locked,
   };
   const bySeverity = filterMap[filter];
-  const displayed = search.trim()
+  const bySearch = search.trim()
     ? bySeverity.filter(f => getFnName(f).toLowerCase().includes(search.trim().toLowerCase()))
     : bySeverity;
+  const displayed = applyColumnFilters(bySearch, FUNCTION_COLUMNS, columnFilters);
 
   function getTags(f: ZohoFunction): FnFilterKey[] {
     const tags: FnFilterKey[] = [];
@@ -362,6 +374,12 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                 )}
               </div>
             </div>
+
+            <ColumnFilterChips items={bySearch} columns={FUNCTION_COLUMNS} active={columnFilters} onChange={(key, val) => setColumnFilters(prev => {
+              const next = { ...prev };
+              if (val) next[key] = val; else delete next[key];
+              return next;
+            })} />
 
             {displayed.length === 0 ? (
               <div className="empty-state">

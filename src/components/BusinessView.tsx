@@ -35,7 +35,7 @@ const DIMENSION_TO_ACTION_IDS: Record<keyof HealthScoreDimensions, string[]> = {
 };
 
 const DIMENSION_TOOLTIPS: Record<keyof HealthScoreDimensions, string> = {
-  automationCoverage: "How many of your modules have at least one active automation watching them. Modules with none drag this score down.",
+  automationCoverage: "Of your core lead-to-deal modules — Leads, Campaigns, Contacts, Deals — how many have at least one active workflow watching them. The ones with none drag this score down.",
   processCompleteness: "Whether a sales pipeline, blueprint, and defined stages actually exist. Missing pieces mean reps have no set path to follow.",
   accessSecurity: "Whether access is split into real roles instead of everyone sharing one login level, and whether inactive users still hold licenses.",
   dataArchitecture: "Whether your fields and module count are kept reasonable, not bloated with excess required fields or clutter.",
@@ -205,6 +205,15 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   // its container so scrollLeft: 0 always shows the true left edge.
   const flowFits = flowContainerWidth > 0 && flowWidth <= flowContainerWidth;
 
+  const edgeGeoms = flowMap.edges.map(edge => {
+    const from = flowMap.nodes.find(n => n.id === edge.from);
+    const to = flowMap.nodes.find(n => n.id === edge.to);
+    if (!from || !to) return null;
+    const x1 = nodeX(from, colW) + NODE_W / 2, y1 = nodeY(from) + NODE_H;
+    const x2 = nodeX(to, colW) + NODE_W / 2, y2 = nodeY(to);
+    return { edge, x1, y1, x2, y2, midX: (x1 + x2) / 2, midY: (y1 + y2) / 2 };
+  }).filter((g): g is NonNullable<typeof g> => g !== null);
+
   return (
     <div className="business-view">
 
@@ -257,7 +266,20 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
       {/* ── 2. Business Process Flow Map ── */}
       <div className={`business-view-section flow-map-card ${flowExpanded ? "expanded" : ""} ${flowMinimized ? "minimized" : ""}`}>
         <div className="flow-map-toolbar">
-          <SectionTitle text="How a Lead Moves Through Your Business" tooltip="How does a lead move through my business end to end — where does it break down, and what's automated vs. manual?" />
+          <div className="flow-map-toolbar-left">
+            <SectionTitle text="How a Lead Moves Through Your Business" tooltip="How does a lead move through my business end to end — where does it break down, and what's automated vs. manual?" />
+            <div className="flow-legend">
+              <span className="flow-legend-item" data-tooltip-below="This step runs automatically — no manual work needed.">
+                <span className="flow-legend-swatch flow-legend-solid" />Automated
+              </span>
+              <span className="flow-legend-item" data-tooltip-below="This step isn't automated — someone has to do it by hand.">
+                <span className="flow-legend-swatch flow-legend-dashed" />Manual
+              </span>
+              <span className="flow-legend-item" data-tooltip-below="This connection is broken — the expected setup is missing or misconfigured.">
+                <span className="flow-legend-cross">✕</span>Broken
+              </span>
+            </div>
+          </div>
           <div className="flow-map-toolbar-actions">
             <button className="flow-map-expand-btn" title={flowMinimized ? "Restore" : "Minimize"} onClick={() => setFlowMinimized(v => !v)}>
               {flowMinimized ? "▸" : "▾"}
@@ -277,24 +299,24 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
               <div key={lane.id} className="flow-lane-label" style={{ top: i * LANE_BLOCK_H }}>{lane.label}</div>
             ))}
             <svg className="flow-map-edges" width={flowWidth} height={flowHeight}>
-              {flowMap.edges.map(edge => {
-                const from = flowMap.nodes.find(n => n.id === edge.from);
-                const to = flowMap.nodes.find(n => n.id === edge.to);
-                if (!from || !to) return null;
-                const x1 = nodeX(from, colW) + NODE_W / 2, y1 = nodeY(from) + NODE_H;
-                const x2 = nodeX(to, colW) + NODE_W / 2, y2 = nodeY(to);
-                const midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
-                return (
-                  <g key={edge.id} className={`flow-edge-${edge.kind}`}>
-                    {edge.detail && <title>{edge.detail}</title>}
-                    <path d={edgePath(x1, y1, x2, y2)} />
-                    {edge.kind === "broken" && (
-                      <text x={midX} y={midY} textAnchor="middle" className="flow-edge-break-mark">✕</text>
-                    )}
-                  </g>
-                );
-              })}
+              {edgeGeoms.map(({ edge, x1, y1, x2, y2, midX, midY }) => (
+                <g key={edge.id} className={`flow-edge-${edge.kind}`}>
+                  {edge.detail && <title>{edge.detail}</title>}
+                  <path d={edgePath(x1, y1, x2, y2)} />
+                  {edge.kind === "broken" && (
+                    <text x={midX} y={midY} textAnchor="middle" className="flow-edge-break-mark">✕</text>
+                  )}
+                </g>
+              ))}
             </svg>
+            {edgeGeoms.filter(g => g.edge.detail).map(({ edge, midX, midY }) => (
+              <span
+                key={`${edge.id}-hover`}
+                className="flow-edge-hover"
+                style={{ left: midX, top: midY }}
+                data-tooltip={edge.detail}
+              />
+            ))}
             {flowMap.nodes.map(node => (
               <button
                 key={node.id}
