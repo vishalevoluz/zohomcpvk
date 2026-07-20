@@ -191,6 +191,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   const [error, setError] = useState("");
   const [functions, setFunctions] = useState<ZohoFunction[]>([]);
   const [filter, setFilter] = useState<FnFilterKey>("all");
+  const [search, setSearch] = useState("");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -260,7 +261,10 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
     missing_ref: missingRef,
     locked,
   };
-  const displayed = filterMap[filter];
+  const bySeverity = filterMap[filter];
+  const displayed = search.trim()
+    ? bySeverity.filter(f => getFnName(f).toLowerCase().includes(search.trim().toLowerCase()))
+    : bySeverity;
 
   function getTags(f: ZohoFunction): FnFilterKey[] {
     const tags: FnFilterKey[] = [];
@@ -342,16 +346,27 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
             <div className="table-toolbar">
               <span className="table-info">
                 {filter === "all"
-                  ? `Showing all ${functions.length} function${functions.length !== 1 ? "s" : ""}`
+                  ? `Showing all ${displayed.length} of ${functions.length} function${functions.length !== 1 ? "s" : ""}`
                   : `Showing ${displayed.length} ${filter.replace(/_/g, " ")} of ${functions.length}`}
               </span>
-              {filter !== "all" && (
-                <button className="btn-secondary" onClick={() => setFilter("all")}>Clear filter</button>
-              )}
+              <div className="table-toolbar-actions">
+                <input
+                  type="text"
+                  className="table-search"
+                  placeholder="Search functions…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+                {filter !== "all" && (
+                  <button className="btn-secondary" onClick={() => setFilter("all")}>Clear filter</button>
+                )}
+              </div>
             </div>
 
             {displayed.length === 0 ? (
-              <div className="empty-state">No {filter.replace(/_/g, " ")} found — this is a good sign!</div>
+              <div className="empty-state">
+                {search.trim() ? `No functions match "${search.trim()}".` : `No ${filter.replace(/_/g, " ")} found — this is a good sign!`}
+              </div>
             ) : (
               <div className="table-scroll">
                 <table className="modules-table">

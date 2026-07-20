@@ -588,6 +588,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   const [error, setError] = useState("");
   const [workflows, setWorkflows] = useState<ZohoWorkflow[]>([]);
   const [filter, setFilter] = useState<WFFilterKey>("all");
+  const [search, setSearch] = useState("");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [detailWf, setDetailWf] = useState<ZohoWorkflow | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -729,7 +730,13 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   const conflicting = workflows.filter(w => { const k = triggerKey(w); return k !== "—::—" && (triggerCounts.get(k) ?? 0) > 1 && !duplicate.includes(w); });
   const complex = workflows.filter(w => getActionsCount(w) > 5 || getCriteriaCount(w) > 5);
   const filterMap: Record<WFFilterKey, ZohoWorkflow[]> = { all: workflows, disabled, duplicate, conflicting, complex };
-  const displayed = filterMap[filter];
+  const bySeverity = filterMap[filter];
+  const displayed = search.trim()
+    ? bySeverity.filter(w => {
+        const q = search.trim().toLowerCase();
+        return getName(w).toLowerCase().includes(q) || getModule(w).toLowerCase().includes(q);
+      })
+    : bySeverity;
 
   function getTags(w: ZohoWorkflow): WFFilterKey[] {
     const tags: WFFilterKey[] = [];
@@ -853,12 +860,23 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
               <div className="modules-table-wrap">
                 <div className="table-toolbar">
                   <span className="table-info">
-                    {filter === "all" ? `Showing all ${workflows.length} workflows` : `Showing ${displayed.length} ${filter} workflow${displayed.length !== 1 ? "s" : ""} of ${workflows.length}`}
+                    {filter === "all" ? `Showing all ${displayed.length} of ${workflows.length} workflows` : `Showing ${displayed.length} ${filter} workflow${displayed.length !== 1 ? "s" : ""} of ${workflows.length}`}
                   </span>
-                  {filter !== "all" && <button className="btn-secondary" onClick={() => setFilter("all")}>Clear filter</button>}
+                  <div className="table-toolbar-actions">
+                    <input
+                      type="text"
+                      className="table-search"
+                      placeholder="Search workflows…"
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                    />
+                    {filter !== "all" && <button className="btn-secondary" onClick={() => setFilter("all")}>Clear filter</button>}
+                  </div>
                 </div>
                 {displayed.length === 0 ? (
-                  <div className="empty-state">No {filter} workflows found — good!</div>
+                  <div className="empty-state">
+                    {search.trim() ? `No workflows match "${search.trim()}".` : `No ${filter} workflows found — good!`}
+                  </div>
                 ) : (
                   <div className="table-scroll">
                     <table className="modules-table">

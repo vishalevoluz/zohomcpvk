@@ -425,17 +425,37 @@ export function buildFlowMap(
   });
 
   // ── Blueprint sub-node on the Deals stage ────────────────────────────────
+  // Scoped to blueprints that actually reference the Deals module (a blueprint
+  // configured for Leads/Tickets/etc. doesn't say anything about deals), and
+  // split by Active vs Inactive/Draft — only Active blueprints are enforced by
+  // Zoho, so a pile of inactive/draft blueprints must not read as "live".
   if (!blueprintsResolved) {
     // no placeholder node — spec treats this as an enhancement, not a required lane member
-  } else if (entityData.blueprints.items.length > 0) {
-    nodes.push({
-      id: "deals-blueprint", lane: "qualification", col: 2,
-      label: `Blueprint${entityData.blueprints.items.length > 1 ? "s" : ""}`,
-      status: "live",
-      detail: `${entityData.blueprints.items.length} blueprint process${entityData.blueprints.items.length !== 1 ? "es" : ""} enforce how deals move forward.`,
-      targetSection: "blueprints",
+  } else {
+    const dealsModule = stageModule.get("deals");
+    const dealsApiName = dealsModule ? moduleApiName(dealsModule) : "";
+    const dealsBlueprints = dealsApiName ? blueprintsForModule(entityData.blueprints.items, dealsApiName) : [];
+    // Blueprint status is its own flat "Active" | "Inactive" | "Draft" string —
+    // isActiveWorkflow's default-true fallback would wrongly count Draft as active,
+    // so check the exact value here rather than reusing that predicate.
+    const activeBlueprints = dealsBlueprints.filter(bp => {
+      const status = (bp as Record<string, unknown> | null)?.status;
+      return typeof status === "string" && status.toLowerCase() === "active";
     });
-    edges.push({ id: "deals-to-blueprint", from: "deals", to: "deals-blueprint", kind: "automated" });
+    if (dealsBlueprints.length > 0) {
+      const status: NodeStatus = activeBlueprints.length > 0 ? "live" : "gap";
+      const detail = activeBlueprints.length > 0
+        ? `${activeBlueprints.length} of ${dealsBlueprints.length} blueprint process${dealsBlueprints.length !== 1 ? "es" : ""} for Deals ${activeBlueprints.length !== 1 ? "are" : "is"} active and enforcing how deals move forward.`
+        : `${dealsBlueprints.length} blueprint process${dealsBlueprints.length !== 1 ? "es" : ""} configured for Deals, but none are active — nothing is currently enforced.`;
+      nodes.push({
+        id: "deals-blueprint", lane: "qualification", col: 2,
+        label: `Blueprint${dealsBlueprints.length > 1 ? "s" : ""}`,
+        status,
+        detail,
+        targetSection: "blueprints",
+      });
+      edges.push({ id: "deals-to-blueprint", from: "deals", to: "deals-blueprint", kind: status === "live" ? "automated" : "broken" });
+    }
   }
 
   // ── Pipeline stages, rendered as a pill chain inside Qualification ───────

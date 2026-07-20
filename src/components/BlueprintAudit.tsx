@@ -1018,6 +1018,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
   const [error, setError] = useState("");
   const [blueprints, setBlueprints] = useState<ZohoBlueprint[]>([]);
   const [filter, setFilter] = useState<BPFilterKey>("all");
+  const [search, setSearch] = useState("");
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
@@ -1223,7 +1224,13 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
     missing_transitions: missingTransitions,
     incomplete,
   };
-  const displayed = filterMap[filter];
+  const bySeverity = filterMap[filter];
+  const displayed = search.trim()
+    ? bySeverity.filter(bp => {
+        const q = search.trim().toLowerCase();
+        return getBPName(bp).toLowerCase().includes(q) || getBPModule(bp).toLowerCase().includes(q);
+      })
+    : bySeverity;
 
   function getTags(bp: ZohoBlueprint): BPFilterKey[] {
     const tags: BPFilterKey[] = [];
@@ -1388,16 +1395,27 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
                 <div className="table-toolbar">
                   <span className="table-info">
                     {filter === "all"
-                      ? `Showing all ${blueprints.length} blueprint${blueprints.length !== 1 ? "s" : ""}`
+                      ? `Showing all ${displayed.length} of ${blueprints.length} blueprint${blueprints.length !== 1 ? "s" : ""}`
                       : `Showing ${displayed.length} ${filter.replace(/_/g, " ")} blueprint${displayed.length !== 1 ? "s" : ""} of ${blueprints.length}`}
                   </span>
-                  {filter !== "all" && (
-                    <button className="btn-secondary" onClick={() => setFilter("all")}>Clear filter</button>
-                  )}
+                  <div className="table-toolbar-actions">
+                    <input
+                      type="text"
+                      className="table-search"
+                      placeholder="Search blueprints…"
+                      value={search}
+                      onChange={e => setSearch(e.target.value)}
+                    />
+                    {filter !== "all" && (
+                      <button className="btn-secondary" onClick={() => setFilter("all")}>Clear filter</button>
+                    )}
+                  </div>
                 </div>
 
                 {displayed.length === 0 ? (
-                  <div className="empty-state">No {filter.replace(/_/g, " ")} blueprints found — this is a good sign!</div>
+                  <div className="empty-state">
+                    {search.trim() ? `No blueprints match "${search.trim()}".` : `No ${filter.replace(/_/g, " ")} blueprints found — this is a good sign!`}
+                  </div>
                 ) : (
                   <div className="table-scroll">
                     <table className="modules-table">

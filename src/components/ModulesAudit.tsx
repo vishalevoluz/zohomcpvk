@@ -148,6 +148,7 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
   const [error, setError] = useState("");
   const [modules, setModules] = useState<ZohoModule[]>([]);
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [search, setSearch] = useState("");
   const [expandedModule, setExpandedModule] = useState<string | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -232,7 +233,13 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
     all: modules, hidden, unused, custom, deprecated,
   };
 
-  const displayed = filterMap[filter];
+  const bySeverity = filterMap[filter];
+  const displayed = search.trim()
+    ? bySeverity.filter(m => {
+        const q = search.trim().toLowerCase();
+        return getName(m).toLowerCase().includes(q) || String(m.api_name ?? "").toLowerCase().includes(q);
+      })
+    : bySeverity;
 
   function getTags(m: ZohoModule): FilterKey[] {
     const tags: FilterKey[] = [];
@@ -308,18 +315,29 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
             <div className="table-toolbar">
               <span className="table-info">
                 {filter === "all"
-                  ? `Showing all ${modules.length} modules`
+                  ? `Showing all ${displayed.length} of ${modules.length} modules`
                   : `Showing ${displayed.length} ${filter} module${displayed.length !== 1 ? "s" : ""} of ${modules.length}`}
               </span>
-              {filter !== "all" && (
-                <button className="btn-secondary" onClick={() => setFilter("all")}>
-                  Clear filter
-                </button>
-              )}
+              <div className="table-toolbar-actions">
+                <input
+                  type="text"
+                  className="table-search"
+                  placeholder="Search modules…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+                {filter !== "all" && (
+                  <button className="btn-secondary" onClick={() => setFilter("all")}>
+                    Clear filter
+                  </button>
+                )}
+              </div>
             </div>
 
             {displayed.length === 0 ? (
-              <div className="empty-state">No {filter} modules found — this is a good sign!</div>
+              <div className="empty-state">
+                {search.trim() ? `No modules match "${search.trim()}".` : `No ${filter} modules found — this is a good sign!`}
+              </div>
             ) : (
               <div className="table-scroll">
                 <table className="modules-table">

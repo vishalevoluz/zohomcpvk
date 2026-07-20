@@ -14,8 +14,20 @@ interface Props {
   allTools: McpTool[];
 }
 
+// Connected Tools is grouped the same way as the Audit nav, plus Fields —
+// which has tools but no nav entry of its own (see lib/sections.ts).
+const TOOL_GROUPS: { id: Section; label: string; icon: string }[] = [
+  ...SECTIONS,
+  { id: "fields", label: "Fields", icon: "▤" },
+];
+
 export default function Sidebar({ connected, activeSection, onSelectSection, categorized, logCount, onDisconnect, allTools }: Props) {
   const [toolsOpen, setToolsOpen] = useState(true);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+
+  function toggleGroup(id: string) {
+    setOpenGroups(prev => ({ ...prev, [id]: !(prev[id] ?? true) }));
+  }
 
   return (
     <aside className="sidebar">
@@ -94,16 +106,34 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
           </button>
           {toolsOpen && (
             <div className="sidebar-tools-list">
-              {allTools.map(t => (
-                <div
-                  key={t.name}
-                  className="sidebar-tool-item"
-                  title={t.description ?? t.name}
-                >
-                  <span className="sidebar-tool-dot" />
-                  <span className="sidebar-tool-name">{t.name}</span>
-                </div>
-              ))}
+              {TOOL_GROUPS.map(group => {
+                const items = categorized[group.id] ?? [];
+                if (items.length === 0) return null;
+                const groupOpen = openGroups[group.id] ?? true;
+                return (
+                  <div key={group.id} className="sidebar-tools-group">
+                    <button
+                      className="sidebar-tools-group-header"
+                      onClick={() => toggleGroup(group.id)}
+                    >
+                      <span className="sidebar-tools-group-icon">{group.icon}</span>
+                      <span className="sidebar-tools-group-title">{group.label}</span>
+                      <span className="sidebar-nav-count">{items.length}</span>
+                      <span className="sidebar-tools-chevron">{groupOpen ? "▴" : "▾"}</span>
+                    </button>
+                    {groupOpen && items.map(t => (
+                      <div
+                        key={t.name}
+                        className="sidebar-tool-item"
+                        title={t.description ?? t.name}
+                      >
+                        <span className="sidebar-tool-dot" />
+                        <span className="sidebar-tool-name">{t.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
