@@ -5,7 +5,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
 import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions } from "@/lib/businessScore";
-import { buildFlowMap, buildFlowReport, FLOW_MAP_ENTITIES, type FlowNode, type FlowLane, type RecordSampleStageId, type RecordSampleState, type PipelineStagesState } from "@/lib/flowMapModel";
+import { buildFlowMap, FLOW_MAP_ENTITIES, type FlowNode, type FlowLane, type RecordSampleStageId, type RecordSampleState, type PipelineStagesState } from "@/lib/flowMapModel";
 import { evaluateCostCards } from "@/lib/costCards";
 import { computeTopActions } from "@/lib/priorityActions";
 import HealthGauge from "@/components/HealthGauge";
@@ -149,7 +149,6 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   );
   const costCards = useMemo(() => evaluateCostCards(entityData), [entityData]);
   const priorityResult = useMemo(() => computeTopActions(entityData), [entityData]);
-  const flowReport = useMemo(() => buildFlowReport(flowMap), [flowMap]);
 
   useEffect(() => {
     const el = flowScrollRef.current;
@@ -351,43 +350,6 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
           </div>
         )}
 
-        {/* ── Report: plain-text summary of the same connection facts ── */}
-        <div className="flow-report">
-          <h4 className="flow-report-title">Report</h4>
-          <div className="flow-report-rows">
-            {flowReport.rows.map(row => (
-              <div key={row.id} className="flow-report-row">
-                <span className={`flow-report-dot status-${row.status}`} />
-                <div className="flow-report-row-body">
-                  <div className="flow-report-row-head">
-                    <strong>{row.label}</strong>
-                    <span className="flow-report-row-status">{statusLabel(row.status)}</span>
-                  </div>
-                  <p>{row.detail}</p>
-                  {row.automation && (
-                    <p className="flow-report-automation">
-                      <span className={`flow-report-dot small status-${row.automation.status}`} />
-                      Automation: {row.automation.detail}
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-            <div className="flow-report-row">
-              <span className={`flow-report-dot status-${flowReport.pipeline.status}`} />
-              <div className="flow-report-row-body">
-                <div className="flow-report-row-head">
-                  <strong>Pipeline Stages</strong>
-                  <span className="flow-report-row-status">{statusLabel(flowReport.pipeline.status)}</span>
-                </div>
-                <p>{flowReport.pipeline.detail}</p>
-                {flowReport.pipeline.stageNames.length > 0 && (
-                  <p className="flow-report-pipeline-chain">{flowReport.pipeline.stageNames.join(" → ")}</p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
         </>
         )}
       </div>
