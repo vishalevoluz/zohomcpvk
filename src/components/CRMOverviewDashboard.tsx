@@ -9,6 +9,7 @@ import {
   type CrmEntityType,
   type EntityState,
   CRM_ENTITIES,
+  extractArray,
   getItemName,
   getItemStatus,
   isEntityResolved,
@@ -16,7 +17,61 @@ import {
 import type { Section } from "@/lib/sections";
 import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser } from "@/lib/crmPredicates";
 import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions } from "@/lib/businessScore";
+import { automationCoverageApiNames } from "@/lib/flowMapModel";
 import HealthGauge from "@/components/HealthGauge";
+
+// Per-module rule counts fetched separately from the shared entityData —
+// getValidationRules/getLayoutRules require a `module` query param, so they
+// can't be pulled in as a flat entity list the way workflows/blueprints are.
+interface RuleCoverage {
+  validation: Record<string, number>;
+  layout: Record<string, number>;
+}
+
+function parseMcpJson(result: unknown): Record<string, unknown> | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as Record<string, unknown>;
+  if (Array.isArray(r.content)) {
+    for (const item of r.content as Record<string, unknown>[]) {
+      if (item.type === "text" && typeof item.text === "string") {
+        try { return JSON.parse(item.text) as Record<string, unknown>; } catch { /* not JSON */ }
+      }
+    }
+  }
+  return r;
+}
+
+function countRulesInResponse(result: unknown): number {
+  const parsed = parseMcpJson(result);
+  if (!parsed) return 0;
+  for (const v of Object.values(parsed)) {
+    if (Array.isArray(v)) return v.length;
+  }
+  return 0;
+}
+
+// Functions naming/duplicate/failure health — like RuleCoverage, this is fetched
+// separately from entityData since getFunctions/getAutomationFunctionFailures
+// aren't part of the shared flat-entity list.
+interface FunctionHealth {
+  totalScanned: number;
+  hasMore: boolean;
+  duplicateGroups: { name: string; count: number }[];
+  suspiciousNames: string[];
+  failuresChecked: boolean;
+  failureCount: number;
+}
+
+// Placeholder/test names left over from building or copy-pasting a function —
+// "Function1", "Untitled", "Copy of X", or a plain "test"/"temp" prefix.
+const SUSPICIOUS_FUNCTION_NAME = /^(function\d*$|untitled|new[ _]?function|copy[ _]?of|test|temp)/i;
+const MAX_FUNCTION_PAGES = 5; // 5 * 200 = up to 1000 functions scanned
+
+function hasMoreRecords(result: unknown): boolean {
+  const parsed = parseMcpJson(result);
+  const info = parsed?.info as Record<string, unknown> | undefined;
+  return info?.more_records === true;
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -147,7 +202,9 @@ function findZiaTool(tools: McpTool[]): McpTool | null {
 
 function generateRecommendations(
   entityData: Record<CrmEntityType, EntityState>,
-  tools: McpTool[]
+  tools: McpTool[],
+  ruleCoverage: RuleCoverage | null,
+  functionHealth: FunctionHealth | null
 ): Recommendation[] {
   const recs: Recommendation[] = [];
 
@@ -236,6 +293,79 @@ function generateRecommendations(
       title: "Some Modules Lack Custom Layouts",
       description: `Only ${layouts.length} layouts for ${mods.length} modules. Consider adding role-specific layouts for key modules to improve data entry efficiency and field relevance per team.`,
       severity: "low", category: "changes", icon: "⊟",
+    });
+  }
+
+  // Functions — the shared entityData doesn't track custom functions (see
+  // FunctionAudit.tsx, which fetches them separately), so naming/duplicate/
+  // failure health is fetched independently (see functionHealth effect) and
+  // falls back to a tool-presence check when that data isn't in yet.
+  if (functionHealth) {
+    const scannedNote = functionHealth.hasMore
+      ? ` (based on the first ${functionHealth.totalScanned} scanned — your org has more)`
+      : ` (${functionHealth.totalScanned} scanned)`;
+
+    if (functionHealth.duplicateGroups.length > 0) {
+      const top = functionHealth.duplicateGroups
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 4)
+        .map(g => `"${g.name}" (${g.count}×)`)
+        .join(", ");
+      recs.push({
+        id: "duplicate-functions",
+        title: `${functionHealth.duplicateGroups.length} Duplicate Function Names Found`,
+        description: `Multiple functions share the exact same name${scannedNote}: ${top}. Duplicate names make it impossible to tell which one a workflow or button actually calls — rename or delete the unused copies.`,
+        severity: "medium", category: "changes", icon: "ƒ",
+      });
+    }
+
+    if (functionHealth.suspiciousNames.length > 0) {
+      recs.push({
+        id: "function-naming",
+        title: `${functionHealth.suspiciousNames.length} Functions With Placeholder Names`,
+        description: `Functions named like "${functionHealth.suspiciousNames.slice(0, 3).join('", "')}"${functionHealth.suspiciousNames.length > 3 ? ", …" : ""}${scannedNote} still carry their default/test name. Rename them to describe what they actually do, or delete them if they were never finished.`,
+        severity: "low", category: "changes", icon: "ƒ",
+      });
+    }
+
+    if (functionHealth.failuresChecked) {
+      if (functionHealth.failureCount > 0) {
+        recs.push({
+          id: "function-failures",
+          title: `${functionHealth.failureCount} Recent Function Execution Failures`,
+          description: `${functionHealth.failureCount} function run${functionHealth.failureCount !== 1 ? "s have" : " has"} failed recently. A failing function silently breaks whatever workflow, button, or blueprint action depends on it — check getAutomationFunctionFailures for the specific errors.`,
+          severity: "high", category: "changes", icon: "⚠",
+        });
+      } else {
+        recs.push({
+          id: "function-failures",
+          title: "No Recent Function Execution Failures",
+          description: "No failed function executions were found in the recent window. Keep an eye on this as you add more automation-triggered functions.",
+          severity: "low", category: "changes", icon: "⚠",
+        });
+      }
+    }
+
+    if (functionHealth.duplicateGroups.length === 0 && functionHealth.suspiciousNames.length === 0 && !functionHealth.failuresChecked) {
+      recs.push({
+        id: "audit-functions",
+        title: "No Naming Issues Found in Scanned Functions",
+        description: `Scanned ${functionHealth.totalScanned} functions — no duplicate or placeholder names detected. Connect getAutomationFunctionFailures too so failed executions can be surfaced here as well.`,
+        severity: "low", category: "changes", icon: "ƒ",
+      });
+    }
+  } else {
+    const hasFunctionTools = tools.some(t => /function/i.test(t.name));
+    recs.push(hasFunctionTools ? {
+      id: "audit-functions",
+      title: "Audit Custom Functions for Orphaned Scripts",
+      description: "Function tools are connected. Review your Deluge functions for ones no longer linked to any workflow, button, or blueprint action — orphaned functions still count against your org's script limits and are easy to lose track of. Check the Functions tab for the full breakdown.",
+      severity: "medium", category: "changes", icon: "ƒ",
+    } : {
+      id: "audit-functions",
+      title: "Connect Function Tools to Audit Custom Scripts",
+      description: "No function tooling is connected yet. If your org uses Deluge functions for workflow actions or buttons, attach getFunctions / getAllAutomationFunctions to your MCP connection so unused, duplicate, or failing scripts can be surfaced here.",
+      severity: "low", category: "changes", icon: "ƒ",
     });
   }
 
@@ -459,6 +589,71 @@ function generateRecommendations(
     severity: "medium", category: "architecture", icon: "⟳",
   });
 
+  // No Approval Process tool exists on any connected MCP server as of writing,
+  // so this stays a general best-practice suggestion — never data-backed.
+  recs.push({
+    id: "approval-process",
+    title: "Set Up Approval Processes for High-Value Records",
+    description: "Use Approval Processes to require manager sign-off before high-value deals, large discounts, or refunds go through. Without one configured, any rep can close or edit sensitive records with no checkpoint in between.",
+    severity: "medium", category: "architecture", icon: "☑",
+  });
+
+  // Validation Rules — real per-module counts when getValidationRules is connected.
+  const valEntries = ruleCoverage ? Object.entries(ruleCoverage.validation) : [];
+  if (valEntries.length > 0) {
+    const zeroVal = valEntries.filter(([, count]) => count === 0).map(([name]) => name);
+    if (zeroVal.length > 0) {
+      recs.push({
+        id: "validation-rules",
+        title: `${zeroVal.length} of ${valEntries.length} Core Modules Have No Validation Rules`,
+        description: `${zeroVal.join(", ")} ${zeroVal.length > 1 ? "have" : "has"} zero validation rules configured. Validation rules stop bad data before it's ever saved — e.g. blocking a Closed Won deal with no amount, or an invalid email format — instead of relying on a workflow to clean it up afterward.`,
+        severity: "medium", category: "architecture", icon: "⚑",
+      });
+    } else {
+      recs.push({
+        id: "validation-rules",
+        title: "Validation Rules Are Configured Across Core Modules",
+        description: `All ${valEntries.length} core modules have at least one validation rule (${valEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Keep reviewing them as new fields and picklists get added.`,
+        severity: "low", category: "architecture", icon: "⚑",
+      });
+    }
+  } else {
+    recs.push({
+      id: "validation-rules",
+      title: "Add Validation Rules to Enforce Data Quality at Entry",
+      description: "Validation rules stop bad data before it's ever saved — e.g. blocking a Closed Won deal with no amount, or an email field with an invalid format. They catch mistakes at the source instead of relying on a workflow to clean them up afterward.",
+      severity: "medium", category: "architecture", icon: "⚑",
+    });
+  }
+
+  // Layout Rules — real per-module counts when getLayoutRules is connected.
+  const layoutEntries = ruleCoverage ? Object.entries(ruleCoverage.layout) : [];
+  if (layoutEntries.length > 0) {
+    const zeroLayout = layoutEntries.filter(([, count]) => count === 0).map(([name]) => name);
+    if (zeroLayout.length > 0) {
+      recs.push({
+        id: "layout-rules",
+        title: `${zeroLayout.length} of ${layoutEntries.length} Core Modules Have No Layout Rules`,
+        description: `${zeroLayout.join(", ")} ${zeroLayout.length > 1 ? "have" : "has"} no layout rules. They dynamically show, hide, or require fields based on other field values — e.g. only showing "Reason for Loss" once Stage is set to Closed Lost — so forms stay focused instead of showing every field to every rep.`,
+        severity: "low", category: "architecture", icon: "⊡",
+      });
+    } else {
+      recs.push({
+        id: "layout-rules",
+        title: "Layout Rules Are Configured Across Core Modules",
+        description: `All ${layoutEntries.length} core modules have at least one layout rule (${layoutEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Nice — reps only see fields relevant to the record they're on.`,
+        severity: "low", category: "architecture", icon: "⊡",
+      });
+    }
+  } else {
+    recs.push({
+      id: "layout-rules",
+      title: "Use Layout Rules to Show Only Relevant Fields",
+      description: "Layout rules dynamically show, hide, or require fields based on other field values — e.g. only showing \"Reason for Loss\" once Stage is set to Closed Lost. This keeps forms focused instead of showing every field to every rep regardless of context.",
+      severity: "low", category: "architecture", icon: "⊡",
+    });
+  }
+
   return recs;
 }
 
@@ -654,12 +849,108 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     text: string;
     usage?: { inputTokens: number; outputTokens: number; model: string };
   }>>({});
+  const [ruleCoverage, setRuleCoverage] = useState<RuleCoverage | null>(null);
+  const ruleCoverageFetched = useRef(false);
+  const [functionHealth, setFunctionHealth] = useState<FunctionHealth | null>(null);
+  const functionHealthFetched = useRef(false);
 
   // Tick for relative-time display
   useEffect(() => {
     const id = setInterval(() => setRefreshTick(t => t + 1), 30_000);
     return () => clearInterval(id);
   }, []);
+
+  // Validation/layout rules need a `module` query param each, so they can't
+  // ride along with the flat entity fetches in useCrmEntities — pull them in
+  // separately, once, for the same core lifecycle modules the flow map and
+  // Automation Coverage already check (Leads, Campaigns, Contacts, Deals).
+  useEffect(() => {
+    if (ruleCoverageFetched.current) return;
+    if (!isEntityResolved(entityData.modules) || tools.length === 0) return;
+    const validationTool = tools.find(t => /getvalidationrules$/i.test(t.name));
+    const layoutTool = tools.find(t => /getlayoutrules$/i.test(t.name));
+    if (!validationTool && !layoutTool) return;
+    const coreApiNames = automationCoverageApiNames(entityData.modules.items);
+    if (coreApiNames.length === 0) return;
+
+    ruleCoverageFetched.current = true;
+    void (async () => {
+      const validation: Record<string, number> = {};
+      const layout: Record<string, number> = {};
+      for (const apiName of coreApiNames) {
+        for (const [tool, bucket] of [[validationTool, validation], [layoutTool, layout]] as const) {
+          if (!tool) continue;
+          const start = Date.now();
+          try {
+            const output = await executeTool(config, tool.name, { query_params: { module: apiName } });
+            bucket[apiName] = countRulesInResponse(output);
+            onLog({ id: crypto.randomUUID(), tool: tool.name, input: { query_params: { module: apiName } }, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+          } catch (e: unknown) {
+            onLog({ id: crypto.randomUUID(), tool: tool.name, input: { query_params: { module: apiName } }, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+          }
+        }
+      }
+      setRuleCoverage({ validation, layout });
+    })();
+  }, [entityData.modules, tools, config, onLog]);
+
+  // Function naming/duplicate/failure health — bounded to the first ~1000
+  // functions (5 pages of 200) so a huge org doesn't trigger unbounded fetches.
+  useEffect(() => {
+    if (functionHealthFetched.current) return;
+    if (tools.length === 0) return;
+    const functionsTool = tools.find(t => /getfunctions$/i.test(t.name));
+    const failuresTool = tools.find(t => /getautomationfunctionfailures$/i.test(t.name));
+    if (!functionsTool && !failuresTool) return;
+
+    functionHealthFetched.current = true;
+    void (async () => {
+      const names: string[] = [];
+      let hasMore = false;
+      if (functionsTool) {
+        for (let page = 1; page <= MAX_FUNCTION_PAGES; page++) {
+          const start = Date.now();
+          const input = { query_params: { page, per_page: 200 } };
+          try {
+            const output = await executeTool(config, functionsTool.name, input);
+            const items = extractArray(output) as Record<string, unknown>[];
+            for (const f of items) {
+              if (typeof f.name === "string" && f.name) names.push(f.name);
+            }
+            onLog({ id: crypto.randomUUID(), tool: functionsTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+            hasMore = hasMoreRecords(output);
+            if (items.length === 0 || !hasMore) break;
+          } catch (e: unknown) {
+            onLog({ id: crypto.randomUUID(), tool: functionsTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+            break;
+          }
+        }
+      }
+
+      let failureCount = 0;
+      const failuresChecked = !!failuresTool;
+      if (failuresTool) {
+        const start = Date.now();
+        const input = { query_params: { page: 1, per_page: 200 } };
+        try {
+          const output = await executeTool(config, failuresTool.name, input);
+          failureCount = extractArray(output).length;
+          onLog({ id: crypto.randomUUID(), tool: failuresTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+        } catch (e: unknown) {
+          onLog({ id: crypto.randomUUID(), tool: failuresTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+        }
+      }
+
+      const nameCounts = new Map<string, number>();
+      names.forEach(n => { const k = n.trim().toLowerCase(); nameCounts.set(k, (nameCounts.get(k) ?? 0) + 1); });
+      const duplicateGroups = Array.from(nameCounts.entries())
+        .filter(([, count]) => count > 1)
+        .map(([key, count]) => ({ name: names.find(n => n.trim().toLowerCase() === key) ?? key, count }));
+      const suspiciousNames = names.filter(n => SUSPICIOUS_FUNCTION_NAME.test(n.trim()));
+
+      setFunctionHealth({ totalScanned: names.length, hasMore, duplicateGroups, suspiciousNames, failuresChecked, failureCount });
+    })();
+  }, [tools, config, onLog]);
 
   function buildCrmContext(): string {
     const ctxLines: string[] = ["=== CRM OVERVIEW ==="];
@@ -802,7 +1093,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
 
   void refreshTick; // used for relative time updates
 
-  const recommendations = generateRecommendations(entityData, tools);
+  const recommendations = generateRecommendations(entityData, tools, ruleCoverage, functionHealth);
   const filteredRecs = recommendations.filter(r => r.category === activeTab);
   const totalItems = CRM_ENTITIES.reduce((sum, e) => sum + entityData[e.type].items.length, 0);
   const loadingCount = CRM_ENTITIES.filter(e => entityData[e.type].loading).length;
