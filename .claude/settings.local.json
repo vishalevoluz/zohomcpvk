@@ -37,7 +37,19 @@
       "Bash(\"/c/Program Files/Google/Chrome/Application/chrome.exe\" --headless=new --disable-gpu --no-sandbox --force-color-profile=srgb --force-dark-mode --enable-features=WebContentsForceDark --screenshot=\"C:\\\\Users\\\\ABC\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-ABC-Downloads-zoho-mcp-app-zoho-mcp-app\\\\2fb9e552-bc80-4594-9641-cd32d9aa840a\\\\scratchpad\\\\dashboard-dark.png\" --window-size=1280,500 \"http://localhost:3005/dashboard?t=3\")",
       "Bash(\"/c/Program Files/Google/Chrome/Application/chrome.exe\" --headless=new --disable-gpu --no-sandbox --blink-settings=preferredColorScheme=1 --screenshot=\"C:\\\\Users\\\\ABC\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-ABC-Downloads-zoho-mcp-app-zoho-mcp-app\\\\2fb9e552-bc80-4594-9641-cd32d9aa840a\\\\scratchpad\\\\dashboard-dark2.png\" --window-size=1280,500 \"http://localhost:3005/dashboard?t=4\")",
       "Bash(rm -rf .next/trace)",
-      "Bash(PORT=3009 npm run dev)"
+      "Bash(PORT=3009 npm run dev)",
+      "Bash(python3 -c ' *)",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=11316' | Select-Object ProcessId,CommandLine\")",
+      "PowerShell(try { $r = Invoke-WebRequest -Uri http://localhost:3001 -UseBasicParsing -TimeoutSec 8; $r.StatusCode } catch { $_.Exception.Message })",
+      "Bash(npx --yes chromium-cli --version)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(find . -maxdepth 3 -iname \"SKILL.md\" -not -path \"*/node_modules/*\")",
+      "Bash(ls .claude/skills)",
+      "Bash(which chromium-cli *)",
+      "Bash(npm ls *)",
+      "Bash(chromium-cli --help)",
+      "Bash(command -v chromium-cli)",
+      "PowerShell(Get-CimInstance *)"
     ]
   }
 }

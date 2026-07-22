@@ -16,17 +16,8 @@ import {
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
 import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser } from "@/lib/crmPredicates";
-import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions } from "@/lib/businessScore";
-import { automationCoverageApiNames } from "@/lib/flowMapModel";
+import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions, type RuleCoverage } from "@/lib/businessScore";
 import HealthGauge from "@/components/HealthGauge";
-
-// Per-module rule counts fetched separately from the shared entityData —
-// getValidationRules/getLayoutRules require a `module` query param, so they
-// can't be pulled in as a flat entity list the way workflows/blueprints are.
-interface RuleCoverage {
-  validation: Record<string, number>;
-  layout: Record<string, number>;
-}
 
 function parseMcpJson(result: unknown): Record<string, unknown> | null {
   if (!result || typeof result !== "object") return null;
@@ -41,18 +32,10 @@ function parseMcpJson(result: unknown): Record<string, unknown> | null {
   return r;
 }
 
-function countRulesInResponse(result: unknown): number {
-  const parsed = parseMcpJson(result);
-  if (!parsed) return 0;
-  for (const v of Object.values(parsed)) {
-    if (Array.isArray(v)) return v.length;
-  }
-  return 0;
-}
-
-// Functions naming/duplicate/failure health — like RuleCoverage, this is fetched
-// separately from entityData since getFunctions/getAutomationFunctionFailures
-// aren't part of the shared flat-entity list.
+// Functions naming/duplicate/failure health — like RuleCoverage (see
+// useRuleCoverage.ts), this is fetched separately from entityData since
+// getFunctions/getAutomationFunctionFailures aren't part of the shared
+// flat-entity list.
 interface FunctionHealth {
   totalScanned: number;
   hasMore: boolean;
@@ -111,6 +94,8 @@ interface Props {
   fetchAll: () => void;
   lastRefresh: Date | null;
   onSelectSection: (s: Section) => void;
+  pipelineStageCount: number;
+  ruleCoverage: RuleCoverage | null;
 }
 
 type Severity = "critical" | "warning" | "good";
@@ -589,14 +574,62 @@ function generateRecommendations(
     severity: "medium", category: "architecture", icon: "⟳",
   });
 
-  // No Approval Process tool exists on any connected MCP server as of writing,
-  // so this stays a general best-practice suggestion — never data-backed.
-  recs.push({
-    id: "approval-process",
-    title: "Set Up Approval Processes for High-Value Records",
-    description: "Use Approval Processes to require manager sign-off before high-value deals, large discounts, or refunds go through. Without one configured, any rep can close or edit sensitive records with no checkpoint in between.",
-    severity: "medium", category: "architecture", icon: "☑",
-  });
+  // Approval Process — real per-module counts when getApprovalRules is connected;
+  // falls back to the general best-practice suggestion otherwise.
+  const approvalEntries = ruleCoverage ? Object.entries(ruleCoverage.approval) : [];
+  if (approvalEntries.length > 0) {
+    const zeroApproval = approvalEntries.filter(([, count]) => count === 0).map(([name]) => name);
+    if (zeroApproval.length > 0) {
+      recs.push({
+        id: "approval-process",
+        title: `${zeroApproval.length} of ${approvalEntries.length} Core Modules Have No Approval Process`,
+        description: `${zeroApproval.join(", ")} ${zeroApproval.length > 1 ? "have" : "has"} no approval process configured. Approval Processes require manager sign-off before a record change goes through — e.g. blocking a high-value deal or large discount from closing without review — instead of letting any rep close or edit sensitive records with no checkpoint.`,
+        severity: "medium", category: "architecture", icon: "☑",
+      });
+    } else {
+      recs.push({
+        id: "approval-process",
+        title: "Approval Processes Are Configured Across Core Modules",
+        description: `All ${approvalEntries.length} core modules have at least one approval process (${approvalEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Keep reviewing thresholds as deal sizes and discount policy change.`,
+        severity: "low", category: "architecture", icon: "☑",
+      });
+    }
+  } else {
+    recs.push({
+      id: "approval-process",
+      title: "Set Up Approval Processes for High-Value Records",
+      description: "Use Approval Processes to require manager sign-off before high-value deals, large discounts, or refunds go through. Without one configured, any rep can close or edit sensitive records with no checkpoint in between.",
+      severity: "medium", category: "architecture", icon: "☑",
+    });
+  }
+
+  // Assignment Rules — real per-module counts when getAssignmentRules is connected.
+  const assignmentEntries = ruleCoverage ? Object.entries(ruleCoverage.assignment) : [];
+  if (assignmentEntries.length > 0) {
+    const zeroAssignment = assignmentEntries.filter(([, count]) => count === 0).map(([name]) => name);
+    if (zeroAssignment.length > 0) {
+      recs.push({
+        id: "assignment-rules",
+        title: `${zeroAssignment.length} of ${assignmentEntries.length} Core Modules Have No Assignment Rules`,
+        description: `${zeroAssignment.join(", ")} ${zeroAssignment.length > 1 ? "have" : "has"} zero assignment rules configured. Assignment rules automatically route new records to the right rep or queue — e.g. sending Leads from a specific source straight to the SDR on rotation — instead of leaving them sitting unassigned until someone notices.`,
+        severity: "medium", category: "architecture", icon: "➜",
+      });
+    } else {
+      recs.push({
+        id: "assignment-rules",
+        title: "Assignment Rules Are Configured Across Core Modules",
+        description: `All ${assignmentEntries.length} core modules have at least one assignment rule (${assignmentEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Keep reviewing them as territories or reps change.`,
+        severity: "low", category: "architecture", icon: "➜",
+      });
+    }
+  } else {
+    recs.push({
+      id: "assignment-rules",
+      title: "Add Assignment Rules to Route Records Automatically",
+      description: "Assignment rules automatically route new records to the right rep or queue based on criteria like source, region, or product — e.g. sending Leads from a specific source straight to the SDR on rotation. Without one, new records sit unassigned until someone manually claims them.",
+      severity: "medium", category: "architecture", icon: "➜",
+    });
+  }
 
   // Validation Rules — real per-module counts when getValidationRules is connected.
   const valEntries = ruleCoverage ? Object.entries(ruleCoverage.validation) : [];
@@ -651,6 +684,32 @@ function generateRecommendations(
       title: "Use Layout Rules to Show Only Relevant Fields",
       description: "Layout rules dynamically show, hide, or require fields based on other field values — e.g. only showing \"Reason for Loss\" once Stage is set to Closed Lost. This keeps forms focused instead of showing every field to every rep regardless of context.",
       severity: "low", category: "architecture", icon: "⊡",
+    });
+  }
+
+  // Schedules — an org-level count (not per-module) when getSchedules is connected.
+  if (ruleCoverage && ruleCoverage.scheduleCount !== null) {
+    if (ruleCoverage.scheduleCount === 0) {
+      recs.push({
+        id: "schedules",
+        title: "No Schedules Configured for Recurring Automation",
+        description: "This org has zero schedules set up. Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence — e.g. a nightly cleanup of stale Leads or a weekly digest email — instead of relying on someone to trigger them by hand.",
+        severity: "low", category: "architecture", icon: "◷",
+      });
+    } else {
+      recs.push({
+        id: "schedules",
+        title: `${ruleCoverage.scheduleCount} Schedule${ruleCoverage.scheduleCount > 1 ? "s" : ""} Configured for Recurring Automation`,
+        description: `This org has ${ruleCoverage.scheduleCount} schedule${ruleCoverage.scheduleCount > 1 ? "s" : ""} set up to run automation on a recurring cadence. Review them periodically to make sure they're still needed and pointed at the right functions or workflows.`,
+        severity: "low", category: "architecture", icon: "◷",
+      });
+    }
+  } else {
+    recs.push({
+      id: "schedules",
+      title: "Use Schedules to Automate Recurring Tasks",
+      description: "Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence — e.g. nightly data cleanup or a weekly digest email — without needing a person to trigger them by hand.",
+      severity: "low", category: "architecture", icon: "◷",
     });
   }
 
@@ -832,7 +891,7 @@ function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label:
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function CRMOverviewDashboard({ config, tools, onLog, entityData, fetchEntity, fetchAll, lastRefresh, onSelectSection }: Props) {
+export default function CRMOverviewDashboard({ config, tools, onLog, entityData, fetchEntity, fetchAll, lastRefresh, onSelectSection, pipelineStageCount, ruleCoverage }: Props) {
   const [activeTab, setActiveTab] = useState<ReportTab>("changes");
   const [ziaMessages, setZiaMessages] = useState<ZiaMessage[]>([]);
   const [ziaInput, setZiaInput] = useState("");
@@ -849,8 +908,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     text: string;
     usage?: { inputTokens: number; outputTokens: number; model: string };
   }>>({});
-  const [ruleCoverage, setRuleCoverage] = useState<RuleCoverage | null>(null);
-  const ruleCoverageFetched = useRef(false);
   const [functionHealth, setFunctionHealth] = useState<FunctionHealth | null>(null);
   const functionHealthFetched = useRef(false);
 
@@ -859,40 +916,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     const id = setInterval(() => setRefreshTick(t => t + 1), 30_000);
     return () => clearInterval(id);
   }, []);
-
-  // Validation/layout rules need a `module` query param each, so they can't
-  // ride along with the flat entity fetches in useCrmEntities — pull them in
-  // separately, once, for the same core lifecycle modules the flow map and
-  // Automation Coverage already check (Leads, Campaigns, Contacts, Deals).
-  useEffect(() => {
-    if (ruleCoverageFetched.current) return;
-    if (!isEntityResolved(entityData.modules) || tools.length === 0) return;
-    const validationTool = tools.find(t => /getvalidationrules$/i.test(t.name));
-    const layoutTool = tools.find(t => /getlayoutrules$/i.test(t.name));
-    if (!validationTool && !layoutTool) return;
-    const coreApiNames = automationCoverageApiNames(entityData.modules.items);
-    if (coreApiNames.length === 0) return;
-
-    ruleCoverageFetched.current = true;
-    void (async () => {
-      const validation: Record<string, number> = {};
-      const layout: Record<string, number> = {};
-      for (const apiName of coreApiNames) {
-        for (const [tool, bucket] of [[validationTool, validation], [layoutTool, layout]] as const) {
-          if (!tool) continue;
-          const start = Date.now();
-          try {
-            const output = await executeTool(config, tool.name, { query_params: { module: apiName } });
-            bucket[apiName] = countRulesInResponse(output);
-            onLog({ id: crypto.randomUUID(), tool: tool.name, input: { query_params: { module: apiName } }, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
-          } catch (e: unknown) {
-            onLog({ id: crypto.randomUUID(), tool: tool.name, input: { query_params: { module: apiName } }, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
-          }
-        }
-      }
-      setRuleCoverage({ validation, layout });
-    })();
-  }, [entityData.modules, tools, config, onLog]);
 
   // Function naming/duplicate/failure health — bounded to the first ~1000
   // functions (5 pages of 200) so a huge org doesn't trigger unbounded fetches.
@@ -1101,7 +1124,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const ziaTool = findZiaTool(tools);
 
   const healthResolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t]));
-  const healthScore = computeHealthScore(entityData);
+  const healthScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage);
   const kpis = computeKpis(entityData);
   const moduleVis = computeModuleVisibility(entityData);
   const missingData = computeMissingData(entityData);

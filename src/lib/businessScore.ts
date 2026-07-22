@@ -10,6 +10,26 @@ export interface HealthScoreDimensions {
   automationHealth: number;
 }
 
+// Per-module rule counts for the automation types that require a `module`
+// query param per call (assignment/approval/validation/layout rules), plus a
+// flat org-level count for schedules — fetched separately from entityData by
+// useRuleCoverage.ts since they can't ride along with the flat entity fetches
+// in useCrmEntities. Defined here (rather than in the hook) so this file, the
+// dimension it feeds, stays the source of truth for the shape it consumes.
+export interface RuleCoverage {
+  validation: Record<string, number>;
+  layout: Record<string, number>;
+  assignment: Record<string, number>;
+  approval: Record<string, number>;
+  scheduleCount: number | null;
+}
+
+// The per-module rule-coverage buckets that count as "this core module has
+// automation" for scoreAutomationCoverage — schedules are excluded since
+// they're an org-level concept, not tied to a specific module.
+const PER_MODULE_COVERAGE_KEYS: (keyof Pick<RuleCoverage, "validation" | "layout" | "assignment" | "approval">)[] =
+  ["validation", "layout", "assignment", "approval"];
+
 export type HealthZone = "healthy" | "needs-attention" | "at-risk" | "critical";
 
 export interface HealthScoreResult {
@@ -20,7 +40,7 @@ export interface HealthScoreResult {
   color: string;
 }
 
-function scoreAutomationCoverage(modules: unknown[], workflows: unknown[]): number {
+function scoreAutomationCoverage(modules: unknown[], workflows: unknown[], ruleCoverage: RuleCoverage | null): number {
   // Measured against the lead-to-deal lifecycle modules the flow map's own
   // "automation layer" checks (Leads, Campaigns, Contacts, Deals) rather than
   // every module in the org. Orgs can have hundreds of custom/junction modules
@@ -30,15 +50,23 @@ function scoreAutomationCoverage(modules: unknown[], workflows: unknown[]): numb
   const coreApiNames = automationCoverageApiNames(modules);
   if (coreApiNames.length === 0) return 20;
   const activeWorkflows = workflows.filter(isActiveWorkflow);
-  const covered = coreApiNames.filter(apiName => activeWorkflows.some(w => workflowReferencesModule(w, apiName))).length;
+  // "Automated" now means workflows OR any of assignment/approval/validation/
+  // layout rules — a module fully covered by a validation rule + assignment
+  // rule but no workflow shouldn't read as unautomated just because workflows
+  // happen to be the only rule type entityData fetches as a flat list.
+  const covered = coreApiNames.filter(apiName => {
+    if (activeWorkflows.some(w => workflowReferencesModule(w, apiName))) return true;
+    if (!ruleCoverage) return false;
+    return PER_MODULE_COVERAGE_KEYS.some(key => (ruleCoverage[key][apiName] ?? 0) > 0);
+  }).length;
   return Math.round(20 * (covered / coreApiNames.length));
 }
 
-function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], stages: unknown[]): number {
+function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], pipelineStageCount: number): number {
   let score = 20;
   if (pipelines.length === 0) score -= 7;
   if (blueprints.length === 0) score -= 7;
-  if (stages.length === 0) score -= 7;
+  if (pipelineStageCount === 0) score -= 7;
   return Math.max(0, score);
 }
 
@@ -93,10 +121,21 @@ function zoneForTotal(total: number): { zone: HealthZone; verdict: string; color
   }
 }
 
-export function computeHealthScore(entityData: Record<CrmEntityType, EntityState>): HealthScoreResult {
+// pipelineStageCount comes from the real getLayouts → getPipelines chain (see
+// usePipelineStages.ts / the flow map's pill chain) rather than the generic
+// "stages" entity — no MCP server exposes a dedicated stages-listing tool, so
+// entityData.stages.items is always empty and used to permanently dock 7
+// points from Process Completeness even for orgs with a fully configured
+// pipeline. Defaults to entityData.stages.items.length for callers that
+// haven't wired the real count through yet.
+export function computeHealthScore(
+  entityData: Record<CrmEntityType, EntityState>,
+  pipelineStageCount: number = entityData.stages.items.length,
+  ruleCoverage: RuleCoverage | null = null
+): HealthScoreResult {
   const dimensions: HealthScoreDimensions = {
-    automationCoverage: scoreAutomationCoverage(entityData.modules.items, entityData.workflows.items),
-    processCompleteness: scoreProcessCompleteness(entityData.pipelines.items, entityData.blueprints.items, entityData.stages.items),
+    automationCoverage: scoreAutomationCoverage(entityData.modules.items, entityData.workflows.items, ruleCoverage),
+    processCompleteness: scoreProcessCompleteness(entityData.pipelines.items, entityData.blueprints.items, pipelineStageCount),
     accessSecurity: scoreAccessSecurity(entityData.profiles.items, entityData.users.items),
     dataArchitecture: scoreDataArchitecture(entityData.fields.items, entityData.modules.items),
     automationHealth: scoreAutomationHealth(entityData.workflows.items),

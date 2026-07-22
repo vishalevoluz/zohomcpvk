@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions } from "@/lib/businessScore";
+import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions, type RuleCoverage } from "@/lib/businessScore";
 import { buildFlowMap, FLOW_MAP_ENTITIES, type FlowNode, type FlowLane, type RecordSampleStageId, type RecordSampleState, type PipelineStagesState } from "@/lib/flowMapModel";
 import { evaluateCostCards } from "@/lib/costCards";
 import { computeTopActions } from "@/lib/priorityActions";
@@ -14,6 +14,7 @@ interface Props {
   entityData: Record<CrmEntityType, EntityState>;
   recordSamples: Record<RecordSampleStageId, RecordSampleState>;
   pipelineStages: PipelineStagesState;
+  ruleCoverage: RuleCoverage | null;
   fetchAll: () => void;
   onSelectSection: (s: Section) => void;
 }
@@ -35,7 +36,7 @@ const DIMENSION_TO_ACTION_IDS: Record<keyof HealthScoreDimensions, string[]> = {
 };
 
 const DIMENSION_TOOLTIPS: Record<keyof HealthScoreDimensions, string> = {
-  automationCoverage: "Of your core lead-to-deal modules — Leads, Campaigns, Contacts, Deals — how many have at least one active workflow watching them. The ones with none drag this score down.",
+  automationCoverage: "Of your core lead-to-deal modules — Leads, Campaigns, Contacts, Deals — how many have at least one active workflow, assignment rule, approval process, validation rule, or layout rule watching them. The ones with none drag this score down.",
   processCompleteness: "Whether a sales pipeline, blueprint, and defined stages actually exist. Missing pieces mean reps have no set path to follow.",
   accessSecurity: "Whether access is split into real roles instead of everyone sharing one login level, and whether inactive users still hold licenses.",
   dataArchitecture: "Whether your fields and module count are kept reasonable, not bloated with excess required fields or clutter.",
@@ -90,6 +91,11 @@ const NODE_H = 52;
 const MARGIN_L = 20;
 const MARGIN_R = 40;
 
+// Matches the pipeline-stage pill nodes buildFlowMap adds (stage-0, stage-1,
+// …, stage-gap, stage-loading) — hidden from the diagram per product request,
+// without touching the flowMapModel.ts logic that computes them.
+const PIPELINE_STAGE_NODE_ID = /^stage-(\d+|gap|loading)$/;
+
 function nodeX(node: FlowNode, colW: number): number { return MARGIN_L + node.col * colW; }
 function nodeY(node: FlowNode): number {
   const laneIdx = FLOW_LANES.findIndex(l => l.id === node.lane);
@@ -129,7 +135,7 @@ function CostCard({ card }: { card: { id: string; icon: string; headline: string
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function BusinessView({ entityData, recordSamples, pipelineStages, fetchAll, onSelectSection }: Props) {
+export default function BusinessView({ entityData, recordSamples, pipelineStages, ruleCoverage, fetchAll, onSelectSection }: Props) {
   const [displayScore, setDisplayScore] = useState(0);
   const [costCardsExpanded, setCostCardsExpanded] = useState(false);
   const [selectedFlowNodeId, setSelectedFlowNodeId] = useState<string | null>(null);
@@ -141,7 +147,10 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   const flowScrollInitialized = useRef(false);
 
   const healthResolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t]));
-  const healthScore = useMemo(() => computeHealthScore(entityData), [entityData]);
+  const healthScore = useMemo(
+    () => computeHealthScore(entityData, pipelineStages.items.length, ruleCoverage),
+    [entityData, pipelineStages.items.length, ruleCoverage],
+  );
   const flowResolved = FLOW_MAP_ENTITIES.some(t => isEntityResolved(entityData[t]));
   const flowMap = useMemo(
     () => buildFlowMap(entityData, recordSamples, pipelineStages),
@@ -185,9 +194,15 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
     priorityRefs.current[match ?? ""]?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  const selectedNode = flowMap.nodes.find(n => n.id === selectedFlowNodeId) ?? null;
+  // Pipeline stage pills are still computed by buildFlowMap (backend intact —
+  // see flowMapModel.ts) but hidden from this card's diagram per product
+  // request; filter them out of the rendered node/edge set only.
+  const visibleNodes = flowMap.nodes.filter(n => !PIPELINE_STAGE_NODE_ID.test(n.id));
+  const visibleEdges = flowMap.edges.filter(e => !PIPELINE_STAGE_NODE_ID.test(e.from) && !PIPELINE_STAGE_NODE_ID.test(e.to));
 
-  const numCols = Math.max(0, ...flowMap.nodes.map(n => n.col)) + 1;
+  const selectedNode = visibleNodes.find(n => n.id === selectedFlowNodeId) ?? null;
+
+  const numCols = Math.max(0, ...visibleNodes.map(n => n.col)) + 1;
   // Stretch column spacing to fill the available card width (capped so nodes
   // don't end up absurdly far apart on very wide screens), so the diagram
   // fills the card edge-to-edge instead of sitting cramped on the left.
@@ -204,9 +219,9 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   // its container so scrollLeft: 0 always shows the true left edge.
   const flowFits = flowContainerWidth > 0 && flowWidth <= flowContainerWidth;
 
-  const edgeGeoms = flowMap.edges.map(edge => {
-    const from = flowMap.nodes.find(n => n.id === edge.from);
-    const to = flowMap.nodes.find(n => n.id === edge.to);
+  const edgeGeoms = visibleEdges.map(edge => {
+    const from = visibleNodes.find(n => n.id === edge.from);
+    const to = visibleNodes.find(n => n.id === edge.to);
     if (!from || !to) return null;
     const x1 = nodeX(from, colW) + NODE_W / 2, y1 = nodeY(from) + NODE_H;
     const x2 = nodeX(to, colW) + NODE_W / 2, y2 = nodeY(to);
@@ -316,7 +331,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
                 data-tooltip={edge.detail}
               />
             ))}
-            {flowMap.nodes.map(node => (
+            {visibleNodes.map(node => (
               <button
                 key={node.id}
                 className={`flow-node status-${node.status} ${selectedFlowNodeId === node.id ? "selected" : ""}`}
