@@ -83,7 +83,11 @@ function scoreAutomationHealth(workflows: unknown[]): number {
   // workflows never moved this dimension at all.
   if (workflows.length === 0) return 20;
   const active = workflows.filter(isActiveWorkflow).length;
-  return Math.round(20 * (active / workflows.length));
+  // Floored at 1 whenever at least one workflow is active — otherwise a tiny
+  // active ratio (e.g. 1 of 64) rounds down to the same 0/20 as having zero
+  // active workflows at all, hiding that some automation genuinely exists.
+  if (active === 0) return 0;
+  return Math.max(1, Math.round(20 * (active / workflows.length)));
 }
 
 // Same healthy/needs-attention/at-risk/critical banding used for the overall
