@@ -49,7 +49,9 @@
       "Bash(npm ls *)",
       "Bash(chromium-cli --help)",
       "Bash(command -v chromium-cli)",
-      "PowerShell(Get-CimInstance *)"
+      "PowerShell(Get-CimInstance *)",
+      "Bash(perl -pi -e 's/--color-accent-bg/--color-brand-bg/g; s/--color-accent-hover/--color-brand-hover/g; s/--color-accent-glow/--color-brand-glow/g' src/app/globals.css)",
+      "PowerShell($p = Get-Process -Name node -ErrorAction SilentlyContinue; if \\($p\\) { Stop-Process -Id $p.Id -Force -Confirm:$false -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500; \"stopped\")"
     ]
   }
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { Button } from "@/components/ui/button";
 import jsPDF from "jspdf";
 import autoTable, { type RowInput } from "jspdf-autotable";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
@@ -2225,12 +2226,12 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
         <div className="crm-header-actions">
           {loadingCount > 0 && <span className="spinner" />}
-          <button className="btn-secondary" onClick={fetchAll} disabled={loadingCount > 0}>
+          <Button variant="outline" size="sm" onClick={fetchAll} disabled={loadingCount > 0}>
             ↺ Refresh All
-          </button>
-          <button className="btn-connect" onClick={downloadFullReport}>
+          </Button>
+          <Button size="sm" onClick={downloadFullReport}>
             ↓ Download Full Report (PDF)
-          </button>
+          </Button>
         </div>
       </div>
 
