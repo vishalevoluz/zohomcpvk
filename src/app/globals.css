@@ -563,18 +563,48 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   font-size: 14px;
 }
 
-/* Spinner */
+/* Spinner — EvoAudit-branded icon (rounded-square badge + spinning ring +
+   pulsing bolt), drop-in replacement for the plain circular spinner. Pure
+   CSS (ring via ::before border, bolt via ::after mask) so none of the 40+
+   `<span className="spinner" />` call sites across the app need to change —
+   only this rule does. */
 .spinner {
   display: inline-block;
-  width: 13px;
-  height: 13px;
-  border: 2px solid rgba(0,0,0,0.15);
-  border-top-color: currentColor;
-  border-radius: 50%;
-  animation: spin 0.65s linear infinite;
+  position: relative;
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+  border-radius: 5px;
+  background: var(--color-brand-bg);
+  flex-shrink: 0;
+}
+.spinner::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 7px;
+  border: 2px solid transparent;
+  border-top-color: var(--color-brand);
+  animation: spinner-spin 0.9s linear infinite;
+}
+.spinner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 55%;
+  height: 55%;
+  background-color: var(--color-brand);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M13 2L4 14h6l-1 8 9-12h-6l1-8z'/%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M13 2L4 14h6l-1 8 9-12h-6l1-8z'/%3E%3C/svg%3E") no-repeat center / contain;
+  animation: spinner-pulse 1s ease-in-out infinite;
 }
 
-@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes spinner-spin { to { transform: rotate(360deg); } }
+@keyframes spinner-pulse {
+  0%, 100% { opacity: 0.75; filter: drop-shadow(0 0 0px transparent); }
+  50% { opacity: 1; filter: drop-shadow(0 0 4px var(--color-brand-glow)); }
+}
 
 /* Responsive */
 @media (max-width: 600px) {
@@ -903,49 +933,63 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   100% { background-position: 0 0; }
 }
 
-/* ─── Dashboard loading gate ─────────────────────────────────── */
-.dashboard-loading {
-  flex: 1;
+/* ─── Full-page EvoAudit loader (shown once, on the very first connect,
+   before the app shell/sidebar ever mount) ──────────────────────────── */
+.evo-loader-page {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-tertiary);
+}
+.evo-loader-wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 4rem 1rem;
+  gap: 20px;
+}
+.evo-loader-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  padding: 10px 20px 10px 10px;
+  border-radius: var(--radius-lg);
+}
+.evo-loader-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text);
+  letter-spacing: 0.2px;
+}
+.evo-loader-status {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  letter-spacing: 0.3px;
   text-align: center;
 }
-.dashboard-loading-spinner {
-  width: 26px;
-  height: 26px;
-  border-width: 3px;
-  margin-bottom: 8px;
+.evo-loader-status::after {
+  content: "";
+  animation: evo-loader-dots 1.2s steps(4, end) infinite;
 }
-.dashboard-loading-title {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--color-text);
+@keyframes evo-loader-dots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+  100% { content: ""; }
 }
-.dashboard-loading-sub {
-  font-size: 13px;
-  color: var(--color-text-secondary);
+
+/* Larger variant of .spinner for the full-page badge */
+.spinner.spinner-lg {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
 }
-.dashboard-loading-track {
-  width: 220px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--color-bg);
-  border: 0.5px solid var(--color-border);
-  overflow: hidden;
-  margin-top: 8px;
-}
-.dashboard-loading-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--color-brand), #4A9FE0, var(--color-brand));
-  background-size: 200% 100%;
-  animation: connect-progress-stripe 1.4s linear infinite;
-  transition: width 0.3s ease;
-}
+.spinner.spinner-lg::before { inset: -4px; border-radius: 12px; border-width: 2px; }
 
 /* ─── Connected status bar ───────────────────────────────────── */
 .connected-status {
@@ -4272,11 +4316,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .main-card:active {
   box-shadow: 0 4px 16px var(--color-brand-glow), 0 0 0 3px var(--color-brand-bg);
-}
-
-.spinner {
-  border-color: rgba(255,255,255,0.25);
-  border-top-color: currentColor;
 }
 
 .sidebar-nav-item.active .sidebar-nav-count {

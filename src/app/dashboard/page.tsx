@@ -125,6 +125,22 @@ export default function DashboardPage() {
     );
   }
 
+  if (!dashboardReady) {
+    return (
+      <div className="evo-loader-page">
+        <div className="evo-loader-wrap">
+          <div className="evo-loader-badge">
+            <span className="spinner spinner-lg" />
+            <span className="evo-loader-name">Evo<span className="landing-logo-accent">Audit</span></span>
+          </div>
+          <div className="evo-loader-status">
+            Loading {resolvedEntityCount}/{CRM_ENTITIES.length} data sources
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -157,44 +173,30 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Keep audit panels mounted so loaded data survives section switches */}
+        {/* Keep audit panels mounted so loaded data survives section switches.
+            No loading fallback needed here — dashboardReady is guaranteed true
+            by the time this renders (see the full-page loader early-return above). */}
         <div style={{ display: activeSection === "crm-dashboard" ? undefined : "none" }}>
-          {dashboardReady ? (
-            <>
-              <BusinessView
-                entityData={crm.entityData}
-                recordSamples={crmRecords.data}
-                pipelineStages={pipelineStages.data}
-                ruleCoverage={ruleCoverage.data}
-                fetchAll={fetchAllData}
-                onSelectSection={onSelectSection}
-              />
-              <CRMOverviewDashboard
-                config={config}
-                tools={tools}
-                onLog={onLog}
-                entityData={crm.entityData}
-                fetchEntity={crm.fetchEntity}
-                fetchAll={fetchAllData}
-                lastRefresh={crm.lastRefresh}
-                onSelectSection={onSelectSection}
-                pipelineStageCount={pipelineStages.data.items.length}
-                ruleCoverage={ruleCoverage.data}
-              />
-            </>
-          ) : (
-            <div className="dashboard-loading">
-              <span className="spinner dashboard-loading-spinner" />
-              <p className="dashboard-loading-title">Loading your CRM Dashboard…</p>
-              <p className="dashboard-loading-sub">{resolvedEntityCount}/{CRM_ENTITIES.length} data sources loaded</p>
-              <div className="dashboard-loading-track">
-                <div
-                  className="dashboard-loading-fill"
-                  style={{ width: `${(resolvedEntityCount / CRM_ENTITIES.length) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
+          <BusinessView
+            entityData={crm.entityData}
+            recordSamples={crmRecords.data}
+            pipelineStages={pipelineStages.data}
+            ruleCoverage={ruleCoverage.data}
+            fetchAll={fetchAllData}
+            onSelectSection={onSelectSection}
+          />
+          <CRMOverviewDashboard
+            config={config}
+            tools={tools}
+            onLog={onLog}
+            entityData={crm.entityData}
+            fetchEntity={crm.fetchEntity}
+            fetchAll={fetchAllData}
+            lastRefresh={crm.lastRefresh}
+            onSelectSection={onSelectSection}
+            pipelineStageCount={pipelineStages.data.items.length}
+            ruleCoverage={ruleCoverage.data}
+          />
         </div>
         <div className="main-card" style={{ display: activeSection === "modules" ? undefined : "none" }}>
           <ModulesAudit config={config} tools={categorized.modules} allTools={tools} onLog={onLog} />
