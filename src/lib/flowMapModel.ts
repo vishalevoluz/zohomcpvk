@@ -1,6 +1,7 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, moduleApiName, workflowReferencesModule, blueprintsForModule, findBlueprintFieldApiName } from "@/lib/crmPredicates";
+import { isActiveWorkflow, moduleApiName, workflowReferencesModule, blueprintsForModule, findBlueprintFieldApiName, ruleCoverageCount, ruleCoverageBreakdown } from "@/lib/crmPredicates";
+import type { RuleCoverage } from "@/lib/crmPredicates";
 import type { Section } from "@/lib/sections";
 
 export type FlowLane = "entry" | "qualification" | "automation" | "outcome";
@@ -147,15 +148,25 @@ interface AutomationInfo {
   status: NodeStatus;   // "live" | "configured-issues" | "gap"
   activeCount: number;
   inactiveCount: number;
+  ruleCount: number;
+  rules: { validation: number; layout: number; assignment: number; approval: number };
 }
 
-function computeAutomation(apiName: string, workflows: unknown[]): AutomationInfo {
+// "Automated" matches the CRM Health Score's Automation Coverage dimension
+// (see scoreAutomationCoverage in businessScore.ts): a module counts as
+// automated if it has an active workflow OR any assignment/approval/
+// validation/layout rule, not just workflows — a module fully covered by a
+// validation rule + assignment rule but no workflow shouldn't read as a gap
+// on the flow map just because workflows used to be the only signal checked.
+function computeAutomation(apiName: string, workflows: unknown[], ruleCoverage: RuleCoverage | null): AutomationInfo {
   const referencing = workflows.filter(w => workflowReferencesModule(w, apiName));
   const active = referencing.filter(isActiveWorkflow);
   const inactive = referencing.length - active.length;
-  if (referencing.length === 0) return { status: "gap", activeCount: 0, inactiveCount: 0 };
-  if (inactive > 0) return { status: "configured-issues", activeCount: active.length, inactiveCount: inactive };
-  return { status: "live", activeCount: active.length, inactiveCount: inactive };
+  const rules = ruleCoverageBreakdown(ruleCoverage, apiName);
+  const ruleCount = ruleCoverageCount(ruleCoverage, apiName);
+  if (active.length > 0 || ruleCount > 0) return { status: "live", activeCount: active.length, inactiveCount: inactive, ruleCount, rules };
+  if (inactive > 0) return { status: "configured-issues", activeCount: 0, inactiveCount: inactive, ruleCount: 0, rules };
+  return { status: "gap", activeCount: 0, inactiveCount: 0, ruleCount: 0, rules };
 }
 
 function edgeKindForStatus(status: NodeStatus): EdgeKind {
@@ -320,6 +331,7 @@ export function buildFlowMap(
   entityData: Record<CrmEntityType, EntityState>,
   recordSamples?: Partial<Record<RecordSampleStageId, RecordSampleState>>,
   pipelineStages?: PipelineStagesState,
+  ruleCoverage?: RuleCoverage | null,
 ): FlowMapModel {
   const nodes: FlowNode[] = [];
   const edges: FlowEdge[] = [];
@@ -369,7 +381,7 @@ export function buildFlowMap(
     const detail = `${moduleLabel(mod) || stage.label} module is connected — API name: ${apiName || "unknown"}`
       + (generatedType ? `, type: ${generatedType}.` : ".");
     if (stage.wantsAutomation && workflowsResolved) {
-      stageAutomation.set(stage.id, computeAutomation(apiName, entityData.workflows.items));
+      stageAutomation.set(stage.id, computeAutomation(apiName, entityData.workflows.items, ruleCoverage ?? null));
     }
     stageStatus.set(stage.id, status);
 
@@ -408,8 +420,11 @@ export function buildFlowMap(
 
   // ── Automation lane companion nodes ──────────────────────────────────────
   // Coloring rule: green ("live") if this module has at least one active
-  // workflow connected to it, red ("gap") otherwise — independent of the
-  // module node's own connected/not-connected color above.
+  // workflow OR any assignment/approval/validation/layout rule connected to
+  // it, red ("gap") otherwise — independent of the module node's own
+  // connected/not-connected color above. The tooltip always itemizes all
+  // five signal types (with a live count each) so it's clear exactly which
+  // ones are covering the module and which aren't, not just a combined total.
   const automationStages = STAGE_DEFINITIONS.filter(s => s.wantsAutomation);
   automationStages.forEach((stage, i) => {
     const moduleStatus = stageStatus.get(stage.id) ?? "loading";
@@ -420,19 +435,26 @@ export function buildFlowMap(
       status = "gap";
       detail = "No module to automate — module isn't connected.";
     } else if (mod && workflowsResolved) {
-      const auto = stageAutomation.get(stage.id) ?? computeAutomation(moduleApiName(mod), entityData.workflows.items);
-      status = auto.activeCount > 0 ? "live" : "gap";
-      const activePart = `${auto.activeCount} active`;
-      const inactivePart = `${auto.inactiveCount} inactive`;
-      if (auto.activeCount > 0 && auto.inactiveCount > 0) {
-        detail = `${activePart}, ${inactivePart} workflow${auto.activeCount + auto.inactiveCount !== 1 ? "s" : ""} found for ${moduleLabel(mod) || stage.label} — automation is running.`;
-      } else if (auto.activeCount > 0) {
-        detail = `${activePart} workflow${auto.activeCount !== 1 ? "s" : ""} found for ${moduleLabel(mod) || stage.label} — automation is running.`;
-      } else if (auto.inactiveCount > 0) {
-        detail = `${inactivePart} workflow${auto.inactiveCount !== 1 ? "s" : ""} found — configured but turned off, so nothing is currently running.`;
-      } else {
-        detail = "No workflows reference this module (0 active, 0 inactive) — automation isn't connected.";
-      }
+      const auto = stageAutomation.get(stage.id) ?? computeAutomation(moduleApiName(mod), entityData.workflows.items, ruleCoverage ?? null);
+      // Only an active workflow or an actual rule counts as "live" — a module
+      // whose only workflows are inactive, and has no rule coverage either,
+      // still reads as a gap (matches the original workflow-only behavior;
+      // "configured-issues" is folded into the same red state here since this
+      // node's color is a strict has-automation/doesn't binary).
+      status = auto.status === "live" ? "live" : "gap";
+      const label = moduleLabel(mod) || stage.label;
+      const workflowLine = `Workflows: ${auto.activeCount} active${auto.inactiveCount > 0 ? `, ${auto.inactiveCount} inactive` : ""}`;
+      const breakdown = [
+        workflowLine,
+        `Approval Process: ${auto.rules.approval}`,
+        `Validation Rules: ${auto.rules.validation}`,
+        `Layout Rules: ${auto.rules.layout}`,
+        `Assignment Rules: ${auto.rules.assignment}`,
+      ].join(" · ");
+      const verdict = status === "live"
+        ? `${label} is automated — at least one of these is active.`
+        : `${label} has no active workflow and no rule of any kind — automation isn't connected. Add any one (workflow, approval process, validation rule, layout rule, or assignment rule) to turn this green.`;
+      detail = `${breakdown}. ${verdict}`;
     }
     nodes.push({
       id: `${stage.id}-automation`, lane: "automation", col: i, label: `${stage.label} Automation`,

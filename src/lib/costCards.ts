@@ -8,7 +8,9 @@ export interface CostCardRule {
   id: string;
   icon: string;
   headline: string;
-  body: string;
+  // A function lets a card surface the real numbers behind the finding (e.g.
+  // "12 of 20 licensed users are active") instead of only a generic statement.
+  body: string | ((entityData: Record<CrmEntityType, EntityState>) => string);
   severity: CostCardSeverity;
   requires: CrmEntityType[];
   test: (entityData: Record<CrmEntityType, EntityState>) => boolean;
@@ -32,7 +34,14 @@ export const COST_CARD_RULES: CostCardRule[] = [
     id: "unused-seats",
     icon: "◎",
     headline: "You Are Paying for Unused Seats",
-    body: "Active user licenses are assigned to inactive accounts. This is direct, avoidable monthly spend.",
+    // Surfaces the actual purchased-vs-used numbers instead of a generic
+    // statement, so this reads as a concrete cost finding, not a vague warning.
+    body: e => {
+      const total = e.users.items.length;
+      const inactive = e.users.items.filter(isInactiveUser).length;
+      const active = total - inactive;
+      return `You have ${total} licensed user${total !== 1 ? "s" : ""}, but only ${active} ${active === 1 ? "is" : "are"} active. ${inactive} inactive license${inactive !== 1 ? "s" : ""} may still be billed monthly — free them up or reassign to someone actually using the CRM.`;
+    },
     severity: "WARNING",
     requires: ["users"],
     test: e => e.users.items.some(isInactiveUser),
@@ -94,7 +103,7 @@ export const COST_CARD_RULES: CostCardRule[] = [
     id: "unused-complexity",
     icon: "⊞",
     headline: "You Are Running Unused Complexity",
-    body: "Multiple CRM modules are empty and inactive. This adds confusion and slows down your team.",
+    body: "Multiple CRM modules are empty and inactive. This adds confusion and slows down your team — hide them from profiles rather than deleting to keep the option to reactivate later.",
     severity: "REVIEW",
     requires: ["modules", "workflows", "blueprints"],
     test: e => {
@@ -136,7 +145,8 @@ export function evaluateCostCards(
       continue;
     }
     if (rule.test(entityData)) {
-      triggered.push({ id: rule.id, icon: rule.icon, headline: rule.headline, body: rule.body, severity: rule.severity });
+      const body = typeof rule.body === "function" ? rule.body(entityData) : rule.body;
+      triggered.push({ id: rule.id, icon: rule.icon, headline: rule.headline, body, severity: rule.severity });
     }
   }
 

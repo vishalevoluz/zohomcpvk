@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
@@ -50,24 +50,30 @@ const SCHEDULE_TOOL_PATTERN = /getschedules$/i;
 
 // Assignment/approval/validation/layout rules and schedules each need a
 // `module` query param (or nothing, for schedules) and so can't ride along
-// with the flat entity fetches in useCrmEntities.ts — pulled in separately,
-// once, for the same core lifecycle modules the flow map and Automation
-// Coverage dimension already check (Leads, Campaigns, Contacts, Deals).
-// Shared by BusinessView and CRMOverviewDashboard so both reflect the same
-// broadened definition of "automation" without fetching twice.
+// with the flat entity fetches in useCrmEntities.ts — pulled in separately
+// for the same core lifecycle modules the flow map and Automation Coverage
+// dimension already check (Leads, Campaigns, Contacts, Deals). Shared by
+// BusinessView and CRMOverviewDashboard so both reflect the same broadened
+// definition of "automation" without fetching twice.
+//
+// Exposes `refetch` (same refreshTick pattern as usePipelineStages.ts) so a
+// manual dashboard refresh actually re-pulls rule counts — without it, a rule
+// added in Zoho after the first load would never show up until a full page
+// reload, since the old implementation fetched only once per session.
 export function useRuleCoverage(
   config: McpConfig | null,
   tools: McpTool[],
   entityData: Record<CrmEntityType, EntityState>,
   onLog: (log: ExecutionLog) => void
-): RuleCoverage | null {
+): { data: RuleCoverage | null; refetch: () => void } {
   const [ruleCoverage, setRuleCoverage] = useState<RuleCoverage | null>(null);
-  const fetched = useRef(false);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const fetchedTick = useRef<number | null>(null);
 
   useEffect(() => {
-    if (fetched.current) return;
     if (!config || tools.length === 0) return;
     if (!isEntityResolved(entityData.modules)) return;
+    if (fetchedTick.current === refreshTick) return;
 
     const matchedTools = PER_MODULE_RULE_TOOLS
       .map(def => ({ key: def.key, tool: tools.find(t => def.pattern.test(t.name)) }))
@@ -78,7 +84,7 @@ export function useRuleCoverage(
     const coreApiNames = automationCoverageApiNames(entityData.modules.items);
     if (coreApiNames.length === 0 && !scheduleTool) return;
 
-    fetched.current = true;
+    fetchedTick.current = refreshTick;
     void (async () => {
       const buckets: Record<PerModuleKey, Record<string, number>> = {
         validation: {}, layout: {}, assignment: {}, approval: {},
@@ -112,7 +118,9 @@ export function useRuleCoverage(
 
       setRuleCoverage({ ...buckets, scheduleCount });
     })();
-  }, [config, tools, entityData.modules, onLog]);
+  }, [config, tools, entityData.modules, onLog, refreshTick]);
 
-  return ruleCoverage;
+  const refetch = useCallback(() => setRefreshTick(t => t + 1), []);
+
+  return { data: ruleCoverage, refetch };
 }

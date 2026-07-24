@@ -2,12 +2,13 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isEntityResolved } from "@/lib/useCrmEntities";
+import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
 import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions, type RuleCoverage } from "@/lib/businessScore";
 import { buildFlowMap, FLOW_MAP_ENTITIES, type FlowNode, type FlowLane, type RecordSampleStageId, type RecordSampleState, type PipelineStagesState } from "@/lib/flowMapModel";
 import { evaluateCostCards } from "@/lib/costCards";
 import { computeTopActions } from "@/lib/priorityActions";
+import { isActiveWorkflow, workflowLastTriggered, workflowModuleLabel } from "@/lib/crmPredicates";
 import HealthGauge from "@/components/HealthGauge";
 
 interface Props {
@@ -106,6 +107,13 @@ function edgePath(x1: number, y1: number, x2: number, y2: number): string {
   return `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
 }
 
+function formatTriggerDate(iso: string | null): string {
+  if (!iso) return "Never triggered";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 function statusLabel(status: FlowNode["status"]): string {
   switch (status) {
     case "live": return "Live and working";
@@ -142,6 +150,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   const [flowExpanded, setFlowExpanded] = useState(false);
   const [flowMinimized, setFlowMinimized] = useState(false);
   const [flowContainerWidth, setFlowContainerWidth] = useState(0);
+  const [workflowTriggersExpanded, setWorkflowTriggersExpanded] = useState(false);
   const priorityRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const flowScrollRef = useRef<HTMLDivElement | null>(null);
   const flowScrollInitialized = useRef(false);
@@ -153,11 +162,38 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   );
   const flowResolved = FLOW_MAP_ENTITIES.some(t => isEntityResolved(entityData[t]));
   const flowMap = useMemo(
-    () => buildFlowMap(entityData, recordSamples, pipelineStages),
-    [entityData, recordSamples, pipelineStages],
+    () => buildFlowMap(entityData, recordSamples, pipelineStages, ruleCoverage),
+    [entityData, recordSamples, pipelineStages, ruleCoverage],
   );
   const costCards = useMemo(() => evaluateCostCards(entityData), [entityData]);
   const priorityResult = useMemo(() => computeTopActions(entityData), [entityData]);
+
+  const workflowsResolved = isEntityResolved(entityData.workflows);
+  // Active workflows only — an inactive one trivially "never triggers" and is
+  // already surfaced by the Workflows audit's own Disabled filter, so listing
+  // it here would just be noise on top of that existing signal.
+  const workflowTriggerRows = useMemo(() => {
+    if (!workflowsResolved) return [];
+    return entityData.workflows.items
+      .filter(isActiveWorkflow)
+      .map((w, i) => {
+        const lastTriggered = workflowLastTriggered(w);
+        return {
+          id: String((w as Record<string, unknown> | null)?.id ?? i),
+          name: getItemName(w, i),
+          module: workflowModuleLabel(w) || "—",
+          lastTriggered,
+          neverTriggered: lastTriggered === null,
+        };
+      })
+      // Never-triggered workflows are the actionable ones — surface them first.
+      .sort((a, b) => Number(b.neverTriggered) - Number(a.neverTriggered));
+  }, [entityData.workflows, workflowsResolved]);
+  const neverTriggeredCount = workflowTriggerRows.filter(r => r.neverTriggered).length;
+  const VISIBLE_WORKFLOW_TRIGGER_ROWS = 6;
+  const visibleWorkflowTriggerRows = workflowTriggersExpanded
+    ? workflowTriggerRows
+    : workflowTriggerRows.slice(0, VISIBLE_WORKFLOW_TRIGGER_ROWS);
 
   useEffect(() => {
     const el = flowScrollRef.current;
@@ -425,6 +461,56 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* ── 5. Workflow Trigger Activity ── */}
+      <div className="business-view-section">
+        <SectionTitle text="Workflow Trigger Activity" tooltip="When did each active workflow last actually fire? One that has never triggered isn't doing anything for you — flag it for review or removal instead of assuming it's working." />
+        {!workflowsResolved ? (
+          <div className="priority-actions-skeleton">
+            <span className="spinner" /> Loading workflow trigger history…
+          </div>
+        ) : workflowTriggerRows.length === 0 ? (
+          <p className="business-view-hint">No active workflows found.</p>
+        ) : (
+          <>
+            {neverTriggeredCount > 0 && (
+              <p className="business-view-hint workflow-trigger-summary">
+                {neverTriggeredCount} of {workflowTriggerRows.length} active workflow{workflowTriggerRows.length !== 1 ? "s" : ""} {neverTriggeredCount === 1 ? "has" : "have"} never fired — worth reviewing whether {neverTriggeredCount === 1 ? "it's" : "they're"} still needed.
+              </p>
+            )}
+            <div className="workflow-trigger-list">
+              {visibleWorkflowTriggerRows.map(row => (
+                <div key={row.id} className={`workflow-trigger-row ${row.neverTriggered ? "flagged" : ""}`}>
+                  <div className="workflow-trigger-top">
+                    <div className="workflow-trigger-main">
+                      <span className="workflow-trigger-name">{row.name}</span>
+                      <span className="workflow-trigger-module">{row.module}</span>
+                    </div>
+                    <span className={`workflow-trigger-date ${row.neverTriggered ? "never" : ""}`}>
+                      {formatTriggerDate(row.lastTriggered)}
+                    </span>
+                    {row.neverTriggered && (
+                      <span className="workflow-trigger-flag" data-tooltip="This workflow has never fired since it was created — either its criteria never match a real record, or it's dead configuration nobody needs.">
+                        Unnecessary?
+                      </span>
+                    )}
+                  </div>
+                  {row.neverTriggered && (
+                    <p className="workflow-trigger-suggestion">
+                      Suggestion: Check its criteria — it may be scoped to conditions no real record ever meets. If it&apos;s genuinely unneeded, deactivate or delete it instead of leaving it as dead configuration.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+            {workflowTriggerRows.length > VISIBLE_WORKFLOW_TRIGGER_ROWS && !workflowTriggersExpanded && (
+              <button className="cost-cards-more" onClick={() => setWorkflowTriggersExpanded(true)}>
+                + {workflowTriggerRows.length - VISIBLE_WORKFLOW_TRIGGER_ROWS} more workflow{workflowTriggerRows.length - VISIBLE_WORKFLOW_TRIGGER_ROWS !== 1 ? "s" : ""}
+              </button>
+            )}
+          </>
         )}
       </div>
     </div>

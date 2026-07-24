@@ -1,5 +1,6 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, workflowReferencesModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount } from "@/lib/crmPredicates";
+import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
 export interface HealthScoreDimensions {
@@ -10,25 +11,11 @@ export interface HealthScoreDimensions {
   automationHealth: number;
 }
 
-// Per-module rule counts for the automation types that require a `module`
-// query param per call (assignment/approval/validation/layout rules), plus a
-// flat org-level count for schedules — fetched separately from entityData by
-// useRuleCoverage.ts since they can't ride along with the flat entity fetches
-// in useCrmEntities. Defined here (rather than in the hook) so this file, the
-// dimension it feeds, stays the source of truth for the shape it consumes.
-export interface RuleCoverage {
-  validation: Record<string, number>;
-  layout: Record<string, number>;
-  assignment: Record<string, number>;
-  approval: Record<string, number>;
-  scheduleCount: number | null;
-}
-
-// The per-module rule-coverage buckets that count as "this core module has
-// automation" for scoreAutomationCoverage — schedules are excluded since
-// they're an org-level concept, not tied to a specific module.
-const PER_MODULE_COVERAGE_KEYS: (keyof Pick<RuleCoverage, "validation" | "layout" | "assignment" | "approval">)[] =
-  ["validation", "layout", "assignment", "approval"];
+// RuleCoverage now lives in crmPredicates.ts so flowMapModel.ts can share the
+// same "what counts as automation" definition without importing this file
+// (which itself imports from flowMapModel.ts). Re-exported here so existing
+// consumers (useRuleCoverage.ts, BusinessView.tsx, etc.) don't need to change.
+export type { RuleCoverage } from "@/lib/crmPredicates";
 
 export type HealthZone = "healthy" | "needs-attention" | "at-risk" | "critical";
 
@@ -56,8 +43,7 @@ function scoreAutomationCoverage(modules: unknown[], workflows: unknown[], ruleC
   // happen to be the only rule type entityData fetches as a flat list.
   const covered = coreApiNames.filter(apiName => {
     if (activeWorkflows.some(w => workflowReferencesModule(w, apiName))) return true;
-    if (!ruleCoverage) return false;
-    return PER_MODULE_COVERAGE_KEYS.some(key => (ruleCoverage[key][apiName] ?? 0) > 0);
+    return ruleCoverageCount(ruleCoverage, apiName) > 0;
   }).length;
   return Math.round(20 * (covered / coreApiNames.length));
 }

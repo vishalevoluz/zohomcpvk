@@ -50,6 +50,7 @@ export default function DashboardPage() {
     crm.fetchAll();
     crmRecords.refetch();
     pipelineStages.refetch();
+    ruleCoverage.refetch();
   }
 
   const resolvedEntityCount = CRM_ENTITIES.filter(e => isEntityResolved(crm.entityData[e.type])).length;
@@ -164,7 +165,7 @@ export default function DashboardPage() {
                 entityData={crm.entityData}
                 recordSamples={crmRecords.data}
                 pipelineStages={pipelineStages.data}
-                ruleCoverage={ruleCoverage}
+                ruleCoverage={ruleCoverage.data}
                 fetchAll={fetchAllData}
                 onSelectSection={onSelectSection}
               />
@@ -178,7 +179,7 @@ export default function DashboardPage() {
                 lastRefresh={crm.lastRefresh}
                 onSelectSection={onSelectSection}
                 pipelineStageCount={pipelineStages.data.items.length}
-                ruleCoverage={ruleCoverage}
+                ruleCoverage={ruleCoverage.data}
               />
             </>
           ) : (

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import jsPDF from "jspdf";
 import autoTable, { type RowInput } from "jspdf-autotable";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
-import { executeTool } from "@/lib/zohoMcp";
+import { executeTool, findParamLocations, findParam, setParam } from "@/lib/zohoMcp";
 import {
   type CrmEntityType,
   type EntityState,
@@ -13,11 +13,11 @@ import {
   getItemName,
   getItemStatus,
   isEntityResolved,
+  findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser } from "@/lib/crmPredicates";
-import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions, type RuleCoverage } from "@/lib/businessScore";
-import HealthGauge from "@/components/HealthGauge";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout } from "@/lib/crmPredicates";
+import type { RuleCoverage } from "@/lib/businessScore";
 
 function parseMcpJson(result: unknown): Record<string, unknown> | null {
   if (!result || typeof result !== "object") return null;
@@ -106,22 +106,8 @@ interface KpiItem {
   value: number;
   severity: Severity;
   note: string;
+  clickable?: boolean;
 }
-
-interface MissingDataItem {
-  key: string;
-  label: string;
-  severity: "critical" | "warning";
-  message: string;
-  targetSection: Section;
-}
-
-const CATEGORY_GROUPS: { key: string; label: string; dims: (keyof HealthScoreDimensions)[] }[] = [
-  { key: "process",    label: "Process Health",  dims: ["processCompleteness"] },
-  { key: "hygiene",    label: "Module Hygiene",  dims: ["dataArchitecture"] },
-  { key: "adoption",   label: "User Adoption",   dims: ["accessSecurity"] },
-  { key: "automation", label: "Automation",      dims: ["automationCoverage", "automationHealth"] },
-];
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -729,12 +715,372 @@ function isHiddenModule(item: unknown): boolean {
   return r.visible === false || r.show_as_tab === false || r.viewable === false;
 }
 
-function categoryScorePct(dims: HealthScoreDimensions, keys: (keyof HealthScoreDimensions)[]): number {
-  const sum = keys.reduce((s, k) => s + dims[k], 0);
-  return Math.round((sum / (keys.length * 20)) * 100);
+interface ModuleBreakdownRow {
+  apiName: string;
+  name: string;
+  active: boolean;
+  custom: boolean;
 }
 
-function computeKpis(entityData: Record<CrmEntityType, EntityState>): KpiItem[] {
+// Sorted hidden-first — same "surface the actionable ones first" convention
+// as the blueprint/workflow breakdowns elsewhere in this file.
+function computeModuleBreakdown(entityData: Record<CrmEntityType, EntityState>): ModuleBreakdownRow[] {
+  return entityData.modules.items
+    .map((m, i) => {
+      const r = (m ?? {}) as Record<string, unknown>;
+      const apiName = moduleApiName(m);
+      return {
+        apiName: apiName || String(i),
+        name: String(r.plural_label ?? r.singular_label ?? r.module_name ?? apiName ?? `Module ${i + 1}`),
+        active: !isHiddenModule(m),
+        custom: isCustomModule(m),
+      };
+    })
+    .sort((a, b) => Number(a.active) - Number(b.active));
+}
+
+interface WorkflowBreakdownRow {
+  id: string;
+  name: string;
+  module: string;
+  active: boolean;
+  lastTriggered: string | null;
+}
+
+// Sorted inactive-first, then never-triggered-first within active — same
+// "surface the actionable ones" convention as the other breakdowns here.
+function computeWorkflowBreakdown(entityData: Record<CrmEntityType, EntityState>): WorkflowBreakdownRow[] {
+  return entityData.workflows.items
+    .map((w, i) => ({
+      id: String((w as Record<string, unknown> | null)?.id ?? i),
+      name: getItemName(w, i),
+      module: workflowModuleLabel(w) || "—",
+      active: isActiveWorkflow(w),
+      lastTriggered: workflowLastTriggered(w),
+    }))
+    .sort((a, b) => Number(a.active) - Number(b.active) || Number(!!a.lastTriggered) - Number(!!b.lastTriggered));
+}
+
+function formatLastTriggered(iso: string | null): string {
+  if (!iso) return "Never triggered";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+// Same "flag the stale ones, praise the healthy ones" synthesis as
+// buildZiaActivityInsight below, applied to the workflow breakdown instead.
+function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): { summary: string } {
+  if (rows.length === 0) return { summary: "No workflows found — nothing to evaluate yet." };
+  const inactive = rows.filter(r => !r.active).length;
+  const neverTriggered = rows.filter(r => r.active && !r.lastTriggered).length;
+  const flags: string[] = [];
+  if (inactive > 0) flags.push(`${inactive} workflow${inactive !== 1 ? "s are" : " is"} inactive`);
+  if (neverTriggered > 0) flags.push(`${neverTriggered} active workflow${neverTriggered !== 1 ? "s have" : " has"} never fired`);
+  if (flags.length === 0) return { summary: "All workflows are active and have fired at least once — automation looks healthy." };
+  return { summary: `Zia flags: ${flags.join("; ")}. Reactivate what's still needed, and fix or remove the rest — a workflow that never fires isn't protecting anything.` };
+}
+
+// ─── Activity (Email / Task / Call) drill-down ─────────────────────────────────
+// Tasks already ride along in entityData (the "tasks" entity), but Calls and
+// Emails aren't fetched anywhere else in this app — pulled in lazily here,
+// only once the Activity tile is opened, the same on-demand pattern as
+// useLayoutsByModule above, so a dashboard load that never opens this panel
+// never pays for two extra API calls' worth of pagination.
+interface ActivityFetchState {
+  items: unknown[];
+  loading: boolean;
+  fetched: boolean;
+  unavailable: boolean;
+}
+
+const ACTIVITY_FETCH_INIT: ActivityFetchState = { items: [], loading: false, fetched: false, unavailable: false };
+const ACTIVITY_MAX_PAGES = 5;
+
+function useActivityRecords(config: McpConfig | null, tools: McpTool[], active: boolean, onLog: (log: ExecutionLog) => void) {
+  const [calls, setCalls] = useState<ActivityFetchState>(ACTIVITY_FETCH_INIT);
+  const [emails, setEmails] = useState<ActivityFetchState>(ACTIVITY_FETCH_INIT);
+  const fetchedRef = useRef(false);
+
+  useEffect(() => {
+    if (!active || fetchedRef.current) return;
+    if (!config || tools.length === 0) return;
+    fetchedRef.current = true;
+
+    const callsTool = tools.find(t => /getcalls$/i.test(t.name)) ?? tools.find(t => /listcalls|allcalls/i.test(t.name));
+    const emailsTool = tools.find(t => /getemails$/i.test(t.name)) ?? tools.find(t => /listemails|allemails|sentemails/i.test(t.name));
+
+    async function fetchOne(tool: McpTool | undefined, setState: React.Dispatch<React.SetStateAction<ActivityFetchState>>) {
+      if (!tool) { setState(prev => ({ ...prev, unavailable: true })); return; }
+      setState(prev => ({ ...prev, loading: true }));
+      const pageLoc = findParam(findParamLocations(tool), /^page$/i);
+      let items: unknown[] = [];
+      for (let page = 1; page <= ACTIVITY_MAX_PAGES; page++) {
+        const start = Date.now();
+        const input: Record<string, unknown> = {};
+        if (page > 1 && pageLoc) setParam(input, pageLoc, page);
+        try {
+          const output = await executeTool(config as McpConfig, tool.name, input);
+          const pageItems = extractArray(output);
+          items = items.concat(pageItems);
+          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+          if (!pageLoc || pageItems.length === 0) break;
+        } catch (e: unknown) {
+          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+          break;
+        }
+      }
+      setState({ items, loading: false, fetched: true, unavailable: false });
+    }
+
+    void fetchOne(callsTool, setCalls);
+    void fetchOne(emailsTool, setEmails);
+  }, [active, config, tools, onLog]);
+
+  return { calls, emails };
+}
+
+function activityStatusText(item: unknown): string {
+  if (!item || typeof item !== "object") return "";
+  const r = item as Record<string, unknown>;
+  return String(r.status ?? r.Status ?? r.call_status ?? r.Call_Status ?? r.task_status ?? "").toLowerCase();
+}
+
+function isCompletedActivity(item: unknown): boolean {
+  const s = activityStatusText(item);
+  return s.includes("complet") || s.includes("held") || s === "closed" || s === "sent";
+}
+
+function isOverdueTask(item: unknown): boolean {
+  if (isCompletedActivity(item)) return false;
+  const r = item as Record<string, unknown>;
+  const due = r.due_date ?? r.Due_Date ?? r.closingdate;
+  if (typeof due !== "string" || !due) return false;
+  const d = new Date(due);
+  return !Number.isNaN(d.getTime()) && d.getTime() < Date.now();
+}
+
+function isMissedCall(item: unknown): boolean {
+  const s = activityStatusText(item);
+  return s.includes("missed") || s.includes("no answer") || s.includes("no-answer") || s.includes("cancel");
+}
+
+interface ActivityStat {
+  key: "email" | "task" | "call";
+  label: string;
+  total: number;
+  loading: boolean;
+  suggestion: string;
+}
+
+function buildActivityStats(
+  tasksResolved: boolean,
+  taskItems: unknown[],
+  calls: ActivityFetchState,
+  emails: ActivityFetchState,
+): ActivityStat[] {
+  const taskTotal = taskItems.length;
+  const taskOverdue = taskItems.filter(isOverdueTask).length;
+  const taskSuggestion = !tasksResolved ? "Fetching…"
+    : taskTotal === 0 ? "No tasks logged in this CRM — reps may not be tracking follow-ups here at all."
+    : taskOverdue > 0 ? `${taskOverdue} of ${taskTotal} tasks (${Math.round((taskOverdue / taskTotal) * 100)}%) are overdue — assign owners or set due-date reminders so leads don't go cold.`
+    : "Tasks are being kept current — no overdue items right now.";
+
+  const callTotal = calls.items.length;
+  const callMissed = calls.items.filter(isMissedCall).length;
+  const callSuggestion = calls.unavailable ? "No call-logging tool is connected — call activity can't be measured from here."
+    : calls.loading ? "Fetching…"
+    : callTotal === 0 ? "No calls logged against records — outreach may be happening outside the CRM, so you can't measure it."
+    : callMissed > 0 ? `${callMissed} of ${callTotal} calls are logged as missed, no-answer, or cancelled — follow up before these leads go cold.`
+    : "Calls are being logged consistently — no missed calls outstanding.";
+
+  const emailTotal = emails.items.length;
+  const emailSuggestion = emails.unavailable ? "No email-logging tool is connected — email activity can't be measured from here."
+    : emails.loading ? "Fetching…"
+    : emailTotal === 0 ? "No emails logged against records — you can't verify follow-up actually happened."
+    : "Email activity is being tracked against records.";
+
+  return [
+    { key: "email", label: "Email", total: emailTotal, loading: emails.loading, suggestion: emailSuggestion },
+    { key: "task", label: "Task", total: taskTotal, loading: !tasksResolved, suggestion: taskSuggestion },
+    { key: "call", label: "Call", total: callTotal, loading: calls.loading, suggestion: callSuggestion },
+  ];
+}
+
+interface LatestActivity {
+  date: string | null;
+  label: string;
+}
+
+// Scans for whichever date field the item actually carries (varies by MCP
+// server/API version — same defensive fallback-chain pattern as the rest of
+// this file) and keeps the most recent one found.
+function latestActivity(items: unknown[], dateFields: string[], titleFields: string[]): LatestActivity {
+  let best: { date: string; label: string } | null = null;
+  for (const item of items) {
+    if (!item || typeof item !== "object") continue;
+    const r = item as Record<string, unknown>;
+    let dateVal: string | null = null;
+    for (const f of dateFields) {
+      const v = r[f];
+      if (typeof v === "string" && v) { dateVal = v; break; }
+    }
+    if (!dateVal) continue;
+    const d = new Date(dateVal);
+    if (Number.isNaN(d.getTime())) continue;
+    if (!best || d.getTime() > new Date(best.date).getTime()) {
+      let label = "";
+      for (const f of titleFields) {
+        const v = r[f];
+        if (typeof v === "string" && v) { label = v; break; }
+      }
+      best = { date: dateVal, label };
+    }
+  }
+  return best ?? { date: null, label: "" };
+}
+
+function daysSince(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86_400_000);
+}
+
+interface ZiaActivityInsight {
+  lastEmail: LatestActivity;
+  lastCall: LatestActivity;
+  lastTaskDue: LatestActivity;
+  summary: string;
+}
+
+// Synthesizes the three freshest-activity signals into one Zia-style verdict —
+// same "flag the stale ones, praise the healthy ones" tone as the rest of the
+// dashboard's recommendation copy.
+function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState, emails: ActivityFetchState): ZiaActivityInsight {
+  const lastEmail = latestActivity(emails.items, ["sent_time", "Sent_Time", "created_time", "Created_Time", "Modified_Time"], ["subject", "Subject"]);
+  const lastCall = latestActivity(calls.items, ["call_start_time", "Call_Start_Time", "created_time", "Created_Time"], ["subject", "Subject", "description", "Description"]);
+  const lastTaskDue = latestActivity(taskItems, ["due_date", "Due_Date", "closingdate"], ["subject", "Subject", "title", "Title"]);
+
+  const STALE_DAYS = 14;
+  const flags: string[] = [];
+
+  if (!emails.unavailable) {
+    const days = daysSince(lastEmail.date);
+    if (days === null) flags.push("no emails have been logged yet");
+    else if (days > STALE_DAYS) flags.push(`the last email was ${days} days ago`);
+  }
+  if (!calls.unavailable) {
+    const days = daysSince(lastCall.date);
+    if (days === null) flags.push("no calls have been logged yet");
+    else if (days > STALE_DAYS) flags.push(`the last call was ${days} days ago`);
+  }
+  const taskDays = daysSince(lastTaskDue.date);
+  if (taskDays !== null && taskDays > 0) flags.push(`the most recently due task is now ${taskDays} day${taskDays !== 1 ? "s" : ""} overdue`);
+
+  const summary = flags.length === 0
+    ? "Recent activity looks healthy across email, calls, and tasks — no gaps flagged."
+    : `Zia flags: ${flags.join("; ")}. Re-engage before this account goes cold.`;
+
+  return { lastEmail, lastCall, lastTaskDue, summary };
+}
+
+// ─── Schedules drill-down ───────────────────────────────────────────────────────
+// useRuleCoverage.ts already fetches a flat schedule *count* for the KPI's
+// collapsed state, but discards the actual items — active/inactive and last-run
+// need the real records, fetched lazily here only once the tile is clicked, same
+// on-demand pattern as useLayoutsByModule/useActivityRecords above.
+function scheduleStatusText(item: unknown): string {
+  if (!item || typeof item !== "object") return "";
+  const r = item as Record<string, unknown>;
+  return String(r.status ?? r.Status ?? r.state ?? r.State ?? "").toLowerCase();
+}
+
+function isActiveSchedule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return true;
+  const r = item as Record<string, unknown>;
+  if (r.enabled === false || r.active === false) return false;
+  const s = scheduleStatusText(item);
+  return !(s === "inactive" || s === "disabled" || s === "false" || s === "paused" || s === "stopped");
+}
+
+function scheduleLastRun(item: unknown): string | null {
+  if (!item || typeof item !== "object") return null;
+  const r = item as Record<string, unknown>;
+  const raw = r.last_run_time ?? r.Last_Run_Time ?? r.last_executed_time ?? r.lastRunTime ?? r.last_run ?? r.Last_Run;
+  return typeof raw === "string" && raw.trim() !== "" ? raw : null;
+}
+
+function useScheduleRecords(config: McpConfig | null, tools: McpTool[], active: boolean, onLog: (log: ExecutionLog) => void) {
+  const [state, setState] = useState<ActivityFetchState>(ACTIVITY_FETCH_INIT);
+  const fetchedRef = useRef(false);
+
+  useEffect(() => {
+    if (!active || fetchedRef.current) return;
+    if (!config || tools.length === 0) return;
+    fetchedRef.current = true;
+
+    const scheduleTool = tools.find(t => /getschedules$/i.test(t.name));
+    if (!scheduleTool) { setState(prev => ({ ...prev, unavailable: true })); return; }
+
+    void (async () => {
+      setState(prev => ({ ...prev, loading: true }));
+      const pageLoc = findParam(findParamLocations(scheduleTool), /^page$/i);
+      let items: unknown[] = [];
+      for (let page = 1; page <= ACTIVITY_MAX_PAGES; page++) {
+        const start = Date.now();
+        const input: Record<string, unknown> = {};
+        if (page > 1 && pageLoc) setParam(input, pageLoc, page);
+        try {
+          const output = await executeTool(config as McpConfig, scheduleTool.name, input);
+          const pageItems = extractArray(output);
+          items = items.concat(pageItems);
+          onLog({ id: crypto.randomUUID(), tool: scheduleTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+          if (!pageLoc || pageItems.length === 0) break;
+        } catch (e: unknown) {
+          onLog({ id: crypto.randomUUID(), tool: scheduleTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+          break;
+        }
+      }
+      setState({ items, loading: false, fetched: true, unavailable: false });
+    })();
+  }, [active, config, tools, onLog]);
+
+  return state;
+}
+
+interface ScheduleBreakdownRow {
+  id: string;
+  name: string;
+  active: boolean;
+  lastRun: string | null;
+}
+
+function computeScheduleBreakdown(items: unknown[]): ScheduleBreakdownRow[] {
+  return items
+    .map((s, i) => ({
+      id: String((s as Record<string, unknown> | null)?.id ?? i),
+      name: getItemName(s, i),
+      active: isActiveSchedule(s),
+      lastRun: scheduleLastRun(s),
+    }))
+    .sort((a, b) => Number(a.active) - Number(b.active) || Number(!!a.lastRun) - Number(!!b.lastRun));
+}
+
+// "Not used" = inactive, or active but has never actually run — both read as
+// automation nobody would notice if it disappeared.
+function buildZiaScheduleInsight(rows: ScheduleBreakdownRow[]): { summary: string } {
+  if (rows.length === 0) return { summary: "No schedules found — nothing to evaluate yet." };
+  const inactive = rows.filter(r => !r.active).length;
+  const neverRun = rows.filter(r => r.active && !r.lastRun).length;
+  const flags: string[] = [];
+  if (inactive > 0) flags.push(`${inactive} schedule${inactive !== 1 ? "s are" : " is"} inactive`);
+  if (neverRun > 0) flags.push(`${neverRun} active schedule${neverRun !== 1 ? "s have" : " has"} never actually run`);
+  if (flags.length === 0) return { summary: "Every schedule is active and has run at least once — nothing sitting unused." };
+  return { summary: `Zia flags: ${flags.join("; ")}. These schedules aren't doing anything right now — reactivate what's still needed, or delete the rest so it's not mistaken for working automation.` };
+}
+
+function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null): KpiItem[] {
   const modules = entityData.modules.items;
   const blueprints = entityData.blueprints.items;
   const users = entityData.users.items;
@@ -742,7 +1088,14 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>): KpiItem[] 
 
   const hiddenCount = modules.filter(isHiddenModule).length;
   const hiddenPct = modules.length ? Math.round((hiddenCount / modules.length) * 100) : 0;
-  const inactiveBps = blueprints.filter(b => !isActiveWorkflow(b)).length;
+  const activePct = modules.length ? 100 - hiddenPct : 0;
+  // Blueprint status is a flat Active/Inactive/Draft string, not the nested
+  // workflow shape — blueprintStatus keeps Draft from silently counting as
+  // active the way isActiveWorkflow's default-true fallback used to (see
+  // crmPredicates.ts).
+  const bpStatuses = blueprints.map(blueprintStatus);
+  const draftBps = bpStatuses.filter(s => s === "draft").length;
+  const inactiveBps = bpStatuses.filter(s => s === "inactive").length;
   const activeUsers = users.filter(u => !isInactiveUser(u)).length;
   const layoutGap = Math.max(0, modules.length - layouts.length);
 
@@ -750,12 +1103,14 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>): KpiItem[] 
     {
       key: "modules", label: "Modules", value: modules.length,
       severity: hiddenPct >= 40 ? "critical" : hiddenPct >= 15 ? "warning" : "good",
-      note: modules.length ? `${hiddenPct}% hidden from users` : "No modules found",
+      note: modules.length ? `${activePct}% active · ${hiddenPct}% inactive — click to see which` : "No modules found",
+      clickable: modules.length > 0,
     },
     {
       key: "blueprints", label: "Blueprints", value: blueprints.length,
-      severity: blueprints.length > 0 && inactiveBps === blueprints.length ? "critical" : inactiveBps > 0 ? "warning" : "good",
-      note: blueprints.length ? `${inactiveBps} inactive` : "No blueprints found",
+      severity: blueprints.length > 0 && inactiveBps + draftBps === blueprints.length ? "critical" : inactiveBps > 0 ? "warning" : "good",
+      note: blueprints.length ? `${inactiveBps} inactive${draftBps > 0 ? `, ${draftBps} draft` : ""} — click to see which` : "No blueprints found",
+      clickable: blueprints.length > 0,
     },
     {
       key: "users", label: "Active Users", value: activeUsers,
@@ -765,25 +1120,137 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>): KpiItem[] 
     {
       key: "layouts", label: "Layouts", value: layouts.length,
       severity: layouts.length === 0 && modules.length > 0 ? "critical" : layoutGap > 0 ? "warning" : "good",
-      note: layoutGap > 0 ? `${layoutGap} module${layoutGap === 1 ? "" : "s"} missing a layout` : "Covers all modules",
+      note: layoutGap > 0 ? `${layoutGap} module${layoutGap === 1 ? "" : "s"} missing a layout — click for breakdown` : "Covers all modules — click for breakdown",
+      clickable: layouts.length > 0,
+    },
+    {
+      key: "schedules", label: "Schedules", value: ruleCoverage?.scheduleCount ?? 0,
+      severity: ruleCoverage?.scheduleCount === 0 ? "critical" : ruleCoverage?.scheduleCount ? "good" : "warning",
+      note: ruleCoverage === null ? "Loading…"
+        : ruleCoverage.scheduleCount === null ? "No schedule-listing tool connected"
+        : ruleCoverage.scheduleCount === 0 ? "No schedules configured"
+        : "click to see active/inactive and last run",
+      clickable: !!ruleCoverage?.scheduleCount,
     },
   ];
 }
 
-function computeModuleVisibility(entityData: Record<CrmEntityType, EntityState>) {
-  const modules = entityData.modules.items;
-  const blueprints = entityData.blueprints.items;
-  const hidden = modules.filter(isHiddenModule).length;
-  const visible = modules.length - hidden;
-  const hiddenPct = modules.length ? Math.round((hidden / modules.length) * 100) : 0;
-  const visiblePct = modules.length ? 100 - hiddenPct : 0;
-  const customCount = modules.filter(isCustomModule).length;
-  const blueprintsActive = blueprints.filter(isActiveWorkflow).length;
-  const blueprintsPct = blueprints.length ? Math.round((blueprintsActive / blueprints.length) * 100) : 0;
-  return {
-    total: modules.length, visible, hidden, hiddenPct, visiblePct, customCount,
-    blueprintsActive, blueprintsTotal: blueprints.length, blueprintsPct,
-  };
+interface BlueprintBreakdownRow {
+  id: string;
+  name: string;
+  module: string;
+  status: BlueprintStatus;
+}
+
+// Sorted so the actionable rows (not enforcing anything right now) surface
+// first, matching the same "flag the useless ones first" pattern as the
+// Workflow Trigger Activity card in BusinessView.tsx.
+const BP_STATUS_ORDER: Record<BlueprintStatus, number> = { inactive: 0, draft: 1, active: 2 };
+
+function computeBlueprintBreakdown(entityData: Record<CrmEntityType, EntityState>): BlueprintBreakdownRow[] {
+  return entityData.blueprints.items
+    .map((bp, i) => ({
+      id: String((bp as Record<string, unknown> | null)?.id ?? i),
+      name: getItemName(bp, i),
+      module: workflowModuleLabel(bp) || "—",
+      status: blueprintStatus(bp),
+    }))
+    .sort((a, b) => BP_STATUS_ORDER[a.status] - BP_STATUS_ORDER[b.status]);
+}
+
+interface LayoutModuleBreakdownRow {
+  apiName: string;
+  moduleLabel: string;
+  total: number;
+  standard: number;
+  custom: number;
+  layouts: { name: string; custom: boolean }[];
+}
+
+// Modules stacking unusually many custom layouts are worth a second look —
+// not because multiple layouts is inherently wrong (see the explanatory copy
+// rendered alongside this), but because past that many it's more likely to be
+// abandoned one-off layouts than genuine per-profile designs.
+const LAYOUT_REVIEW_THRESHOLD = 3;
+
+// getLayouts is module-scoped on Zoho's real API (same as getValidationRules/
+// getAssignmentRules etc. — see useRuleCoverage.ts), so the flat, unscoped
+// fetch useCrmEntities.ts does for the "layouts" entity only ever returns one
+// module's layouts. This builds the per-module breakdown from a real
+// per-module fetch (see useLayoutsByModule below) instead of that flat list —
+// grouping the flat list by module can never surface custom modules that
+// weren't the one module the unscoped call happened to default to.
+function computeLayoutBreakdown(
+  modules: unknown[],
+  layoutsByModule: Record<string, unknown[]>,
+): LayoutModuleBreakdownRow[] {
+  return Object.entries(layoutsByModule)
+    .filter(([, ls]) => ls.length > 0)
+    .map(([apiName, ls]) => {
+      const mod = modules.find(m => moduleApiName(m) === apiName) as Record<string, unknown> | undefined;
+      const moduleLabel = mod ? String(mod.plural_label ?? mod.singular_label ?? apiName) : apiName;
+      const layoutRows = ls.map((l, i) => ({ name: getItemName(l, i), custom: isCustomLayout(l) }));
+      const custom = layoutRows.filter(l => l.custom).length;
+      return { apiName, moduleLabel, total: ls.length, standard: ls.length - custom, custom, layouts: layoutRows };
+    })
+    .sort((a, b) => b.total - a.total);
+}
+
+// Fetches getLayouts per module (module-scoped, like the rule-coverage hook)
+// instead of relying on the flat "layouts" entity, which only ever covers one
+// module. Lazy — only starts once the Layouts KPI drill-down is opened — and
+// capped so a 300+ module org doesn't fire hundreds of sequential calls; the
+// panel tells the user how many modules were actually covered.
+const LAYOUT_MODULE_FETCH_CAP = 60;
+
+function useLayoutsByModule(
+  config: McpConfig | null,
+  tools: McpTool[],
+  modules: unknown[],
+  active: boolean,
+  onLog: (log: ExecutionLog) => void,
+) {
+  const [byModule, setByModule] = useState<Record<string, unknown[]>>({});
+  const [progress, setProgress] = useState<{ done: number; total: number; loading: boolean }>({ done: 0, total: 0, loading: false });
+  const fetchedRef = useRef(false);
+
+  useEffect(() => {
+    if (!active || fetchedRef.current) return;
+    if (!config || tools.length === 0 || modules.length === 0) return;
+    const layoutsTool = findToolForEntity(tools, "layouts");
+    if (!layoutsTool) return;
+
+    fetchedRef.current = true;
+    const targets = modules
+      .filter(m => !isHiddenModule(m))
+      .map(m => moduleApiName(m))
+      .filter(Boolean)
+      .slice(0, LAYOUT_MODULE_FETCH_CAP);
+
+    setProgress({ done: 0, total: targets.length, loading: true });
+
+    void (async () => {
+      const moduleLoc = findParam(findParamLocations(layoutsTool), /^module$/i) ?? { group: null, key: "module" };
+      const result: Record<string, unknown[]> = {};
+      for (const apiName of targets) {
+        const start = Date.now();
+        const input: Record<string, unknown> = {};
+        setParam(input, moduleLoc, apiName);
+        try {
+          const output = await executeTool(config, layoutsTool.name, input);
+          result[apiName] = extractArray(output);
+          onLog({ id: crypto.randomUUID(), tool: layoutsTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+        } catch (e: unknown) {
+          onLog({ id: crypto.randomUUID(), tool: layoutsTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+        }
+        setProgress(prev => ({ ...prev, done: prev.done + 1 }));
+      }
+      setByModule(result);
+      setProgress(prev => ({ ...prev, loading: false }));
+    })();
+  }, [active, config, tools, modules, onLog]);
+
+  return { byModule, progress, targetCount: Math.min(modules.filter(m => !isHiddenModule(m)).length, LAYOUT_MODULE_FETCH_CAP) };
 }
 
 interface ConfigRow {
@@ -799,11 +1266,8 @@ const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Sect
   { type: "pipelines", label: "Pipelines", targetSection: "modules" },
   { type: "stages",    label: "Stages",    targetSection: "blueprints" },
   { type: "workflows", label: "Workflows", targetSection: "workflows" },
-  { type: "blueprints", label: "Blueprints", targetSection: "blueprints" },
-  { type: "fields",    label: "Fields",    targetSection: "fields" },
   { type: "profiles",  label: "Profiles",  targetSection: null },
-  { type: "users",     label: "Users",     targetSection: null },
-  { type: "tasks",     label: "Tasks",     targetSection: "modules" },
+  { type: "tasks",     label: "Activity",  targetSection: "modules" },
 ];
 
 function computeConfigRows(entityData: Record<CrmEntityType, EntityState>): ConfigRow[] {
@@ -820,24 +1284,13 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>): Conf
     let status: string;
     let severity: Severity;
     switch (def.type) {
-      case "workflows":
-      case "blueprints": {
+      case "workflows": {
         const inactive = st.items.filter(i => !isActiveWorkflow(i)).length;
         if (inactive === 0) { status = "Active"; severity = "good"; }
         else if (inactive === count) { status = `${inactive} inactive`; severity = "critical"; }
         else { status = `${inactive} inactive`; severity = "warning"; }
         break;
       }
-      case "users": {
-        const inactive = st.items.filter(isInactiveUser).length;
-        if (inactive === 0) { status = "Active"; severity = "good"; }
-        else { status = `${inactive} inactive`; severity = "warning"; }
-        break;
-      }
-      case "fields":
-        status = count < 10 ? "Low" : "Configured";
-        severity = count < 10 ? "warning" : "good";
-        break;
       case "profiles":
         status = count === 1 ? "Single profile" : "Configured";
         severity = count === 1 ? "warning" : "good";
@@ -849,29 +1302,6 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>): Conf
 
     return { key: def.type, label: def.label, value: String(count), status, severity, targetSection: def.targetSection };
   });
-}
-
-const MISSING_DATA_CHECKS: { type: CrmEntityType; label: string; targetSection: Section; severity: "critical" | "warning" }[] = [
-  { type: "stages",    label: "Stages",    targetSection: "blueprints", severity: "critical" },
-  { type: "tasks",     label: "Tasks",     targetSection: "modules",    severity: "critical" },
-  { type: "fields",    label: "Fields",    targetSection: "fields",     severity: "warning" },
-  { type: "pipelines", label: "Pipelines", targetSection: "modules",    severity: "warning" },
-];
-
-function computeMissingData(entityData: Record<CrmEntityType, EntityState>): MissingDataItem[] {
-  const items: MissingDataItem[] = [];
-  for (const check of MISSING_DATA_CHECKS) {
-    const st = entityData[check.type];
-    if (!isEntityResolved(st) || st.items.length > 0) continue;
-    // No matching tool means we simply have no visibility into this entity —
-    // that's a tooling gap, not a real "missing data" finding, so don't flag it.
-    if (!st.toolUsed) continue;
-    const message = st.error
-      ? `${check.label} not found — ${st.error}`
-      : `No ${check.label.toLowerCase()} configured`;
-    items.push({ key: check.type, label: check.label, severity: check.severity, message, targetSection: check.targetSection });
-  }
-  return items;
 }
 
 function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label: string; onRetry: () => void }) {
@@ -910,6 +1340,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   }>>({});
   const [functionHealth, setFunctionHealth] = useState<FunctionHealth | null>(null);
   const functionHealthFetched = useRef(false);
+  const [expandedKpi, setExpandedKpi] = useState<"modules" | "blueprints" | "layouts" | "schedules" | null>(null);
+  const layoutsByModule = useLayoutsByModule(config, tools, entityData.modules.items, expandedKpi === "layouts", onLog);
+  const scheduleRecords = useScheduleRecords(config, tools, expandedKpi === "schedules", onLog);
+  // Workflows/Activity are always-visible cards (not click-to-reveal like the
+  // KPI strip drilldowns above), so this fetches as soon as tools are ready
+  // rather than waiting on a click.
+  const activityRecords = useActivityRecords(config, tools, true, onLog);
 
   // Tick for relative-time display
   useEffect(() => {
@@ -1123,12 +1560,17 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const loadedCount = CRM_ENTITIES.filter(e => entityData[e.type].lastFetched !== null).length;
   const ziaTool = findZiaTool(tools);
 
-  const healthResolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t]));
-  const healthScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage);
-  const kpis = computeKpis(entityData);
-  const moduleVis = computeModuleVisibility(entityData);
-  const missingData = computeMissingData(entityData);
+  const kpis = computeKpis(entityData, ruleCoverage);
+  const moduleBreakdown = expandedKpi === "modules" ? computeModuleBreakdown(entityData) : [];
+  const blueprintBreakdown = expandedKpi === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
+  const layoutBreakdown = expandedKpi === "layouts" ? computeLayoutBreakdown(entityData.modules.items, layoutsByModule.byModule) : [];
+  const scheduleBreakdown = expandedKpi === "schedules" ? computeScheduleBreakdown(scheduleRecords.items) : [];
+  const ziaScheduleInsight = expandedKpi === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
   const configRows = computeConfigRows(entityData);
+  const workflowBreakdown = computeWorkflowBreakdown(entityData);
+  const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
+  const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
+  const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const blueprintItems = entityData.blueprints.items;
   const profileItems = entityData.profiles.items;
   const userItemsForPanel = entityData.users.items;
@@ -1536,97 +1978,157 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
 
       {/* ── KPI strip ───────────────────────────────────────────────────────── */}
       <div className="kpi-strip">
-        {kpis.map(k => (
-          <div key={k.key} className={`kpi-tile kpi-${k.severity}`}>
-            <span className="kpi-tile-label">{k.label}</span>
-            <span className="kpi-tile-value">{k.value.toLocaleString()}</span>
-            <span className="kpi-tile-note">{k.note}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Health score / module visibility / missing data ───────────────────── */}
-      <div className="crm-insights-row">
-        <div className="business-view-section health-gauge-card crm-health-card">
-          <h3 className="business-view-section-title">CRM Health Score</h3>
-          <HealthGauge score={healthScore.total} zone={healthScore.zone} resolved={healthResolved} />
-          <p className={`health-gauge-verdict ${healthResolved ? `zone-${healthScore.zone}` : ""}`}>
-            {healthResolved ? healthScore.verdict : "Reading your CRM setup…"}
-          </p>
-          <div className="health-subscores">
-            {CATEGORY_GROUPS.map(g => {
-              const pct = healthResolved ? categoryScorePct(healthScore.dimensions, g.dims) : 0;
-              const dimensionZone = pct <= 0 ? "empty" : pct >= 75 ? "healthy" : "yellow";
-              const fillPct = pct <= 0 ? 100 : pct;
-              return (
-                <div key={g.key} className="health-subscore-row" style={{ cursor: "default" }}>
-                  <span className="health-subscore-label">{g.label}</span>
-                  <span className="health-subscore-track">
-                    <span
-                      className={`health-subscore-fill ${healthResolved ? `zone-${dimensionZone}` : ""}`}
-                      style={{ width: `${fillPct}%` }}
-                    />
-                  </span>
-                  <span className="health-subscore-value">{healthResolved ? `${pct}%` : "—"}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="business-view-section crm-vis-card">
-          <h3 className="business-view-section-title">Module Visibility</h3>
-          <div className="module-vis-bar">
-            <div className="module-vis-fill" style={{ width: `${100 - moduleVis.hiddenPct}%` }} />
-          </div>
-          {moduleVis.total === 0 ? (
-            <p className="business-view-hint">No modules found.</p>
-          ) : (
-            <div className="module-breakdown">
-              <div className="module-breakdown-row">
-                <span className="module-breakdown-label">Visible to users</span>
-                <span className="module-breakdown-value good">{moduleVis.visible} ({moduleVis.visiblePct}%)</span>
-              </div>
-              <div className="module-breakdown-row">
-                <span className="module-breakdown-label">Hidden modules</span>
-                <span className="module-breakdown-value critical">{moduleVis.hidden} ({moduleVis.hiddenPct}%)</span>
-              </div>
-              <div className="module-breakdown-row">
-                <span className="module-breakdown-label">Custom modules</span>
-                <span className="module-breakdown-value">{moduleVis.customCount} active</span>
-              </div>
-              <div className="module-breakdown-row">
-                <span className="module-breakdown-label">Blueprints active</span>
-                <span className="module-breakdown-value">
-                  {moduleVis.blueprintsTotal === 0 ? "N/A" : `${moduleVis.blueprintsActive} of ${moduleVis.blueprintsTotal} (${moduleVis.blueprintsPct}%)`}
-                </span>
-              </div>
+        {kpis.map(k => {
+          const toggle = () => setExpandedKpi(prev => (prev === k.key ? null : (k.key as "modules" | "blueprints" | "layouts" | "schedules")));
+          return (
+            <div
+              key={k.key}
+              className={`kpi-tile kpi-${k.severity} ${k.clickable ? "kpi-clickable" : ""} ${expandedKpi === k.key ? "kpi-expanded" : ""}`}
+              onClick={k.clickable ? toggle : undefined}
+              role={k.clickable ? "button" : undefined}
+              tabIndex={k.clickable ? 0 : undefined}
+              onKeyDown={k.clickable ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } } : undefined}
+            >
+              <span className="kpi-tile-label">{k.label}</span>
+              <span className="kpi-tile-value">{k.value.toLocaleString()}</span>
+              <span className="kpi-tile-note">{k.note}</span>
             </div>
-          )}
-        </div>
-
-        <div className="business-view-section crm-missing-card">
-          <div className="missing-data-header">
-            <h3 className="business-view-section-title" style={{ marginBottom: 0 }}>Missing Data</h3>
-            {missingData.length > 0 && <span className="crm-fb-count">{missingData.length}</span>}
-          </div>
-          <p className="business-view-hint" style={{ padding: "4px 0 8px" }}>
-            Flags CRM areas — stages, tasks, fields, pipelines — that have no data configured yet, so you can spot and address gaps.
-          </p>
-          {missingData.length === 0 ? (
-            <p className="business-view-hint">No critical data gaps detected.</p>
-          ) : (
-            missingData.map(item => (
-              <div key={item.key} className={`missing-data-row sev-${item.severity}`}>
-                <span className="missing-data-msg">{item.message}</span>
-                <button className="btn-secondary missing-data-view" onClick={() => onSelectSection(item.targetSection)}>
-                  View
-                </button>
-              </div>
-            ))
-          )}
-        </div>
+          );
+        })}
       </div>
+
+      {expandedKpi === "modules" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Modules — Active vs Inactive</h4>
+            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+          </div>
+          <div className="kpi-drilldown-summary">
+            <span className="kpi-drilldown-stat good">{moduleBreakdown.filter(r => r.active).length} Active</span>
+            <span className="kpi-drilldown-stat bad">{moduleBreakdown.filter(r => !r.active).length} Inactive</span>
+          </div>
+          <div className="kpi-drilldown-table">
+            {moduleBreakdown.map(row => (
+              <div key={row.apiName} className="kpi-drilldown-row">
+                <span className="kpi-drilldown-name">{row.name}</span>
+                <span className="kpi-drilldown-module">{row.apiName}</span>
+                {row.custom && <span className="kpi-drilldown-badge neutral">custom</span>}
+                <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {expandedKpi === "blueprints" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Blueprints — Active vs Inactive</h4>
+            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+          </div>
+          <div className="kpi-drilldown-summary">
+            <span className="kpi-drilldown-stat good">{blueprintBreakdown.filter(r => r.status === "active").length} Active</span>
+            <span className="kpi-drilldown-stat bad">{blueprintBreakdown.filter(r => r.status === "inactive").length} Inactive</span>
+            {blueprintBreakdown.some(r => r.status === "draft") && (
+              <span className="kpi-drilldown-stat neutral">{blueprintBreakdown.filter(r => r.status === "draft").length} Draft</span>
+            )}
+          </div>
+          <div className="kpi-drilldown-table">
+            {blueprintBreakdown.map(row => (
+              <div key={row.id} className="kpi-drilldown-row">
+                <span className="kpi-drilldown-name">{row.name}</span>
+                <span className="kpi-drilldown-module">{row.module}</span>
+                <span className={`kpi-drilldown-badge status-${row.status}`}>{row.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {expandedKpi === "layouts" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Layouts — Standard vs Custom, Per Module</h4>
+            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+          </div>
+          <p className="kpi-drilldown-note">
+            More than one layout on a module usually isn&apos;t clutter — Zoho lets each profile use a different layout on the same module, so Sales and Support can see different required fields on the same Leads module. It&apos;s only worth a closer look when a module is stacking several custom layouts with no clear reason.
+          </p>
+          {layoutsByModule.progress.loading && (
+            <p className="kpi-drilldown-progress">
+              <span className="spinner" /> Fetching layouts per module… {layoutsByModule.progress.done} of {layoutsByModule.progress.total}
+            </p>
+          )}
+          {!layoutsByModule.progress.loading && layoutsByModule.progress.total > 0 && (
+            <p className="kpi-drilldown-note">
+              Checked {layoutsByModule.targetCount} visible module{layoutsByModule.targetCount !== 1 ? "s" : ""}
+              {layoutsByModule.targetCount >= LAYOUT_MODULE_FETCH_CAP ? " (capped — this org has more visible modules than were checked)" : ""}.
+            </p>
+          )}
+          {!layoutsByModule.progress.loading && layoutsByModule.progress.total > 0 && layoutBreakdown.length === 0 && (
+            <p className="business-view-hint">No layouts found on any checked module.</p>
+          )}
+          <div className="kpi-drilldown-table">
+            {layoutBreakdown.map(row => (
+              <div key={row.apiName} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                <div className="kpi-drilldown-row-top">
+                  <span className="kpi-drilldown-name">{row.moduleLabel}</span>
+                  <span className="kpi-drilldown-module">{row.total} layout{row.total !== 1 ? "s" : ""}</span>
+                  <span className="kpi-drilldown-badge neutral">{row.standard} standard · {row.custom} custom</span>
+                  {row.custom > LAYOUT_REVIEW_THRESHOLD && <span className="kpi-drilldown-flag">Review</span>}
+                </div>
+                <div className="kpi-drilldown-layout-names">
+                  {row.layouts.map((l, i) => (
+                    <span key={i} className={`kpi-drilldown-layout-chip ${l.custom ? "custom" : "standard"}`}>{l.name}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {expandedKpi === "schedules" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Schedules — Active / Inactive / Last Run</h4>
+            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+          </div>
+          {scheduleRecords.unavailable && (
+            <p className="business-view-hint">No schedule-listing tool is connected — schedule activity can't be checked from here.</p>
+          )}
+          {scheduleRecords.loading && (
+            <p className="kpi-drilldown-progress"><span className="spinner" /> Fetching schedules…</p>
+          )}
+          {!scheduleRecords.unavailable && !scheduleRecords.loading && scheduleRecords.fetched && (
+            <>
+              <div className="kpi-drilldown-summary">
+                <span className="kpi-drilldown-stat good">{scheduleBreakdown.filter(r => r.active).length} Active</span>
+                <span className="kpi-drilldown-stat bad">{scheduleBreakdown.filter(r => !r.active).length} Inactive</span>
+                <span className="kpi-drilldown-stat neutral">{scheduleBreakdown.filter(r => !r.lastRun).length} Never Run</span>
+              </div>
+              <div className="kpi-drilldown-table">
+                {scheduleBreakdown.map(row => (
+                  <div key={row.id} className="kpi-drilldown-row">
+                    <span className="kpi-drilldown-name">{row.name}</span>
+                    <span className={`kpi-drilldown-date ${!row.lastRun ? "never" : ""}`}>{formatLastTriggered(row.lastRun)}</span>
+                    <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+                  </div>
+                ))}
+              </div>
+              {ziaScheduleInsight && (
+                <div className="zia-rec zia-rec-medium activity-zia-rec">
+                  <div className="zia-rec-header">
+                    <span className="zia-rec-icon">✦</span>
+                    <span className="zia-rec-title">Zia Recommendation — Unused Schedules</span>
+                  </div>
+                  <p className="zia-rec-desc">{ziaScheduleInsight.summary}</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── CRM Configuration summary ──────────────────────────────────────────── */}
       <div className="business-view-section">
@@ -1639,6 +2141,9 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 key={row.key}
                 className={`config-tile config-${row.severity} ${clickable ? "clickable" : ""}`}
                 onClick={clickable ? () => onSelectSection(row.targetSection as Section) : undefined}
+                role={clickable ? "button" : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                onKeyDown={clickable ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSection(row.targetSection as Section); } } : undefined}
               >
                 <span className="config-tile-label">{row.label}</span>
                 <span className="config-tile-value">{row.value}</span>
@@ -1646,6 +2151,73 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* ── Workflows / Activity detail cards ──────────────────────────────────── */}
+      <div className="crm-panels-row crm-panels-row-2col">
+        <div className="business-view-section crm-panel-card">
+          <h3 className="business-view-section-title">Workflows — Active / Inactive / Last Triggered</h3>
+          <div className="kpi-drilldown-summary">
+            <span className="kpi-drilldown-stat good">{workflowBreakdown.filter(r => r.active).length} Active</span>
+            <span className="kpi-drilldown-stat bad">{workflowBreakdown.filter(r => !r.active).length} Inactive</span>
+            <span className="kpi-drilldown-stat neutral">{workflowBreakdown.filter(r => !r.lastTriggered).length} Never Triggered</span>
+          </div>
+          <div className="kpi-drilldown-table">
+            {workflowBreakdown.map(row => (
+              <div key={row.id} className="kpi-drilldown-row">
+                <span className="kpi-drilldown-name">{row.name}</span>
+                <span className="kpi-drilldown-module">{row.module}</span>
+                <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : ""}`}>{formatLastTriggered(row.lastTriggered)}</span>
+                <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+              </div>
+            ))}
+          </div>
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">Zia Recommendation — Workflows</span>
+            </div>
+            <p className="zia-rec-desc">{ziaWorkflowInsight.summary}</p>
+          </div>
+        </div>
+
+        <div className="business-view-section crm-panel-card">
+          <h3 className="business-view-section-title">Activity — Email / Task / Call</h3>
+          <div className="activity-subkpi-grid">
+            {activityStats.map(stat => (
+              <div key={stat.key} className="activity-subkpi-tile">
+                <span className="kpi-tile-label">{stat.label}</span>
+                <span className="kpi-tile-value">{stat.loading ? "…" : stat.total.toLocaleString()}</span>
+                <p className="activity-subkpi-suggestion">{stat.suggestion}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">Zia Recommendation — Recent Activity</span>
+            </div>
+            <div className="activity-zia-grid">
+              <div className="activity-zia-item">
+                <span className="activity-zia-label">Last Email</span>
+                <span className="activity-zia-value">{ziaActivityInsight.lastEmail.date ? formatLastTriggered(ziaActivityInsight.lastEmail.date) : "None found"}</span>
+                {ziaActivityInsight.lastEmail.label && <span className="activity-zia-sub">{ziaActivityInsight.lastEmail.label}</span>}
+              </div>
+              <div className="activity-zia-item">
+                <span className="activity-zia-label">Last Call</span>
+                <span className="activity-zia-value">{ziaActivityInsight.lastCall.date ? formatLastTriggered(ziaActivityInsight.lastCall.date) : "None found"}</span>
+                {ziaActivityInsight.lastCall.label && <span className="activity-zia-sub">{ziaActivityInsight.lastCall.label}</span>}
+              </div>
+              <div className="activity-zia-item">
+                <span className="activity-zia-label">Last Task Due</span>
+                <span className="activity-zia-value">{ziaActivityInsight.lastTaskDue.date ? formatLastTriggered(ziaActivityInsight.lastTaskDue.date) : "None found"}</span>
+                {ziaActivityInsight.lastTaskDue.label && <span className="activity-zia-sub">{ziaActivityInsight.lastTaskDue.label}</span>}
+              </div>
+            </div>
+            <p className="zia-rec-desc">{ziaActivityInsight.summary}</p>
+          </div>
         </div>
       </div>
 

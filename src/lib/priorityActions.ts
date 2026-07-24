@@ -87,8 +87,8 @@ export const PRIORITY_ACTION_LIBRARY: PriorityActionRule[] = [
   },
   {
     id: "decommission-empty-modules",
-    title: "Decommission Empty Modules",
-    why: "Unused modules clutter the interface and confuse new team members. Remove what you do not use.",
+    title: "Hide Unused Empty Modules",
+    why: "Unused modules clutter the interface and confuse new team members. Hide them from each profile's module settings (Setup → Users & Control → Profiles → Module Permissions) instead of deleting — this keeps any historical data intact and can be reversed instantly if you need the module again, unlike deleting a module which is permanent and can destroy data.",
     impact: "Low", effort: "Easy", targetSection: "modules",
     requires: ["modules", "workflows", "blueprints"],
     test: e => {

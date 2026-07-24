@@ -2335,7 +2335,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 /* KPI strip */
 .kpi-strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 10px;
 }
 .kpi-tile {
@@ -2360,48 +2360,87 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .kpi-tile-value { font-size: 22px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
 .kpi-tile-note { font-size: 12px; color: var(--color-text-secondary); }
+.kpi-tile.kpi-clickable { cursor: pointer; }
+.kpi-tile.kpi-clickable:hover { border-color: var(--color-border-strong); background: var(--color-bg-tertiary); }
+.kpi-tile.kpi-clickable:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.kpi-tile.kpi-expanded { border-left-width: 4px; }
+.config-tile.kpi-expanded { border-left-width: 4px; }
 
-/* Health / visibility / missing-data insights row */
-.crm-insights-row {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr;
-  gap: 1.25rem;
-  align-items: stretch;
+/* KPI drill-down panels (Blueprints / Layouts) */
+.kpi-drilldown {
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 18px;
+  margin-top: 10px;
 }
-.crm-health-card { align-items: center; text-align: center; }
+.kpi-drilldown-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.kpi-drilldown-header h4 { font-size: 14px; font-weight: 700; color: var(--color-text); margin: 0; }
+.kpi-drilldown-close {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; color: var(--color-text-tertiary); line-height: 1; padding: 4px;
+}
+.kpi-drilldown-close:hover { color: var(--color-text); }
+.kpi-drilldown-note { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 0 0 12px; }
+.kpi-drilldown-summary { display: flex; gap: 8px; margin-bottom: 12px; }
+.kpi-drilldown-stat { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
+.kpi-drilldown-stat.good { background: var(--color-success-bg); color: var(--color-success); }
+.kpi-drilldown-stat.bad { background: var(--color-danger-bg); color: var(--bv-critical); }
+.kpi-drilldown-stat.neutral { background: var(--color-warning-bg); color: var(--bv-warning); }
+.kpi-drilldown-table { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto; }
+.kpi-drilldown-row {
+  display: flex; align-items: center; gap: 10px;
+  border: 0.5px solid var(--color-border); border-radius: var(--radius-md);
+  padding: 8px 12px; font-size: 12px;
+}
+.kpi-drilldown-name { flex: 1; min-width: 0; font-weight: 600; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kpi-drilldown-module { color: var(--color-text-tertiary); flex-shrink: 0; }
+.kpi-drilldown-date { font-size: 12px; color: var(--color-text-secondary); flex-shrink: 0; white-space: nowrap; }
+.kpi-drilldown-date.never { color: var(--bv-critical); font-weight: 600; }
+.kpi-drilldown-badge {
+  font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary); flex-shrink: 0; text-transform: capitalize;
+}
+.kpi-drilldown-badge.status-active { background: var(--color-success-bg); color: var(--color-success); }
+.kpi-drilldown-badge.status-inactive { background: var(--color-danger-bg); color: var(--bv-critical); }
+.kpi-drilldown-badge.status-draft { background: var(--color-warning-bg); color: var(--bv-warning); }
+.kpi-drilldown-flag {
+  font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+  background: var(--color-warning-bg); color: var(--bv-warning); flex-shrink: 0;
+}
+.kpi-drilldown-progress { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-text-secondary); margin: 0 0 12px; }
+.kpi-drilldown-row-layouts { flex-direction: column; align-items: stretch; gap: 8px; }
+.kpi-drilldown-row-top { display: flex; align-items: center; gap: 10px; }
+.kpi-drilldown-layout-names { display: flex; flex-wrap: wrap; gap: 6px; }
+.kpi-drilldown-layout-chip {
+  font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+}
+.kpi-drilldown-layout-chip.custom { background: var(--color-warning-bg); color: var(--bv-warning); }
+.kpi-drilldown-layout-chip.standard { background: var(--color-success-bg); color: var(--color-success); }
 
-.module-vis-bar {
-  height: 14px;
-  border-radius: 999px;
-  background: var(--bv-critical);
-  overflow: hidden;
-}
-.module-vis-fill {
-  height: 100%;
-  background: var(--color-success);
-  border-radius: 999px 0 0 999px;
-  transition: width 0.6s ease-out;
-}
-
-.missing-data-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-.missing-data-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 10px;
+/* Activity (Email / Task / Call) sub-KPIs */
+.activity-subkpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.activity-subkpi-tile {
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
   border-radius: var(--radius-md);
-  margin-bottom: 6px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
-.missing-data-row.sev-critical { background: var(--color-danger-bg); }
-.missing-data-row.sev-warning { background: var(--color-warning-bg); }
-.missing-data-msg { font-size: 13px; color: var(--color-text); }
-.missing-data-view { padding: 4px 10px; font-size: 12px; flex-shrink: 0; }
+.activity-subkpi-suggestion { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 4px 0 0; }
+.activity-zia-rec { margin-top: 12px; }
+.activity-zia-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 8px 0 10px; }
+.activity-zia-item { display: flex; flex-direction: column; gap: 2px; }
+.activity-zia-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-tertiary); }
+.activity-zia-value { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.activity-zia-sub { font-size: 11px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 720px) {
+  .activity-subkpi-grid { grid-template-columns: 1fr; }
+  .activity-zia-grid { grid-template-columns: 1fr; }
+}
 
 /* Blueprints / Profiles / Users panels */
 .crm-panels-row {
@@ -2409,6 +2448,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   grid-template-columns: repeat(3, 1fr);
   gap: 1.25rem;
 }
+.crm-panels-row.crm-panels-row-2col { display: flex; flex-direction: column; grid-template-columns: none; }
 .crm-panel-card { display: flex; flex-direction: column; }
 .panel-item-list { display: flex; flex-direction: column; gap: 8px; }
 .panel-item-row {
@@ -2521,14 +2561,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   color: var(--color-text-tertiary);
 }
 
-/* Module visibility breakdown */
-.module-breakdown { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
-.module-breakdown-row { display: flex; align-items: center; justify-content: space-between; }
-.module-breakdown-label { font-size: 12px; color: var(--color-text-secondary); }
-.module-breakdown-value { font-size: 13px; font-weight: 600; color: var(--color-text); }
-.module-breakdown-value.good { color: var(--color-success); }
-.module-breakdown-value.critical { color: var(--bv-critical); }
-
 /* CRM Configuration summary grid */
 .config-grid {
   display: grid;
@@ -2547,6 +2579,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .config-tile.clickable { cursor: pointer; }
 .config-tile.clickable:hover { border-color: var(--color-accent); }
+.config-tile.clickable:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .config-tile.config-good { border-left-color: var(--color-success); }
 .config-tile.config-warning { border-left-color: var(--bv-warning); }
 .config-tile.config-critical { border-left-color: var(--bv-critical); }
@@ -2563,8 +2596,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 @media (max-width: 1100px) {
   .kpi-strip { grid-template-columns: repeat(2, 1fr); }
-  .crm-insights-row { grid-template-columns: 1fr; }
-  .crm-panels-row { grid-template-columns: 1fr; }
+  .crm-panels-row, .crm-panels-row.crm-panels-row-2col { grid-template-columns: 1fr; }
   .config-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
@@ -4043,8 +4075,43 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .effort-badge.hard { background: var(--color-danger-bg); color: var(--bv-critical); }
 .priority-action-btn { flex-shrink: 0; }
 
+/* Workflow Trigger Activity */
+.workflow-trigger-summary { margin-bottom: 10px; }
+.workflow-trigger-list { display: flex; flex-direction: column; gap: 8px; }
+.workflow-trigger-row {
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+.workflow-trigger-row.flagged { border-color: var(--bv-critical); }
+.workflow-trigger-top { display: flex; align-items: center; gap: 12px; }
+.workflow-trigger-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.workflow-trigger-name { font-size: 13px; font-weight: 600; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-trigger-module { font-size: 12px; color: var(--color-text-tertiary); }
+.workflow-trigger-date { font-size: 12px; color: var(--color-text-secondary); flex-shrink: 0; white-space: nowrap; }
+.workflow-trigger-date.never { color: var(--bv-critical); font-weight: 600; }
+.workflow-trigger-flag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--color-danger-bg);
+  color: var(--bv-critical);
+  flex-shrink: 0;
+}
+.workflow-trigger-suggestion {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 0.5px solid var(--color-border);
+}
+
 @media (max-width: 720px) {
   .priority-action-card { flex-wrap: wrap; }
+  .workflow-trigger-top { flex-wrap: wrap; }
   .business-view { padding: 1rem; }
 }
 
