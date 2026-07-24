@@ -2335,7 +2335,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 /* KPI strip */
 .kpi-strip {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   gap: 10px;
 }
 .kpi-tile {
@@ -2418,6 +2418,39 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .kpi-drilldown-layout-chip.custom { background: var(--color-warning-bg); color: var(--bv-warning); }
 .kpi-drilldown-layout-chip.standard { background: var(--color-success-bg); color: var(--color-success); }
+
+/* Functions KPI drilldown */
+.kpi-drilldown-subheading {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--color-text-tertiary); margin: 16px 0 8px;
+}
+.kpi-drilldown-subheading:first-of-type { margin-top: 0; }
+.function-issue-message { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 6px 0 0; }
+.function-dup-toggle {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  background: none; border: none; padding: 0; cursor: pointer; text-align: left; font: inherit;
+}
+.function-dup-caret { color: var(--color-text-tertiary); font-size: 11px; margin-left: auto; }
+.function-preview-btn { padding: 4px 10px; font-size: 12px; flex-shrink: 0; margin-left: auto; }
+.function-code-preview { margin-top: 10px; padding-top: 10px; border-top: 0.5px solid var(--color-border); }
+.function-code-block {
+  background: var(--color-bg-tertiary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow-y: auto;
+  color: var(--color-text);
+}
+.function-code-issues-label { display: block; font-size: 12px; font-weight: 700; color: var(--color-text); margin: 10px 0 4px; }
+.function-code-issues { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 0; list-style: none; }
+.function-code-issues li { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; }
+.function-code-issues .kpi-drilldown-badge { margin-right: 6px; }
 
 /* Activity (Email / Task / Call) sub-KPIs */
 .activity-subkpi-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -2593,6 +2626,10 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .config-tile-value { font-size: 20px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
 .config-tile-status { font-size: 12px; color: var(--color-text-secondary); }
+
+@media (max-width: 1400px) {
+  .kpi-strip { grid-template-columns: repeat(3, 1fr); }
+}
 
 @media (max-width: 1100px) {
   .kpi-strip { grid-template-columns: repeat(2, 1fr); }

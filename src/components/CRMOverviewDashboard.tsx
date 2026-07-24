@@ -18,6 +18,8 @@ import {
 import type { Section } from "@/lib/sections";
 import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
+import { isScheduleTool } from "@/lib/useRuleCoverage";
+import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, ISSUE_CATEGORY_LABELS, type FunctionIssue } from "@/lib/functionAnalysis";
 
 function parseMcpJson(result: unknown): Record<string, unknown> | null {
   if (!result || typeof result !== "object") return null;
@@ -1020,8 +1022,23 @@ function useScheduleRecords(config: McpConfig | null, tools: McpTool[], active: 
     if (!config || tools.length === 0) return;
     fetchedRef.current = true;
 
-    const scheduleTool = tools.find(t => /getschedules$/i.test(t.name));
-    if (!scheduleTool) { setState(prev => ({ ...prev, unavailable: true })); return; }
+    const scheduleTool = tools.find(t => isScheduleTool(t.name));
+    if (!scheduleTool) {
+      // Surfaces in the Audit Logs panel so it's visible without DevTools —
+      // either the near-miss candidates the regex almost matched (fix the
+      // pattern to include them), or confirmation the server truly has no
+      // schedule-listing tool under any name containing "sched"/"cron"/"recur".
+      const candidates = tools.filter(t => /sched|cron|recur/i.test(t.name)).map(t => t.name);
+      onLog({
+        id: crypto.randomUUID(), tool: "schedule-tool-lookup", input: {},
+        output: { totalToolsConnected: tools.length, possibleScheduleTools: candidates },
+        status: candidates.length > 0 ? "success" : "error",
+        errorMessage: candidates.length > 0 ? undefined : "No connected tool name contains 'sched', 'cron', or 'recur' — this MCP server may not expose schedule data at all.",
+        durationMs: 0, timestamp: new Date(),
+      });
+      setState(prev => ({ ...prev, unavailable: true }));
+      return;
+    }
 
     void (async () => {
       setState(prev => ({ ...prev, loading: true }));
@@ -1080,7 +1097,259 @@ function buildZiaScheduleInsight(rows: ScheduleBreakdownRow[]): { summary: strin
   return { summary: `Zia flags: ${flags.join("; ")}. These schedules aren't doing anything right now — reactivate what's still needed, or delete the rest so it's not mistaken for working automation.` };
 }
 
-function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null): KpiItem[] {
+// ─── Functions: list, duplicates, active/inactive, code fetch + analysis ──────
+// Verified against a live org via ZohoCRM_getFunctions/getFunctionCode: the
+// modern Functions API has no module scoping (only "category": Standalone /
+// Button / Automation / etc.) and exposes a flat "state" field for active/
+// inactive — a different, more reliable shape than the older workflow-linked
+// "associated" concept FunctionAudit.tsx uses. Code is fetched fresh per
+// function from the MCP server and held only in React state for the session —
+// never persisted to localStorage.
+
+interface FunctionItem {
+  id: string;
+  apiName: string;
+  name: string;
+  category: string;
+  active: boolean;
+}
+
+interface FunctionDuplicateGroup {
+  name: string;
+  items: { id: string; apiName: string; category: string }[];
+}
+
+function getFunctionActive(item: unknown): boolean {
+  const r = (item ?? {}) as Record<string, unknown>;
+  if (typeof r.active === "boolean") return r.active;
+  if (typeof r.enabled === "boolean") return r.enabled;
+  const state = String(r.state ?? "").toLowerCase();
+  if (!state) return true; // no signal at all — default active, same fallback isActiveWorkflow uses
+  return !(state === "inactive" || state === "disabled" || state === "draft" || state === "false");
+}
+
+function computeFunctionDuplicates(items: FunctionItem[]): FunctionDuplicateGroup[] {
+  const byKey = new Map<string, FunctionDuplicateGroup>();
+  for (const it of items) {
+    const key = it.name.trim().toLowerCase();
+    if (!key) continue;
+    const existing = byKey.get(key);
+    if (existing) existing.items.push({ id: it.id, apiName: it.apiName, category: it.category });
+    else byKey.set(key, { name: it.name, items: [{ id: it.id, apiName: it.apiName, category: it.category }] });
+  }
+  return [...byKey.values()].filter(g => g.items.length > 1).sort((a, b) => b.items.length - a.items.length);
+}
+
+// getFunctionCode's response is the raw Deluge/runtime source text itself
+// (confirmed via a live call), not a JSON envelope like the other entity
+// fetches — so this reads structuredContent.data.text / content[0].text
+// directly instead of running it through the generic JSON-array extractor.
+function extractFunctionCode(output: unknown): string | null {
+  if (!output || typeof output !== "object") return null;
+  const r = output as Record<string, unknown>;
+  const structured = r.structuredContent as Record<string, unknown> | undefined;
+  const data = structured?.data as Record<string, unknown> | undefined;
+  if (typeof data?.text === "string" && data.text.trim()) return data.text;
+  if (Array.isArray(r.content)) {
+    for (const item of r.content as Record<string, unknown>[]) {
+      if (item.type === "text" && typeof item.text === "string" && item.text.trim()) return item.text;
+    }
+  }
+  return null;
+}
+
+const FUNCTION_CODE_TOOL_PATTERNS = [/getfunctioncode$/i, /getfunctionscript$/i, /getfunctionbyid$/i, /getfunctiondetail/i];
+const FUNCTION_CODE_SCAN_CAP = 100;
+
+interface FunctionCodeState { code: string | null; loading: boolean; unavailable: boolean; }
+
+function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActive: boolean, onLog: (log: ExecutionLog) => void) {
+  const [items, setItems] = useState<FunctionItem[]>([]);
+  const [listState, setListState] = useState<{ loading: boolean; fetched: boolean; unavailable: boolean; hasMore: boolean }>({ loading: false, fetched: false, unavailable: false, hasMore: false });
+  const [failureCount, setFailureCount] = useState<number | null>(null);
+  const [codeByFnId, setCodeByFnId] = useState<Record<string, FunctionCodeState>>({});
+  const [issuesByFnId, setIssuesByFnId] = useState<Record<string, FunctionIssue[]>>({});
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number; loading: boolean }>({ done: 0, total: 0, loading: false });
+  const listFetchedRef = useRef(false);
+  const scanFetchedRef = useRef(false);
+  const detailToolRef = useRef<McpTool | null | undefined>(undefined);
+
+  // List + failures — eager (bounded to ~1000 functions), same eagerness as
+  // the metadata-only fetch this replaces, so duplicate/naming recommendations
+  // stay populated without requiring a click.
+  useEffect(() => {
+    if (listFetchedRef.current) return;
+    if (tools.length === 0) return;
+    const listTool = tools.find(t => /getfunctions$/i.test(t.name));
+    const failuresTool = tools.find(t => /getautomationfunctionfailures$/i.test(t.name));
+    if (!listTool && !failuresTool) return;
+    listFetchedRef.current = true;
+
+    void (async () => {
+      let all: unknown[] = [];
+      let hasMore = false;
+      if (listTool) {
+        setListState(prev => ({ ...prev, loading: true }));
+        for (let page = 1; page <= MAX_FUNCTION_PAGES; page++) {
+          const start = Date.now();
+          const input = { query_params: { page, per_page: 200 } };
+          try {
+            const output = await executeTool(config as McpConfig, listTool.name, input);
+            const pageItems = extractArray(output);
+            all = all.concat(pageItems);
+            onLog({ id: crypto.randomUUID(), tool: listTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+            hasMore = hasMoreRecords(output);
+            if (pageItems.length === 0 || !hasMore) break;
+          } catch (e: unknown) {
+            onLog({ id: crypto.randomUUID(), tool: listTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+            break;
+          }
+        }
+      }
+      const parsed: FunctionItem[] = all.map((f, i) => {
+        const r = (f ?? {}) as Record<string, unknown>;
+        return {
+          id: String(r.id ?? i),
+          apiName: String(r.api_name ?? ""),
+          name: String(r.name ?? r.api_name ?? `Function ${i + 1}`),
+          category: String(r.category ?? "—"),
+          active: getFunctionActive(f),
+        };
+      });
+      setItems(parsed);
+      setListState({ loading: false, fetched: true, unavailable: !listTool, hasMore });
+
+      if (failuresTool) {
+        const start = Date.now();
+        const input = { query_params: { page: 1, per_page: 200 } };
+        try {
+          const output = await executeTool(config as McpConfig, failuresTool.name, input);
+          setFailureCount(extractArray(output).length);
+          onLog({ id: crypto.randomUUID(), tool: failuresTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+        } catch (e: unknown) {
+          onLog({ id: crypto.randomUUID(), tool: failuresTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+        }
+      }
+    })();
+  }, [tools, config, onLog]);
+
+  function resolveDetailTool(): McpTool | null {
+    if (detailToolRef.current !== undefined) return detailToolRef.current;
+    let found: McpTool | null = null;
+    for (const pattern of FUNCTION_CODE_TOOL_PATTERNS) {
+      found = tools.find(t => pattern.test(t.name)) ?? null;
+      if (found) break;
+    }
+    detailToolRef.current = found;
+    if (!found) {
+      const candidates = tools.filter(t => /function/i.test(t.name) && !/getfunctions$/i.test(t.name) && !/getautomationfunctionfailures$/i.test(t.name)).map(t => t.name);
+      onLog({
+        id: crypto.randomUUID(), tool: "function-code-tool-lookup", input: {},
+        output: { totalToolsConnected: tools.length, possibleFunctionCodeTools: candidates },
+        status: candidates.length > 0 ? "success" : "error",
+        errorMessage: candidates.length > 0 ? undefined : "No connected tool looks like a function-code fetch (checked getFunctionCode/getFunctionScript/getFunctionById/getFunctionDetail).",
+        durationMs: 0, timestamp: new Date(),
+      });
+    }
+    return found;
+  }
+
+  function detailParamLoc(tool: McpTool) {
+    return findParam(findParamLocations(tool), /^fxIdentifier$|^functionId$|^id$/i) ?? { group: "path_variables", key: "fxIdentifier" };
+  }
+
+  // On-demand single-function code fetch (preview) — downloaded fresh from the
+  // MCP server every time it's requested, kept only in this hook's React state.
+  async function fetchCode(fnId: string) {
+    if (!config || !fnId) return;
+    if (codeByFnId[fnId]?.code || codeByFnId[fnId]?.loading) return;
+    const tool = resolveDetailTool();
+    if (!tool) { setCodeByFnId(prev => ({ ...prev, [fnId]: { code: null, loading: false, unavailable: true } })); return; }
+
+    setCodeByFnId(prev => ({ ...prev, [fnId]: { code: null, loading: true, unavailable: false } }));
+    const start = Date.now();
+    const input: Record<string, unknown> = {};
+    setParam(input, detailParamLoc(tool), fnId);
+    try {
+      const output = await executeTool(config, tool.name, input);
+      const code = extractFunctionCode(output);
+      setCodeByFnId(prev => ({ ...prev, [fnId]: { code, loading: false, unavailable: code === null } }));
+      if (code) setIssuesByFnId(prev => ({ ...prev, [fnId]: analyzeFunctionScript(code) }));
+      onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+    } catch (e: unknown) {
+      setCodeByFnId(prev => ({ ...prev, [fnId]: { code: null, loading: false, unavailable: true } }));
+      onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+    }
+  }
+
+  // Capped batch scan for the aggregate "% of functions with issues" stat —
+  // gated behind scanActive (the Functions KPI being opened) since this is
+  // one API call per function and shouldn't fire on every dashboard load.
+  useEffect(() => {
+    if (!scanActive || scanFetchedRef.current) return;
+    if (!listState.fetched || items.length === 0) return;
+    const tool = resolveDetailTool();
+    if (!tool) return;
+    scanFetchedRef.current = true;
+
+    const targets = items.slice(0, FUNCTION_CODE_SCAN_CAP);
+    setScanProgress({ done: 0, total: targets.length, loading: true });
+
+    void (async () => {
+      for (const fn of targets) {
+        const start = Date.now();
+        const input: Record<string, unknown> = {};
+        setParam(input, detailParamLoc(tool), fn.id);
+        try {
+          const output = await executeTool(config as McpConfig, tool.name, input);
+          const code = extractFunctionCode(output);
+          if (code) {
+            setCodeByFnId(prev => ({ ...prev, [fn.id]: { code, loading: false, unavailable: false } }));
+            setIssuesByFnId(prev => ({ ...prev, [fn.id]: analyzeFunctionScript(code) }));
+          }
+          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+        } catch (e: unknown) {
+          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+        }
+        setScanProgress(prev => ({ ...prev, done: prev.done + 1 }));
+      }
+      setScanProgress(prev => ({ ...prev, loading: false }));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanActive, listState.fetched, items, config, tools, onLog]);
+
+  return { items, listState, failureCount, codeByFnId, issuesByFnId, scanProgress, fetchCode };
+}
+
+interface FunctionIssueRow { key: string; functionName: string; category: string; issue: FunctionIssue; }
+const FUNCTION_SEVERITY_ORDER: Record<FunctionIssue["severity"], number> = { high: 0, medium: 1, low: 2 };
+
+function buildFunctionZiaSummary(
+  functionsWithIssuesPct: number, scannedCount: number, duplicates: FunctionDuplicateGroup[],
+  suspiciousCount: number, failureCount: number | null,
+): string {
+  if (scannedCount === 0) return "Open this card to scan function code for issues — nothing analyzed yet.";
+  const parts: string[] = [];
+  if (functionsWithIssuesPct > 0) {
+    parts.push(`${functionsWithIssuesPct}% of the ${scannedCount} functions scanned have at least one flagged issue — mostly missing error handling and API calls made inside loops`);
+  }
+  if (duplicates.length > 0) {
+    const dupItemCount = duplicates.reduce((s, g) => s + g.items.length, 0);
+    parts.push(`${duplicates.length} function name${duplicates.length !== 1 ? "s are" : " is"} duplicated across ${dupItemCount} functions total — rename or delete the unused copies so workflows/buttons unambiguously call the right one`);
+  }
+  if (suspiciousCount > 0) {
+    parts.push(`${suspiciousCount} function${suspiciousCount !== 1 ? "s" : ""} still carr${suspiciousCount !== 1 ? "y" : "ies"} a placeholder/test name`);
+  }
+  if (failureCount) {
+    parts.push(`${failureCount} recent execution failure${failureCount !== 1 ? "s" : ""} logged`);
+  }
+  if (parts.length === 0) return "No issues, duplicates, or placeholder names found in the functions scanned — code quality looks solid.";
+  return `Zia flags: ${parts.join("; ")}.`;
+}
+
+interface FunctionKpiSummary { total: number; active: number; inactive: number; fetched: boolean; }
+
+function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null, functionSummary: FunctionKpiSummary): KpiItem[] {
   const modules = entityData.modules.items;
   const blueprints = entityData.blueprints.items;
   const users = entityData.users.items;
@@ -1131,6 +1400,14 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
         : ruleCoverage.scheduleCount === 0 ? "No schedules configured"
         : "click to see active/inactive and last run",
       clickable: !!ruleCoverage?.scheduleCount,
+    },
+    {
+      key: "functions", label: "Functions", value: functionSummary.active,
+      severity: !functionSummary.fetched ? "warning" : functionSummary.total === 0 ? "critical" : functionSummary.inactive > 0 ? "warning" : "good",
+      note: !functionSummary.fetched ? "Loading…"
+        : functionSummary.total === 0 ? "No functions found"
+        : `${functionSummary.inactive} inactive of ${functionSummary.total} — click for issues, duplicates & code`,
+      clickable: functionSummary.total > 0,
     },
   ];
 }
@@ -1338,11 +1615,20 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     text: string;
     usage?: { inputTokens: number; outputTokens: number; model: string };
   }>>({});
-  const [functionHealth, setFunctionHealth] = useState<FunctionHealth | null>(null);
-  const functionHealthFetched = useRef(false);
-  const [expandedKpi, setExpandedKpi] = useState<"modules" | "blueprints" | "layouts" | "schedules" | null>(null);
+  const [expandedKpi, setExpandedKpi] = useState<"modules" | "blueprints" | "layouts" | "schedules" | "functions" | null>(null);
   const layoutsByModule = useLayoutsByModule(config, tools, entityData.modules.items, expandedKpi === "layouts", onLog);
   const scheduleRecords = useScheduleRecords(config, tools, expandedKpi === "schedules", onLog);
+  const functionRecords = useFunctionRecords(config, tools, expandedKpi === "functions", onLog);
+  const [expandedFunctionDuplicate, setExpandedFunctionDuplicate] = useState<string | null>(null);
+  const [previewFunctionId, setPreviewFunctionId] = useState<string | null>(null);
+  const [functionsListExpanded, setFunctionsListExpanded] = useState(false);
+  function toggleFunctionPreview(fnId: string) {
+    setPreviewFunctionId(prev => {
+      const next = prev === fnId ? null : fnId;
+      if (next) functionRecords.fetchCode(next);
+      return next;
+    });
+  }
   // Workflows/Activity are always-visible cards (not click-to-reveal like the
   // KPI strip drilldowns above), so this fetches as soon as tools are ready
   // rather than waiting on a click.
@@ -1353,64 +1639,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     const id = setInterval(() => setRefreshTick(t => t + 1), 30_000);
     return () => clearInterval(id);
   }, []);
-
-  // Function naming/duplicate/failure health — bounded to the first ~1000
-  // functions (5 pages of 200) so a huge org doesn't trigger unbounded fetches.
-  useEffect(() => {
-    if (functionHealthFetched.current) return;
-    if (tools.length === 0) return;
-    const functionsTool = tools.find(t => /getfunctions$/i.test(t.name));
-    const failuresTool = tools.find(t => /getautomationfunctionfailures$/i.test(t.name));
-    if (!functionsTool && !failuresTool) return;
-
-    functionHealthFetched.current = true;
-    void (async () => {
-      const names: string[] = [];
-      let hasMore = false;
-      if (functionsTool) {
-        for (let page = 1; page <= MAX_FUNCTION_PAGES; page++) {
-          const start = Date.now();
-          const input = { query_params: { page, per_page: 200 } };
-          try {
-            const output = await executeTool(config, functionsTool.name, input);
-            const items = extractArray(output) as Record<string, unknown>[];
-            for (const f of items) {
-              if (typeof f.name === "string" && f.name) names.push(f.name);
-            }
-            onLog({ id: crypto.randomUUID(), tool: functionsTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
-            hasMore = hasMoreRecords(output);
-            if (items.length === 0 || !hasMore) break;
-          } catch (e: unknown) {
-            onLog({ id: crypto.randomUUID(), tool: functionsTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
-            break;
-          }
-        }
-      }
-
-      let failureCount = 0;
-      const failuresChecked = !!failuresTool;
-      if (failuresTool) {
-        const start = Date.now();
-        const input = { query_params: { page: 1, per_page: 200 } };
-        try {
-          const output = await executeTool(config, failuresTool.name, input);
-          failureCount = extractArray(output).length;
-          onLog({ id: crypto.randomUUID(), tool: failuresTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
-        } catch (e: unknown) {
-          onLog({ id: crypto.randomUUID(), tool: failuresTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
-        }
-      }
-
-      const nameCounts = new Map<string, number>();
-      names.forEach(n => { const k = n.trim().toLowerCase(); nameCounts.set(k, (nameCounts.get(k) ?? 0) + 1); });
-      const duplicateGroups = Array.from(nameCounts.entries())
-        .filter(([, count]) => count > 1)
-        .map(([key, count]) => ({ name: names.find(n => n.trim().toLowerCase() === key) ?? key, count }));
-      const suspiciousNames = names.filter(n => SUSPICIOUS_FUNCTION_NAME.test(n.trim()));
-
-      setFunctionHealth({ totalScanned: names.length, hasMore, duplicateGroups, suspiciousNames, failuresChecked, failureCount });
-    })();
-  }, [tools, config, onLog]);
 
   function buildCrmContext(): string {
     const ctxLines: string[] = ["=== CRM OVERVIEW ==="];
@@ -1553,6 +1781,23 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
 
   void refreshTick; // used for relative time updates
 
+  const functionDuplicates = computeFunctionDuplicates(functionRecords.items);
+  const functionActiveCount = functionRecords.items.filter(f => f.active).length;
+  const functionInactiveCount = functionRecords.items.length - functionActiveCount;
+  const functionSuspiciousNames = functionRecords.items.filter(f => SUSPICIOUS_FUNCTION_NAME.test(f.name.trim())).map(f => f.name);
+  // Adapter so generateRecommendations (unchanged below) keeps reading the
+  // same FunctionHealth shape it always has — now sourced from the new hook's
+  // full items instead of the old names-only fetch, so duplicate/suspicious
+  // counts here always match what the Functions KPI drilldown shows.
+  const functionHealth: FunctionHealth | null = functionRecords.listState.fetched ? {
+    totalScanned: functionRecords.items.length,
+    hasMore: functionRecords.listState.hasMore,
+    duplicateGroups: functionDuplicates.map(g => ({ name: g.name, count: g.items.length })),
+    suspiciousNames: functionSuspiciousNames,
+    failuresChecked: functionRecords.failureCount !== null,
+    failureCount: functionRecords.failureCount ?? 0,
+  } : null;
+
   const recommendations = generateRecommendations(entityData, tools, ruleCoverage, functionHealth);
   const filteredRecs = recommendations.filter(r => r.category === activeTab);
   const totalItems = CRM_ENTITIES.reduce((sum, e) => sum + entityData[e.type].items.length, 0);
@@ -1560,12 +1805,25 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const loadedCount = CRM_ENTITIES.filter(e => entityData[e.type].lastFetched !== null).length;
   const ziaTool = findZiaTool(tools);
 
-  const kpis = computeKpis(entityData, ruleCoverage);
+  const kpis = computeKpis(entityData, ruleCoverage, {
+    total: functionRecords.items.length, active: functionActiveCount, inactive: functionInactiveCount,
+    fetched: functionRecords.listState.fetched,
+  });
   const moduleBreakdown = expandedKpi === "modules" ? computeModuleBreakdown(entityData) : [];
   const blueprintBreakdown = expandedKpi === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
   const layoutBreakdown = expandedKpi === "layouts" ? computeLayoutBreakdown(entityData.modules.items, layoutsByModule.byModule) : [];
   const scheduleBreakdown = expandedKpi === "schedules" ? computeScheduleBreakdown(scheduleRecords.items) : [];
   const ziaScheduleInsight = expandedKpi === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
+
+  const functionIssueRows: FunctionIssueRow[] = expandedKpi === "functions"
+    ? functionRecords.items.flatMap(fn => (functionRecords.issuesByFnId[fn.id] ?? []).map((issue, i) => ({ key: `${fn.id}-${i}`, functionName: fn.name, category: fn.category, issue })))
+    : [];
+  const sortedFunctionIssueRows = [...functionIssueRows].sort((a, b) => FUNCTION_SEVERITY_ORDER[a.issue.severity] - FUNCTION_SEVERITY_ORDER[b.issue.severity]);
+  const scannedFnIds = Object.keys(functionRecords.issuesByFnId);
+  const scannedFnCount = scannedFnIds.length;
+  const functionsWithIssuesCount = scannedFnIds.filter(id => (functionRecords.issuesByFnId[id]?.length ?? 0) > 0).length;
+  const functionsWithIssuesPct = scannedFnCount > 0 ? Math.round((functionsWithIssuesCount / scannedFnCount) * 100) : 0;
+  const functionZiaSummary = buildFunctionZiaSummary(functionsWithIssuesPct, scannedFnCount, functionDuplicates, functionSuspiciousNames.length, functionRecords.failureCount);
   const configRows = computeConfigRows(entityData);
   const workflowBreakdown = computeWorkflowBreakdown(entityData);
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
@@ -1979,7 +2237,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {/* ── KPI strip ───────────────────────────────────────────────────────── */}
       <div className="kpi-strip">
         {kpis.map(k => {
-          const toggle = () => setExpandedKpi(prev => (prev === k.key ? null : (k.key as "modules" | "blueprints" | "layouts" | "schedules")));
+          const toggle = () => setExpandedKpi(prev => (prev === k.key ? null : (k.key as "modules" | "blueprints" | "layouts" | "schedules" | "functions")));
           return (
             <div
               key={k.key}
@@ -2126,6 +2384,155 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 </div>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {expandedKpi === "functions" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Functions — Issues, Duplicates &amp; Code</h4>
+            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+          </div>
+          <div className="kpi-drilldown-summary">
+            <span className="kpi-drilldown-stat good">{functionActiveCount} Active</span>
+            <span className="kpi-drilldown-stat bad">{functionInactiveCount} Inactive</span>
+            <span className="kpi-drilldown-stat neutral">{functionDuplicates.length} Duplicate Names</span>
+          </div>
+
+          {/* Issues first, per the requested output order */}
+          <h5 className="kpi-drilldown-subheading">Issues</h5>
+          {functionRecords.scanProgress.loading && (
+            <p className="kpi-drilldown-progress">
+              <span className="spinner" /> Scanning function code for issues… {functionRecords.scanProgress.done} of {functionRecords.scanProgress.total}
+            </p>
+          )}
+          {!functionRecords.scanProgress.loading && functionRecords.scanProgress.total > 0 && (
+            <p className="kpi-drilldown-note">
+              Scanned {scannedFnCount} of {functionRecords.items.length} functions
+              {scannedFnCount >= FUNCTION_CODE_SCAN_CAP && scannedFnCount < functionRecords.items.length ? ` (capped at ${FUNCTION_CODE_SCAN_CAP})` : ""}
+              {scannedFnCount > 0 ? ` — ${functionsWithIssuesPct}% have at least one flagged issue.` : "."}
+            </p>
+          )}
+          {!functionRecords.scanProgress.loading && sortedFunctionIssueRows.length === 0 && scannedFnCount > 0 && (
+            <p className="business-view-hint">No issues flagged in the functions scanned.</p>
+          )}
+          {sortedFunctionIssueRows.length > 0 && (
+            <div className="kpi-drilldown-table">
+              {sortedFunctionIssueRows.slice(0, 15).map(row => (
+                <div key={row.key} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                  <div className="kpi-drilldown-row-top">
+                    <span className="kpi-drilldown-name">{row.functionName}</span>
+                    <span className="kpi-drilldown-module">{row.category}</span>
+                    <span className={`kpi-drilldown-badge status-${row.issue.severity === "high" ? "inactive" : row.issue.severity === "medium" ? "draft" : "active"}`}>
+                      {ISSUE_CATEGORY_LABELS[row.issue.category]}
+                    </span>
+                  </div>
+                  <p className="function-issue-message">{row.issue.message}</p>
+                </div>
+              ))}
+              {sortedFunctionIssueRows.length > 15 && (
+                <p className="business-view-hint">+{sortedFunctionIssueRows.length - 15} more issues found</p>
+              )}
+            </div>
+          )}
+
+          {/* Recommendations second */}
+          <h5 className="kpi-drilldown-subheading">Recommendations</h5>
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">Zia Recommendation — Functions</span>
+            </div>
+            <p className="zia-rec-desc">{functionZiaSummary}</p>
+          </div>
+
+          {/* Duplicate names — clickable, lists every duplicate and its module/category */}
+          <h5 className="kpi-drilldown-subheading">Duplicate Function Names ({functionDuplicates.length})</h5>
+          {functionDuplicates.length === 0 ? (
+            <p className="business-view-hint">No duplicate function names found.</p>
+          ) : (
+            <div className="kpi-drilldown-table">
+              {functionDuplicates.map(group => (
+                <div key={group.name} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                  <button
+                    className="function-dup-toggle"
+                    onClick={() => setExpandedFunctionDuplicate(prev => (prev === group.name ? null : group.name))}
+                  >
+                    <span className="kpi-drilldown-name">{group.name}</span>
+                    <span className="kpi-drilldown-badge neutral">{group.items.length}×</span>
+                    <span className="function-dup-caret">{expandedFunctionDuplicate === group.name ? "▾" : "▸"}</span>
+                  </button>
+                  {expandedFunctionDuplicate === group.name && (
+                    <div className="kpi-drilldown-layout-names">
+                      {group.items.map(it => (
+                        <span key={it.id} className="kpi-drilldown-layout-chip custom">{it.apiName || it.id} · {it.category}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Full list, each with an on-demand code preview + per-function recommendations */}
+          <h5 className="kpi-drilldown-subheading">All Functions ({functionRecords.items.length})</h5>
+          <div className="kpi-drilldown-table">
+            {(functionsListExpanded ? functionRecords.items : functionRecords.items.slice(0, 8)).map(fn => (
+              <div key={fn.id} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                <div className="kpi-drilldown-row-top">
+                  <span className="kpi-drilldown-name">{fn.name}</span>
+                  <span className="kpi-drilldown-module">{fn.category}</span>
+                  <span className={`kpi-drilldown-badge status-${fn.active ? "active" : "inactive"}`}>{fn.active ? "active" : "inactive"}</span>
+                  <button className="btn-secondary function-preview-btn" onClick={() => toggleFunctionPreview(fn.id)}>
+                    {previewFunctionId === fn.id ? "Hide Code" : "Preview Code"}
+                  </button>
+                </div>
+                {previewFunctionId === fn.id && (
+                  <div className="function-code-preview">
+                    {functionRecords.codeByFnId[fn.id]?.loading && (
+                      <p className="kpi-drilldown-progress"><span className="spinner" /> Downloading code from Zoho…</p>
+                    )}
+                    {functionRecords.codeByFnId[fn.id]?.unavailable && (
+                      <p className="business-view-hint">Code not available for this function.</p>
+                    )}
+                    {functionRecords.codeByFnId[fn.id]?.code && (
+                      <>
+                        <pre className="function-code-block"><code>{functionRecords.codeByFnId[fn.id]!.code}</code></pre>
+
+                        <div className="zia-rec zia-rec-low activity-zia-rec">
+                          <div className="zia-rec-header">
+                            <span className="zia-rec-icon">✦</span>
+                            <span className="zia-rec-title">Zia Recommendation — Formatting &amp; Comments</span>
+                          </div>
+                          <p className="zia-rec-desc">{reviewCodeQuality(functionRecords.codeByFnId[fn.id]!.code!).summary}</p>
+                        </div>
+
+                        <strong className="function-code-issues-label">Recommendations for this function</strong>
+                        {(functionRecords.issuesByFnId[fn.id]?.length ?? 0) > 0 ? (
+                          <ul className="function-code-issues">
+                            {sortIssuesBySeverity(functionRecords.issuesByFnId[fn.id]!).map((iss, i) => (
+                              <li key={i}>
+                                <span className={`kpi-drilldown-badge status-${iss.severity === "high" ? "inactive" : iss.severity === "medium" ? "draft" : "active"}`}>
+                                  {ISSUE_CATEGORY_LABELS[iss.category]}
+                                </span> {iss.message}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="business-view-hint">No issues flagged in this function.</p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {functionRecords.items.length > 8 && !functionsListExpanded && (
+            <button className="cost-cards-more" onClick={() => setFunctionsListExpanded(true)}>
+              + {functionRecords.items.length - 8} more functions
+            </button>
           )}
         </div>
       )}

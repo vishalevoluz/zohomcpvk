@@ -45,8 +45,16 @@ const PER_MODULE_RULE_TOOLS: { key: PerModuleKey; pattern: RegExp }[] = [
 
 // Schedules (recurring scheduled functions/actions) are an org-level concept
 // in Zoho CRM, not scoped to a module — fetched once as a flat count rather
-// than per core module.
-const SCHEDULE_TOOL_PATTERN = /getschedules$/i;
+// than per core module. Multiple patterns (not just an exact "getSchedules$"
+// match) since MCP server implementations vary the tool name — same
+// broadened-matching approach as the layouts/workflows patterns in
+// useCrmEntities.ts, which use several regexes rather than one exact one.
+const SCHEDULE_TOOL_PATTERNS = [/getschedule(?!byid)/i, /listschedule/i, /allschedule/i, /getscheduledactions?/i];
+// Exported so CRMOverviewDashboard.tsx's schedule drilldown (which needs the
+// full records, not just a count) resolves the same tool this hook does.
+export function isScheduleTool(name: string): boolean {
+  return SCHEDULE_TOOL_PATTERNS.some(p => p.test(name));
+}
 
 // Assignment/approval/validation/layout rules and schedules each need a
 // `module` query param (or nothing, for schedules) and so can't ride along
@@ -78,7 +86,7 @@ export function useRuleCoverage(
     const matchedTools = PER_MODULE_RULE_TOOLS
       .map(def => ({ key: def.key, tool: tools.find(t => def.pattern.test(t.name)) }))
       .filter((m): m is { key: PerModuleKey; tool: McpTool } => !!m.tool);
-    const scheduleTool = tools.find(t => SCHEDULE_TOOL_PATTERN.test(t.name)) ?? null;
+    const scheduleTool = tools.find(t => isScheduleTool(t.name)) ?? null;
     if (matchedTools.length === 0 && !scheduleTool) return;
 
     const coreApiNames = automationCoverageApiNames(entityData.modules.items);
