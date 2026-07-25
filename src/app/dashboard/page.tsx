@@ -18,6 +18,7 @@ import AuditLogs from "@/components/AuditLogs";
 import IntegrationsPanel from "@/components/IntegrationsPanel";
 import CRMOverviewDashboard from "@/components/CRMOverviewDashboard";
 import BusinessView from "@/components/BusinessView";
+import BusinessJourneyCard from "@/components/BusinessJourneyCard";
 import { useCrmEntities, CRM_ENTITIES, isEntityResolved } from "@/lib/useCrmEntities";
 import { useCrmRecordSamples } from "@/lib/useCrmRecordSamples";
 import { usePipelineStages } from "@/lib/usePipelineStages";
@@ -183,6 +184,13 @@ export default function DashboardPage() {
             pipelineStages={pipelineStages.data}
             ruleCoverage={ruleCoverage.data}
             fetchAll={fetchAllData}
+            onSelectSection={onSelectSection}
+          />
+          <BusinessJourneyCard
+            entityData={crm.entityData}
+            recordSamples={crmRecords.data}
+            pipelineStages={pipelineStages.data}
+            ruleCoverage={ruleCoverage.data}
             onSelectSection={onSelectSection}
           />
           <CRMOverviewDashboard

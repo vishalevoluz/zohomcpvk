@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { SECTIONS, type Section } from "@/lib/sections";
 import type { McpTool } from "@/types/mcp";
 
@@ -22,6 +23,8 @@ const TOOL_GROUPS: { id: Section; label: string; icon: string }[] = [
 ];
 
 export default function Sidebar({ connected, activeSection, onSelectSection, categorized, logCount, onDisconnect, allTools }: Props) {
+  // Starts narrow (icons only) — the toggle button below expands/collapses it.
+  const [collapsed, setCollapsed] = useState(true);
   const [toolsOpen, setToolsOpen] = useState(true);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
@@ -29,17 +32,36 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
     setOpenGroups(prev => ({ ...prev, [id]: !(prev[id] ?? true) }));
   }
 
+  // Radix Dialog portals to document.body, outside this component's DOM
+  // subtree, so a fixed/centered modal has no way to know how much width the
+  // sidebar is currently eating on the left — without this, "centered"
+  // dialogs sit visibly left-of-center relative to the actual visible
+  // workspace. Publishing the width on the root element lets globals.css
+  // shift centered overlays by half of it (see .jc-dialog).
+  useEffect(() => {
+    document.documentElement.style.setProperty("--sidebar-w", collapsed ? "64px" : "220px");
+  }, [collapsed]);
+
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
+      <button
+        className="sidebar-toggle-btn"
+        onClick={() => setCollapsed(c => !c)}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+      </button>
+
       <div className="sidebar-brand">
         <div className="sidebar-brand-icon">⚡</div>
         <span className="sidebar-brand-name">EvoAudit</span>
       </div>
 
       {connected && (
-        <div className="sidebar-status">
+        <div className="sidebar-status" title="Connected">
           <span className="status-dot connected" />
-          Connected
+          <span className="sidebar-status-text">Connected</span>
         </div>
       )}
 
@@ -49,6 +71,7 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
         <button
           className={`sidebar-nav-item sidebar-nav-overview ${activeSection === "crm-dashboard" ? "active" : ""}`}
           onClick={() => onSelectSection("crm-dashboard")}
+          title="CRM Dashboard"
         >
           <span className="sidebar-nav-icon">⌂</span>
           <span className="sidebar-nav-text">CRM Dashboard</span>
@@ -64,6 +87,7 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
               key={sec.id}
               className={`sidebar-nav-item ${activeSection === sec.id ? "active" : ""}`}
               onClick={() => onSelectSection(sec.id)}
+              title={sec.label}
             >
               <span className="sidebar-nav-icon">{sec.icon}</span>
               <span className="sidebar-nav-text">{sec.label}</span>
@@ -79,6 +103,7 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
         <button
           className={`sidebar-nav-item ${activeSection === "logs" ? "active" : ""}`}
           onClick={() => onSelectSection("logs")}
+          title="Audit Logs"
         >
           <span className="sidebar-nav-icon">◎</span>
           <span className="sidebar-nav-text">Audit Logs</span>
@@ -88,13 +113,14 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
         <button
           className={`sidebar-nav-item ${activeSection === "integrations" ? "active" : ""}`}
           onClick={() => onSelectSection("integrations")}
+          title="Integrations"
         >
           <span className="sidebar-nav-icon">⧉</span>
           <span className="sidebar-nav-text">Integrations</span>
         </button>
       </nav>
 
-      {connected && allTools.length > 0 && (
+      {connected && !collapsed && allTools.length > 0 && (
         <div className="sidebar-tools-section">
           <button
             className="sidebar-tools-header"
@@ -141,8 +167,9 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
 
       {connected && (
         <div className="sidebar-footer">
-          <button className="sidebar-disconnect" onClick={onDisconnect}>
-            Disconnect
+          <button className="sidebar-disconnect" onClick={onDisconnect} title="Disconnect">
+            <LogOut size={14} />
+            <span className="sidebar-disconnect-text">Disconnect</span>
           </button>
         </div>
       )}

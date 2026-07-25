@@ -39,8 +39,20 @@
   --bv-configured: #34d399;
   --bv-empty: #5c6675;
   --bv-yellow: #fbbf24;
+  /* Journey map's extended palette — kept distinct from --bv-healthy (green)
+     so automation/confidence read as their own signal instead of competing
+     with "healthy" for the same color. */
+  --bv-automation: #60a5fa;
+  --bv-automation-bg: rgba(96,165,250,0.14);
+  --bv-confidence: #2dd4bf;
+  --bv-confidence-bg: rgba(45,212,191,0.14);
 
   --shadcn-radius: 0.625rem;
+  /* Sidebar's actual rendered width (collapsed 64px by default) — kept in
+     sync at runtime by Sidebar.tsx so viewport-centered overlays (see
+     .jc-dialog) can offset around the visible content area, not the full
+     browser window. */
+  --sidebar-w: 64px;
 }
 
 /* ── shadcn/ui theme layer ────────────────────────────────────────────────
@@ -628,12 +640,34 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   position: sticky;
   top: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   background: var(--color-bg);
   border-right: 0.5px solid var(--color-border);
   display: flex;
   flex-direction: column;
   padding: 1rem 0 1rem;
+  transition: width 0.18s ease;
 }
+.sidebar.collapsed { width: 64px; }
+
+.sidebar-toggle-btn {
+  position: absolute;
+  top: 18px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-bg-secondary);
+  border: 0.5px solid var(--color-border);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  transition: background 0.12s, color 0.12s;
+}
+.sidebar-toggle-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text); }
 
 /* Thin, unobtrusive scrollbar matching the dark/green theme — same treatment
    on the nested tools list so a scrolled sidebar doesn't show two different
@@ -687,6 +721,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   font-size: 15px;
   font-weight: 600;
   color: var(--color-text);
+  white-space: nowrap;
 }
 
 .sidebar-status {
@@ -698,6 +733,22 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   font-size: 12px;
   color: var(--color-text-secondary);
 }
+.sidebar-status-text { white-space: nowrap; }
+
+/* ─── Collapsed state — icons only, text/labels/counts hidden ──────────── */
+.sidebar.collapsed .sidebar-brand { justify-content: center; padding: 0 0 1rem; gap: 0; }
+.sidebar.collapsed .sidebar-brand-name,
+.sidebar.collapsed .sidebar-status-text,
+.sidebar.collapsed .sidebar-nav-label,
+.sidebar.collapsed .sidebar-nav-text,
+.sidebar.collapsed .sidebar-nav-count,
+.sidebar.collapsed .sidebar-disconnect-text {
+  display: none;
+}
+.sidebar.collapsed .sidebar-status { justify-content: center; padding: 0; }
+.sidebar.collapsed .sidebar-nav { padding: 0 0.5rem; }
+.sidebar.collapsed .sidebar-nav-item { justify-content: center; gap: 0; padding: 8px 0; }
+.sidebar.collapsed .sidebar-footer { padding: 0.75rem 0.5rem 0; }
 
 .sidebar-nav-label {
   font-size: 10px;
@@ -768,11 +819,16 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 .sidebar-disconnect {
   width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font-size: 13px;
   padding: 7px 10px;
   color: var(--color-danger);
   background: none;
   border: 0.5px solid var(--color-border);
+  cursor: pointer;
 }
 
 .sidebar-disconnect:hover { background: var(--color-danger-bg); border-color: transparent; }
@@ -4541,6 +4597,316 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   .landing-hero-visual { flex-direction: row-reverse; align-self: stretch; justify-content: flex-end; gap: 24px; }
   .landing-hero-title { font-size: 32px; }
 }
+/* ── Business Journey Card (redesigned flow chart, below the Business Card) ──
+   Palette: healthy = emerald (--bv-healthy), warning = amber (--bv-warning),
+   broken = red (--bv-critical), automation = blue (--bv-automation),
+   confidence = teal (--bv-confidence) — green is reserved for "healthy" only,
+   so automation/confidence never compete with it for attention. */
+.journey-view {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 0 1.5rem 1.5rem;
+}
+.journey-card { display: flex; flex-direction: column; gap: 20px; }
+.journey-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.jc-legend { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.jc-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  cursor: help;
+}
+.jc-legend-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.jc-legend-swatch.kind-automated { background: var(--bv-healthy); }
+.jc-legend-swatch.kind-manual { background: var(--color-text-tertiary); }
+.jc-legend-swatch.kind-broken { background: var(--bv-critical); }
+
+/* Journey Summary strip — big number, label, tiny status word, colored accent */
+.jc-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+}
+@media (max-width: 900px) { .jc-summary-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 520px) { .jc-summary-grid { grid-template-columns: repeat(2, 1fr); } }
+.jc-summary-tile {
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-left: 3px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.jc-summary-tile.tone-healthy { border-left-color: var(--bv-healthy); }
+.jc-summary-tile.tone-warning { border-left-color: var(--bv-warning); }
+.jc-summary-tile.tone-critical { border-left-color: var(--bv-critical); }
+.jc-summary-value { font-size: 22px; font-weight: 800; color: var(--color-text); line-height: 1.2; }
+.jc-summary-label { font-size: 11px; font-weight: 500; color: var(--color-text-secondary); }
+.jc-summary-desc { font-size: 10.5px; font-weight: 500; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.03em; }
+.jc-summary-tile.tone-healthy .jc-summary-desc { color: var(--bv-healthy); }
+.jc-summary-tile.tone-warning .jc-summary-desc { color: var(--bv-warning); }
+.jc-summary-tile.tone-critical .jc-summary-desc { color: var(--bv-critical); }
+
+/* Journey grid: 7 cols (card, arrow, card, arrow, card, arrow, card) x 5 rows
+   (secondary campaign row, connector, main row, connector, invoice branch row).
+   Extra column/row breathing room per the "increase spacing between major
+   stages" pass — was 120px cols / 26px connector rows. */
+.jc-grid-scroll { overflow-x: auto; padding: 8px 2px 10px; }
+.jc-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(128px, 1fr));
+  grid-template-rows: auto 34px auto 34px auto;
+  align-items: center;
+  column-gap: 4px;
+  min-width: 960px;
+}
+.jc-cell { display: flex; flex-direction: column; align-items: stretch; justify-content: center; padding: 6px; }
+.jc-connector-cell { padding: 0; align-self: stretch; }
+.jc-secondary-cell { opacity: 0.96; }
+.jc-secondary-tag {
+  text-align: center;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  margin-top: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ── Connectors — thicker, rounded, glow on healthy, pulse on broken ───── */
+.jc-connector {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-tertiary);
+  position: relative;
+  cursor: help;
+  transition: opacity 0.15s, filter 0.15s;
+}
+.jc-connector-h { flex-direction: row; height: 100%; gap: 4px; }
+.jc-connector-v { flex-direction: column; width: 100%; height: 100%; gap: 2px; }
+.jc-connector-track { display: flex; flex: 1; align-items: center; justify-content: center; }
+.jc-connector-h .jc-connector-track { height: 100%; }
+.jc-connector-v .jc-connector-track { width: 100%; min-height: 12px; }
+.jc-connector-line {
+  border-radius: 999px;
+  background: var(--color-text-tertiary);
+  transition: background 0.15s, box-shadow 0.2s;
+}
+.jc-connector-h .jc-connector-line { height: 3px; width: 100%; }
+.jc-connector-v .jc-connector-line { width: 3px; height: 100%; min-height: 10px; }
+.jc-connector-arrow { flex-shrink: 0; }
+.jc-connector-label {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 10px; font-weight: 600;
+  white-space: nowrap;
+}
+.jc-connector-v .jc-connector-label { font-size: 9.5px; }
+
+.jc-connector.kind-automated { color: var(--bv-healthy); }
+.jc-connector.kind-automated .jc-connector-line { background: var(--bv-healthy); box-shadow: 0 0 8px 0 rgba(52,211,153,0.55); }
+.jc-connector.kind-broken { color: var(--bv-critical); }
+.jc-connector.kind-broken .jc-connector-line { background: var(--bv-critical); animation: jc-broken-pulse 1.6s ease-in-out infinite; }
+.jc-connector.kind-loading { color: var(--color-border-strong); opacity: 0.6; }
+.jc-connector.kind-loading .jc-connector-line { background: var(--color-border-strong); }
+.jc-connector.dashed .jc-connector-line { background: none; border-left: 3px dashed var(--color-text-tertiary); width: 0; border-radius: 0; }
+.jc-connector.dashed.kind-automated .jc-connector-line { border-left-color: var(--bv-healthy); box-shadow: none; }
+
+/* Animated flow sweep on hover — automated/healthy connectors only */
+.jc-connector-h.kind-automated:hover .jc-connector-line,
+.jc-connector-v.kind-automated:hover .jc-connector-line {
+  background: repeating-linear-gradient(90deg, var(--bv-healthy) 0 8px, rgba(52,211,153,0.4) 8px 16px);
+  background-size: 200% 100%;
+  animation: jc-flow-sweep 0.9s linear infinite;
+}
+.jc-connector-v.kind-automated:hover .jc-connector-line {
+  background: repeating-linear-gradient(180deg, var(--bv-healthy) 0 8px, rgba(52,211,153,0.4) 8px 16px);
+  background-size: 100% 200%;
+}
+@keyframes jc-flow-sweep { from { background-position: 0 0; } to { background-position: -32px 0; } }
+@keyframes jc-broken-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(248,113,113,0.5); }
+  50% { opacity: 0.65; box-shadow: 0 0 10px 1px rgba(248,113,113,0.35); }
+}
+
+/* Cross-chart hover focus — dim everything not connected to the hovered stage */
+.jc-dimmed { opacity: 0.32; filter: saturate(0.6); }
+
+/* ── Stage card ──────────────────────────────────────────────────────────
+   Primary (Leads → Contacts → Deals → Accounts) is the visual anchor of the
+   chart — larger type, fuller padding. Secondary (Campaigns, Invoices) is
+   real but intentionally quieter. */
+.jc-stage-card {
+  background: var(--color-bg);
+  border: 0.5px solid var(--color-border);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.14s, box-shadow 0.14s, border-color 0.14s, opacity 0.15s, filter 0.15s;
+  width: 100%;
+}
+.jc-stage-card.secondary { padding: 12px; gap: 8px; border-radius: 14px; }
+.jc-stage-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+  border-color: var(--color-border-strong);
+}
+.jc-stage-card.zone-healthy { box-shadow: 0 0 0 1px rgba(52,211,153,0.18) inset; }
+.jc-stage-card.zone-healthy:hover { box-shadow: 0 10px 28px rgba(0,0,0,0.22), 0 0 0 1px rgba(52,211,153,0.3) inset; }
+.jc-stage-card.zone-not-connected,
+.jc-stage-card.zone-critical { box-shadow: 0 0 0 1px rgba(248,113,113,0.16) inset; }
+
+.jc-stage-head { display: flex; align-items: center; gap: 8px; }
+.jc-stage-icon {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  background: var(--color-brand-bg);
+  color: var(--color-brand);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.jc-stage-card.secondary .jc-stage-icon { width: 22px; height: 22px; }
+.jc-stage-name { font-size: 18px; font-weight: 700; color: var(--color-text); flex: 1; letter-spacing: -0.01em; }
+.jc-stage-card.secondary .jc-stage-name { font-size: 14.5px; font-weight: 600; }
+.jc-stage-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.jc-stage-dot.zone-healthy { background: var(--bv-healthy); }
+.jc-stage-dot.zone-needs-attention { background: var(--bv-warning); }
+.jc-stage-dot.zone-at-risk { background: var(--bv-at-risk); }
+.jc-stage-dot.zone-critical,
+.jc-stage-dot.zone-not-connected { background: var(--bv-critical); }
+.jc-stage-dot.zone-loading { background: var(--color-border-strong); }
+
+/* Health is the primary metric on every card — largest number, read first */
+.jc-stage-health-block { display: flex; align-items: baseline; gap: 8px; }
+.jc-stage-health-value { font-size: 28px; font-weight: 800; color: var(--color-text); line-height: 1; letter-spacing: -0.02em; }
+.jc-stage-card.secondary .jc-stage-health-value { font-size: 20px; }
+.jc-stage-health-label { font-size: 13px; font-weight: 600; }
+.jc-stage-card.secondary .jc-stage-health-label { font-size: 11.5px; }
+.jc-stage-health-label.zone-healthy { color: var(--bv-healthy); }
+.jc-stage-health-label.zone-needs-attention { color: var(--bv-warning); }
+.jc-stage-health-label.zone-at-risk { color: var(--bv-at-risk); }
+.jc-stage-health-label.zone-critical,
+.jc-stage-health-label.zone-not-connected { color: var(--bv-critical); }
+.jc-stage-health-label.zone-loading { color: var(--color-text-tertiary); }
+
+/* Automation — one summarized chip; hover reveals the per-type breakdown */
+.jc-automation {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  font-size: 11px; font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  width: fit-content;
+  position: relative;
+}
+.jc-automation-live { background: var(--bv-automation-bg); color: var(--bv-automation); }
+.jc-automation-gap { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
+.jc-automation-loading { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
+.jc-automation-pop { display: none; }
+.jc-automation:hover .jc-automation-pop {
+  display: flex; flex-direction: column; gap: 3px;
+  position: absolute;
+  top: 100%; left: 0;
+  margin-top: 6px;
+  background: var(--color-bg-secondary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
+  z-index: 20;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.jc-automation-pop-item { font-size: 11px; color: var(--bv-automation); font-weight: 500; white-space: nowrap; }
+
+.jc-blueprint-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 999px;
+  width: fit-content;
+}
+.jc-blueprint-chip.live { background: var(--bv-automation-bg); color: var(--bv-automation); }
+.jc-blueprint-chip.gap { background: var(--color-warning-bg); color: var(--bv-warning); }
+.jc-blueprint-chip.empty { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
+
+.jc-stage-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px; font-weight: 400; color: var(--color-text-tertiary);
+  margin-top: auto;
+  padding-top: 2px;
+}
+
+/* Confidence — compact teal-scale pill with a dot, detail on hover */
+.jc-confidence {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: help;
+}
+.jc-confidence-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.jc-confidence-high { background: var(--bv-confidence-bg); color: var(--bv-confidence); }
+.jc-confidence-high .jc-confidence-dot { background: var(--bv-confidence); }
+.jc-confidence-medium { background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
+.jc-confidence-medium .jc-confidence-dot { background: var(--bv-confidence); opacity: 0.55; }
+.jc-confidence-low { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
+.jc-confidence-low .jc-confidence-dot { background: var(--color-text-tertiary); }
+
+/* Drill-down dialog — DialogContent's base classes center it on the full
+   browser viewport (left: 50%), which sits visibly left of center once the
+   sidebar's width is accounted for. Re-centered on the visible content area
+   (the space to the right of the sidebar) instead. */
+.jc-dialog { max-width: 480px; border-radius: 16px; left: calc(50% + (var(--sidebar-w) / 2)) !important; }
+@media (max-width: 720px) { .jc-dialog { left: 50% !important; } }
+.jc-dialog-title { display: flex; align-items: center; gap: 10px; }
+.jc-dialog-status {
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+.jc-dialog-status.status-live { background: var(--color-success-bg); color: var(--bv-healthy); }
+.jc-dialog-status.status-gap { background: var(--color-danger-bg); color: var(--bv-critical); }
+.jc-dialog-body { display: flex; flex-direction: column; gap: 12px; }
+.jc-dialog-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--color-text-secondary); }
+.jc-dialog-section h4 {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--color-text-tertiary); margin-bottom: 6px;
+}
+.jc-dialog-text { font-size: 13px; color: var(--color-text-secondary); line-height: 1.5; }
+.jc-dialog-evidence { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.jc-dialog-evidence li {
+  font-size: 12.5px; color: var(--color-text-secondary); padding-left: 14px; position: relative; line-height: 1.5;
+}
+.jc-dialog-evidence li::before { content: "•"; position: absolute; left: 2px; color: var(--color-text-tertiary); }
+
+@media (max-width: 720px) {
+  .jc-grid { grid-template-columns: 1fr; grid-template-rows: none; display: flex !important; flex-direction: column; gap: 16px; min-width: 0; }
+  .jc-grid .jc-cell { grid-column: auto !important; grid-row: auto !important; }
+  .jc-connector-h, .jc-connector-v { flex-direction: row; height: 28px; }
+  .jc-connector-h .jc-connector-line, .jc-connector-v .jc-connector-line { height: 3px; width: auto; flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jc-connector.kind-broken .jc-connector-line,
+  .jc-connector-h.kind-automated:hover .jc-connector-line,
+  .jc-connector-v.kind-automated:hover .jc-connector-line { animation: none; }
+}
+
 @media (max-width: 560px) {
   .landing-by-evoluz { display: none; }
   .landing-hero-visual { flex-direction: column; }
