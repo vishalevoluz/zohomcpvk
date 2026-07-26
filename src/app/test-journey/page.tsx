@@ -1,6 +1,7 @@
 "use client";
 
 import BusinessJourneyCard from "@/components/BusinessJourneyCard";
+import BusinessView from "@/components/BusinessView";
 import Sidebar from "@/components/Sidebar";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from "@/lib/flowMapModel";
@@ -82,7 +83,19 @@ const recordSamples: Record<RecordSampleStageId, RecordSampleState> = {
   invoices: sample(invoiceIds.map(id => invoiceRecordUnlinked(id))),
 };
 
-const pipelineStages: PipelineStagesState = { items: [], loading: false, error: null, lastFetched: NOW };
+// Represents an org that DOES have a default pipeline on Deals — regression
+// check for the cost card that used to false-positive "You Cannot Forecast
+// Your Revenue" here because it checked the generic (always-empty on Zoho)
+// pipelines/stages entities instead of this real per-module pipeline data.
+const pipelineStages: PipelineStagesState = {
+  items: [
+    { name: "Qualification", apiName: "Qualification", sequence: 1, forecastType: "Open" },
+    { name: "Needs Analysis", apiName: "Needs Analysis", sequence: 2, forecastType: "Open" },
+    { name: "Negotiation", apiName: "Negotiation", sequence: 3, forecastType: "Open" },
+    { name: "Closed Won", apiName: "Closed Won", sequence: 4, forecastType: "Won" },
+  ],
+  loading: false, error: null, lastFetched: NOW,
+};
 
 const ruleCoverage: RuleCoverage = {
   validation: { Leads: 2, Contacts: 0, Deals: 1, Campaigns: 0 },
@@ -105,6 +118,14 @@ export default function TestJourneyPage() {
         allTools={[]}
       />
       <div className="app-main">
+        <BusinessView
+          entityData={entityData}
+          recordSamples={recordSamples}
+          pipelineStages={pipelineStages}
+          ruleCoverage={ruleCoverage}
+          fetchAll={() => {}}
+          onSelectSection={() => {}}
+        />
         <BusinessJourneyCard
           entityData={entityData}
           recordSamples={recordSamples}

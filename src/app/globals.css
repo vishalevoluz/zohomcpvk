@@ -4306,43 +4306,8 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .effort-badge.hard { background: var(--color-danger-bg); color: var(--bv-critical); }
 .priority-action-btn { flex-shrink: 0; }
 
-/* Workflow Trigger Activity */
-.workflow-trigger-summary { margin-bottom: 10px; }
-.workflow-trigger-list { display: flex; flex-direction: column; gap: 8px; }
-.workflow-trigger-row {
-  background: var(--color-bg);
-  border: 0.5px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-}
-.workflow-trigger-row.flagged { border-color: var(--bv-critical); }
-.workflow-trigger-top { display: flex; align-items: center; gap: 12px; }
-.workflow-trigger-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.workflow-trigger-name { font-size: 13px; font-weight: 600; color: var(--color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.workflow-trigger-module { font-size: 12px; color: var(--color-text-tertiary); }
-.workflow-trigger-date { font-size: 12px; color: var(--color-text-secondary); flex-shrink: 0; white-space: nowrap; }
-.workflow-trigger-date.never { color: var(--bv-critical); font-weight: 600; }
-.workflow-trigger-flag {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 9px;
-  border-radius: 999px;
-  background: var(--color-danger-bg);
-  color: var(--bv-critical);
-  flex-shrink: 0;
-}
-.workflow-trigger-suggestion {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  line-height: 1.5;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 0.5px solid var(--color-border);
-}
-
 @media (max-width: 720px) {
   .priority-action-card { flex-wrap: wrap; }
-  .workflow-trigger-top { flex-wrap: wrap; }
   .business-view { padding: 1rem; }
 }
 
@@ -4869,8 +4834,14 @@ details[open] .log-summary::before { transform: rotate(90deg); }
    browser viewport (left: 50%), which sits visibly left of center once the
    sidebar's width is accounted for. Re-centered on the visible content area
    (the space to the right of the sidebar) instead. */
-.jc-dialog { max-width: 480px; border-radius: 16px; left: calc(50% + (var(--sidebar-w) / 2)) !important; }
-@media (max-width: 720px) { .jc-dialog { left: 50% !important; } }
+.jc-dialog {
+  max-width: 640px;
+  width: 92vw;
+  padding: 28px;
+  border-radius: 16px;
+  left: calc(50% + (var(--sidebar-w) / 2)) !important;
+}
+@media (max-width: 720px) { .jc-dialog { left: 50% !important; width: 90vw; padding: 20px; } }
 .jc-dialog-title { display: flex; align-items: center; gap: 10px; }
 .jc-dialog-status {
   font-size: 11px; font-weight: 600;

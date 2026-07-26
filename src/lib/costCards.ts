@@ -1,6 +1,7 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import { hasEmailAction, isAdminProfile, isInactiveUser, isMandatoryField } from "@/lib/crmPredicates";
+import type { PipelineStagesState } from "@/lib/flowMapModel";
 
 export type CostCardSeverity = "CRITICAL" | "WARNING" | "REVIEW";
 
@@ -10,10 +11,17 @@ export interface CostCardRule {
   headline: string;
   // A function lets a card surface the real numbers behind the finding (e.g.
   // "12 of 20 licensed users are active") instead of only a generic statement.
-  body: string | ((entityData: Record<CrmEntityType, EntityState>) => string);
+  body: string | ((entityData: Record<CrmEntityType, EntityState>, pipelineStages: PipelineStagesState) => string);
   severity: CostCardSeverity;
   requires: CrmEntityType[];
-  test: (entityData: Record<CrmEntityType, EntityState>) => boolean;
+  // Zoho has no generic "list all pipelines/stages" API — a real pipeline's
+  // stages live on a module's active layout (see usePipelineStages.ts, which
+  // walks getLayouts -> getPipelines for Deals specifically). A rule that
+  // needs that real data sets this instead of/alongside `requires`, so it
+  // waits on that hook's own resolved state rather than the generic
+  // `pipelines`/`stages` entities, which never resolve on this MCP server.
+  requiresPipelineStages?: boolean;
+  test: (entityData: Record<CrmEntityType, EntityState>, pipelineStages: PipelineStagesState) => boolean;
 }
 
 // Severity isn't specified per-condition in the source spec (only the three badge
@@ -61,8 +69,13 @@ export const COST_CARD_RULES: CostCardRule[] = [
     headline: "You Cannot Forecast Your Revenue",
     body: "Without a structured pipeline, your sales forecast is a guess. Investors and management cannot rely on it.",
     severity: "CRITICAL",
-    requires: ["pipelines", "stages"],
-    test: e => e.pipelines.items.length === 0 || e.stages.items.length === 0,
+    requires: [],
+    requiresPipelineStages: true,
+    // Checks the Deals module's real pipeline stages (see PipelineStagesState
+    // above) instead of the generic `pipelines`/`stages` entities — those
+    // never resolve to anything real on Zoho, which used to fire this
+    // CRITICAL even for orgs with a normal default pipeline configured.
+    test: (_e, pipelineStages) => pipelineStages.items.length === 0,
   },
   {
     id: "automation-partly-broken",
@@ -133,19 +146,22 @@ export interface CostCardResult {
 const SEVERITY_ORDER: Record<CostCardSeverity, number> = { CRITICAL: 0, WARNING: 1, REVIEW: 2 };
 
 export function evaluateCostCards(
-  entityData: Record<CrmEntityType, EntityState>
+  entityData: Record<CrmEntityType, EntityState>,
+  pipelineStages: PipelineStagesState,
 ): { shown: CostCardResult[]; loadingIds: string[]; overflowCount: number; allTriggered: CostCardResult[] } {
   const loadingIds: string[] = [];
   const triggered: CostCardResult[] = [];
+  const pipelineStagesResolved = !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null);
 
   for (const rule of COST_CARD_RULES) {
-    const resolved = rule.requires.every(t => isEntityResolved(entityData[t]));
+    const entitiesResolved = rule.requires.every(t => isEntityResolved(entityData[t]));
+    const resolved = entitiesResolved && (!rule.requiresPipelineStages || pipelineStagesResolved);
     if (!resolved) {
       loadingIds.push(rule.id);
       continue;
     }
-    if (rule.test(entityData)) {
-      const body = typeof rule.body === "function" ? rule.body(entityData) : rule.body;
+    if (rule.test(entityData, pipelineStages)) {
+      const body = typeof rule.body === "function" ? rule.body(entityData, pipelineStages) : rule.body;
       triggered.push({ id: rule.id, icon: rule.icon, headline: rule.headline, body, severity: rule.severity });
     }
   }
