@@ -4,11 +4,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { computeHealthScore, HEALTH_SCORE_ENTITIES, type HealthScoreDimensions, type RuleCoverage } from "@/lib/businessScore";
-import { buildFlowMap, FLOW_MAP_ENTITIES, type FlowNode, type FlowLane, type RecordSampleStageId, type RecordSampleState, type PipelineStagesState } from "@/lib/flowMapModel";
+import type { RuleCoverage } from "@/lib/businessScore";
+import { buildFlowMap, FLOW_MAP_ENTITIES, type FlowNode, type FlowEdge, type FlowLane, type RecordSampleStageId, type RecordSampleState, type PipelineStagesState } from "@/lib/flowMapModel";
 import { evaluateCostCards } from "@/lib/costCards";
 import { computeTopActions } from "@/lib/priorityActions";
-import HealthGauge from "@/components/HealthGauge";
+import HealthScoreDashboard from "@/components/HealthScoreDashboard";
 
 interface Props {
   entityData: Record<CrmEntityType, EntityState>;
@@ -18,30 +18,6 @@ interface Props {
   fetchAll: () => void;
   onSelectSection: (s: Section) => void;
 }
-
-const DIMENSION_LABELS: Record<keyof HealthScoreDimensions, string> = {
-  automationCoverage: "Automation Coverage",
-  processCompleteness: "Sales Process Setup",
-  accessSecurity: "Team Security",
-  dataArchitecture: "Data Structure",
-  automationHealth: "Workflow Health",
-};
-
-const DIMENSION_TO_ACTION_IDS: Record<keyof HealthScoreDimensions, string[]> = {
-  automationCoverage: ["activate-email-workflows", "consolidate-inactive-workflows"],
-  processCompleteness: ["build-pipeline", "deploy-blueprint"],
-  accessSecurity: ["role-based-profiles", "remove-inactive-licenses"],
-  dataArchitecture: ["reduce-mandatory-fields", "decommission-empty-modules"],
-  automationHealth: ["consolidate-inactive-workflows", "activate-email-workflows"],
-};
-
-const DIMENSION_TOOLTIPS: Record<keyof HealthScoreDimensions, string> = {
-  automationCoverage: "Of your core lead-to-deal modules — Leads, Campaigns, Contacts, Deals — how many have at least one active workflow, assignment rule, approval process, validation rule, or layout rule watching them. The ones with none drag this score down.",
-  processCompleteness: "Whether a sales pipeline, blueprint, and defined stages actually exist. Missing pieces mean reps have no set path to follow.",
-  accessSecurity: "Whether access is split into real roles instead of everyone sharing one login level, and whether inactive users still hold licenses.",
-  dataArchitecture: "Whether your fields and module count are kept reasonable, not bloated with excess required fields or clutter.",
-  automationHealth: "What share of your existing workflows are actually turned on right now.",
-};
 
 const SEVERITY_TOOLTIPS: Record<string, string> = {
   CRITICAL: "Urgent — this is actively costing you money or exposing you to risk right now.",
@@ -74,10 +50,13 @@ function SectionTitle({ text, tooltip }: { text: string; tooltip: string }) {
 
 // ─── Flow map layout geometry ───────────────────────────────────────────────────
 
+// "automation" lane is intentionally excluded — its nodes (Leads/Campaigns/
+// Contacts/Deals Automation) are hidden from this diagram per product
+// request; see AUTOMATION_NODE_ID below. flowMapModel.ts still computes them
+// (its FlowLane type is untouched), this is a render-time filter only.
 const FLOW_LANES: { id: FlowLane; label: string }[] = [
   { id: "entry", label: "Entry" },
   { id: "qualification", label: "Qualification" },
-  { id: "automation", label: "Automation Layer" },
   { id: "outcome", label: "Outcome" },
 ];
 const LANE_LABEL_H = 22;
@@ -95,6 +74,12 @@ const MARGIN_R = 40;
 // …, stage-gap, stage-loading) — hidden from the diagram per product request,
 // without touching the flowMapModel.ts logic that computes them.
 const PIPELINE_STAGE_NODE_ID = /^stage-(\d+|gap|loading)$/;
+
+// Matches the per-stage automation companion nodes (leads-automation,
+// campaigns-automation, contacts-automation, deals-automation) — hidden from
+// this diagram per product request, same non-invasive approach as
+// PIPELINE_STAGE_NODE_ID above (flowMapModel.ts still computes them).
+const AUTOMATION_NODE_ID = /-automation$/;
 
 function nodeX(node: FlowNode, colW: number): number { return MARGIN_L + node.col * colW; }
 function nodeY(node: FlowNode): number {
@@ -117,6 +102,15 @@ function statusLabel(status: FlowNode["status"]): string {
   }
 }
 
+function edgeKindLabel(kind: FlowEdge["kind"]): string {
+  switch (kind) {
+    case "automated": return "Automated";
+    case "manual": return "Manual";
+    case "broken": return "Broken";
+    default: return "Checking…";
+  }
+}
+
 function CostCard({ card }: { card: { id: string; icon: string; headline: string; body: string; severity: string } }) {
   return (
     <div className={`cost-card sev-${card.severity.toLowerCase()}`}>
@@ -136,21 +130,15 @@ function CostCard({ card }: { card: { id: string; icon: string; headline: string
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BusinessView({ entityData, recordSamples, pipelineStages, ruleCoverage, fetchAll, onSelectSection }: Props) {
-  const [displayScore, setDisplayScore] = useState(0);
   const [costCardsExpanded, setCostCardsExpanded] = useState(false);
   const [selectedFlowNodeId, setSelectedFlowNodeId] = useState<string | null>(null);
+  const [selectedFlowEdgeId, setSelectedFlowEdgeId] = useState<string | null>(null);
   const [flowExpanded, setFlowExpanded] = useState(false);
   const [flowMinimized, setFlowMinimized] = useState(false);
   const [flowContainerWidth, setFlowContainerWidth] = useState(0);
-  const priorityRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const flowScrollRef = useRef<HTMLDivElement | null>(null);
   const flowScrollInitialized = useRef(false);
 
-  const healthResolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t]));
-  const healthScore = useMemo(
-    () => computeHealthScore(entityData, pipelineStages.items.length, ruleCoverage),
-    [entityData, pipelineStages.items.length, ruleCoverage],
-  );
   const flowResolved = FLOW_MAP_ENTITIES.some(t => isEntityResolved(entityData[t]));
   const flowMap = useMemo(
     () => buildFlowMap(entityData, recordSamples, pipelineStages, ruleCoverage),
@@ -182,23 +170,15 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
     if (flowMap.nodes.length > 0) flowScrollInitialized.current = true;
   }, [flowMap]);
 
-  useEffect(() => {
-    if (!healthResolved) { setDisplayScore(0); return; }
-    const id = requestAnimationFrame(() => setDisplayScore(healthScore.total));
-    return () => cancelAnimationFrame(id);
-  }, [healthResolved, healthScore.total]);
-
-  function scrollToAction(dimensionKey: keyof HealthScoreDimensions) {
-    const candidateIds = DIMENSION_TO_ACTION_IDS[dimensionKey];
-    const match = candidateIds.find(id => priorityRefs.current[id]);
-    priorityRefs.current[match ?? ""]?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
-
-  // Pipeline stage pills are still computed by buildFlowMap (backend intact —
-  // see flowMapModel.ts) but hidden from this card's diagram per product
-  // request; filter them out of the rendered node/edge set only.
-  const visibleNodes = flowMap.nodes.filter(n => !PIPELINE_STAGE_NODE_ID.test(n.id));
-  const visibleEdges = flowMap.edges.filter(e => !PIPELINE_STAGE_NODE_ID.test(e.from) && !PIPELINE_STAGE_NODE_ID.test(e.to));
+  // Pipeline stage pills and the per-stage Automation companion nodes are
+  // still computed by buildFlowMap (backend intact — see flowMapModel.ts)
+  // but hidden from this card's diagram per product request; filter them out
+  // of the rendered node/edge set only.
+  const visibleNodes = flowMap.nodes.filter(n => !PIPELINE_STAGE_NODE_ID.test(n.id) && !AUTOMATION_NODE_ID.test(n.id));
+  const visibleEdges = flowMap.edges.filter(e =>
+    !PIPELINE_STAGE_NODE_ID.test(e.from) && !PIPELINE_STAGE_NODE_ID.test(e.to)
+    && !AUTOMATION_NODE_ID.test(e.from) && !AUTOMATION_NODE_ID.test(e.to)
+  );
 
   const selectedNode = visibleNodes.find(n => n.id === selectedFlowNodeId) ?? null;
 
@@ -225,8 +205,10 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
     if (!from || !to) return null;
     const x1 = nodeX(from, colW) + NODE_W / 2, y1 = nodeY(from) + NODE_H;
     const x2 = nodeX(to, colW) + NODE_W / 2, y2 = nodeY(to);
-    return { edge, x1, y1, x2, y2, midX: (x1 + x2) / 2, midY: (y1 + y2) / 2 };
+    return { edge, from, to, x1, y1, x2, y2, midX: (x1 + x2) / 2, midY: (y1 + y2) / 2 };
   }).filter((g): g is NonNullable<typeof g> => g !== null);
+
+  const selectedEdgeGeom = edgeGeoms.find(g => g.edge.id === selectedFlowEdgeId) ?? null;
 
   return (
     <div className="business-view">
@@ -241,47 +223,18 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
       </div>
 
       {/* ── 1. CRM Health Score ── */}
-      <div className="business-view-section health-gauge-card">
-        <SectionTitle text="CRM Health Score" tooltip="Is my CRM working well or broken? A single score built from automation, process setup, security, data structure, and workflow health." />
-        <HealthGauge score={displayScore} zone={healthScore.zone} resolved={healthResolved} />
-        <p className={`health-gauge-verdict ${healthResolved ? `zone-${healthScore.zone}` : ""}`}>
-          {healthResolved ? healthScore.verdict : "Reading your CRM setup…"}
-        </p>
-
-        <div className="health-subscores">
-          {(Object.keys(DIMENSION_LABELS) as (keyof HealthScoreDimensions)[]).map(key => {
-            const value = healthScore.dimensions[key];
-            // A 0 score means 0% width, which leaves nothing to paint any color onto —
-            // show a full gray bar instead so "empty" is visible rather than blank.
-            const dimensionZone = value <= 0 ? "empty" : value >= 15 ? "healthy" : "yellow";
-            const fillPct = value <= 0 ? 100 : (value / 20) * 100;
-            return (
-              <button
-                key={key}
-                className="health-subscore-row"
-                onClick={() => scrollToAction(key)}
-                disabled={!healthResolved}
-                data-tooltip={DIMENSION_TOOLTIPS[key]}
-              >
-                <span className="health-subscore-label">{DIMENSION_LABELS[key]}</span>
-                <span className="health-subscore-track">
-                  <span
-                    className={`health-subscore-fill ${healthResolved ? `zone-${dimensionZone}` : ""}`}
-                    style={{ width: healthResolved ? `${fillPct}%` : "0%" }}
-                  />
-                </span>
-                <span className="health-subscore-value">{healthResolved ? `${value}/20` : "—"}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <HealthScoreDashboard
+        entityData={entityData}
+        pipelineStageCount={pipelineStages.items.length}
+        ruleCoverage={ruleCoverage}
+        onSelectSection={onSelectSection}
+      />
 
       {/* ── 2. Business Process Flow Map ── */}
       <div className={`business-view-section flow-map-card ${flowExpanded ? "expanded" : ""} ${flowMinimized ? "minimized" : ""}`}>
         <div className="flow-map-toolbar">
           <div className="flow-map-toolbar-left">
-            <SectionTitle text="How a Lead Moves Through Your Business" tooltip="How does a lead move through my business end to end — where does it break down, and what's automated vs. manual?" />
+            <SectionTitle text="Lead Relationship with Contacts, Deals & Accounts" tooltip="How does a lead move through my business end to end — where does it break down, and what's automated vs. manual?" />
             <div className="flow-legend">
               <span className="flow-legend-item" data-tooltip-below="This step runs automatically — no manual work needed.">
                 <span className="flow-legend-swatch flow-legend-solid" />Automated
@@ -307,28 +260,46 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
         </div>
         {!flowMinimized && (
         <>
+        <div className="flow-map-body">
         <div className="flow-map-scroll" ref={flowScrollRef} style={{ justifyContent: flowFits ? "center" : "flex-start" }}>
           <div className="flow-map-canvas" style={{ width: flowWidth, height: flowHeight }}>
             {FLOW_LANES.map((lane, i) => (
               <div key={lane.id} className="flow-lane-label" style={{ top: i * LANE_BLOCK_H }}>{lane.label}</div>
             ))}
             <svg className="flow-map-edges" width={flowWidth} height={flowHeight}>
+              <defs>
+                <marker id="flow-arrow-automated" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L8,4 L0,8 z" style={{ fill: "var(--bv-healthy)" }} />
+                </marker>
+                <marker id="flow-arrow-manual" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L8,4 L0,8 z" style={{ fill: "var(--color-text-tertiary)" }} />
+                </marker>
+                <marker id="flow-arrow-broken" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L8,4 L0,8 z" style={{ fill: "var(--bv-critical)" }} />
+                </marker>
+                <marker id="flow-arrow-loading" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L8,4 L0,8 z" style={{ fill: "var(--color-border-strong)" }} />
+                </marker>
+              </defs>
               {edgeGeoms.map(({ edge, x1, y1, x2, y2, midX, midY }) => (
-                <g key={edge.id} className={`flow-edge-${edge.kind}`}>
+                <g key={edge.id} className={`flow-edge-${edge.kind} ${selectedFlowEdgeId === edge.id ? "selected" : ""}`}>
                   {edge.detail && <title>{edge.detail}</title>}
-                  <path d={edgePath(x1, y1, x2, y2)} />
+                  <path d={edgePath(x1, y1, x2, y2)} markerEnd={`url(#flow-arrow-${edge.kind})`} />
                   {edge.kind === "broken" && (
                     <text x={midX} y={midY} textAnchor="middle" className="flow-edge-break-mark">✕</text>
                   )}
                 </g>
               ))}
             </svg>
-            {edgeGeoms.filter(g => g.edge.detail).map(({ edge, midX, midY }) => (
-              <span
-                key={`${edge.id}-hover`}
-                className="flow-edge-hover"
+            {edgeGeoms.map(({ edge, midX, midY }) => (
+              <button
+                key={`${edge.id}-hit`}
+                type="button"
+                className={`flow-edge-hit ${selectedFlowEdgeId === edge.id ? "selected" : ""}`}
                 style={{ left: midX, top: midY }}
+                onClick={() => { setSelectedFlowEdgeId(edge.id === selectedFlowEdgeId ? null : edge.id); setSelectedFlowNodeId(null); }}
                 data-tooltip={edge.detail}
+                aria-label={`${edge.kind} relationship — view details`}
               />
             ))}
             {visibleNodes.map(node => (
@@ -336,7 +307,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
                 key={node.id}
                 className={`flow-node status-${node.status} ${selectedFlowNodeId === node.id ? "selected" : ""}`}
                 style={{ left: nodeX(node, colW), top: nodeY(node), width: NODE_W, height: NODE_H }}
-                onClick={() => setSelectedFlowNodeId(node.id === selectedFlowNodeId ? null : node.id)}
+                onClick={() => { setSelectedFlowNodeId(node.id === selectedFlowNodeId ? null : node.id); setSelectedFlowEdgeId(null); }}
                 data-tooltip={node.detail}
               >
                 {node.status === "loading" ? <span className="flow-node-skeleton" /> : node.label}
@@ -344,26 +315,45 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
             ))}
           </div>
         </div>
-        {!flowResolved && <p className="business-view-hint">Loading your business process data…</p>}
-        {selectedNode && (
-          <div className="flow-node-detail">
-            <div className="flow-node-detail-header">
-              <strong>{selectedNode.label}</strong>
-              <span className={`flow-node-detail-status status-${selectedNode.status}`}>{statusLabel(selectedNode.status)}</span>
+        <div className="flow-map-side-panel">
+          {selectedNode && (
+            <div className="flow-node-detail">
+              <div className="flow-node-detail-header">
+                <strong>{selectedNode.label}</strong>
+                <span className={`flow-node-detail-status status-${selectedNode.status}`}>{statusLabel(selectedNode.status)}</span>
+              </div>
+              <p>{selectedNode.detail}</p>
+              {selectedNode.evidence && selectedNode.evidence.length > 0 && (
+                <ul className="flow-node-evidence">
+                  {selectedNode.evidence.map((line, i) => <li key={i}>{line}</li>)}
+                </ul>
+              )}
+              {selectedNode.targetSection && (
+                <button className="btn-secondary" onClick={() => onSelectSection(selectedNode.targetSection as Section)}>
+                  View in Audit
+                </button>
+              )}
             </div>
-            <p>{selectedNode.detail}</p>
-            {selectedNode.evidence && selectedNode.evidence.length > 0 && (
-              <ul className="flow-node-evidence">
-                {selectedNode.evidence.map((line, i) => <li key={i}>{line}</li>)}
-              </ul>
-            )}
-            {selectedNode.targetSection && (
-              <button className="btn-secondary" onClick={() => onSelectSection(selectedNode.targetSection as Section)}>
-                View in Audit
-              </button>
-            )}
-          </div>
-        )}
+          )}
+          {selectedEdgeGeom && (
+            <div className="flow-node-detail">
+              <div className="flow-node-detail-header">
+                <strong>{selectedEdgeGeom.from.label} → {selectedEdgeGeom.to.label}</strong>
+                <span className={`flow-node-detail-status status-${selectedEdgeGeom.edge.kind === "broken" ? "gap" : selectedEdgeGeom.edge.kind === "automated" ? "live" : "empty"}`}>
+                  {edgeKindLabel(selectedEdgeGeom.edge.kind)}
+                </span>
+              </div>
+              <p>{selectedEdgeGeom.edge.detail ?? "No further detail available for this relationship yet."}</p>
+            </div>
+          )}
+          {!selectedNode && !selectedEdgeGeom && (
+            <div className="flow-map-side-placeholder">
+              <p className="business-view-hint">Click a step or a connection line to see its details here.</p>
+            </div>
+          )}
+        </div>
+        </div>
+        {!flowResolved && <p className="business-view-hint">Loading your business process data…</p>}
 
         </>
         )}
@@ -404,7 +394,6 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
               <div
                 key={action.id}
                 className="priority-action-card"
-                ref={el => { priorityRefs.current[action.id] = el; }}
               >
                 <span className="priority-action-rank">{action.rank}</span>
                 <div className="priority-action-body">

@@ -51,7 +51,20 @@
       "Bash(command -v chromium-cli)",
       "PowerShell(Get-CimInstance *)",
       "Bash(perl -pi -e 's/--color-accent-bg/--color-brand-bg/g; s/--color-accent-hover/--color-brand-hover/g; s/--color-accent-glow/--color-brand-glow/g' src/app/globals.css)",
-      "PowerShell($p = Get-Process -Name node -ErrorAction SilentlyContinue; if \\($p\\) { Stop-Process -Id $p.Id -Force -Confirm:$false -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500; \"stopped\")"
+      "PowerShell($p = Get-Process -Name node -ErrorAction SilentlyContinue; if \\($p\\) { Stop-Process -Id $p.Id -Force -Confirm:$false -ErrorAction SilentlyContinue }; Start-Sleep -Milliseconds 500; \"stopped\")",
+      "Bash(grep -iE '^\\(megaphone|user-plus|users|briefcase|building-2|file-text|workflow|git-branch|check-circle-2|x-circle|circle|arrow-down\\)\\\\.js$')",
+      "Bash(timeout 90 npx -y playwright@1.62.0 install chromium --with-deps)",
+      "Bash(npx playwright *)",
+      "Bash(timeout 40 bash -c 'until curl -sf http://localhost:3000 >/dev/null 2>&1; do sleep 1; done; echo ready' 2>&1)",
+      "Bash(powershell -NoProfile -Command \"Get-Process -Id 39996 | Select-Object Id,ProcessName,Path\")",
+      "Bash(xargs grep -l \"BusinessView\\\\|crm-dashboard\")",
+      "Bash(powershell -Command \"Get-Process -Id 3116 | Select-Object Id,ProcessName,Path\")",
+      "Bash(powershell -Command \"Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object LocalPort,OwningProcess\")",
+      "Bash(grep -n \"^/\\\\* ──\" src/app/globals.css)",
+      "Bash(awk -F: '$1>4899')",
+      "Bash(head -n 4741 src/app/globals.css)",
+      "Bash(mv /tmp/globals_trimmed.css src/app/globals.css)",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\\\"Name='node.exe'\\\\\" | Where-Object { \\\\$_.CommandLine -like '*next*' } | Select-Object ProcessId,CommandLine\")"
     ]
   }
 }

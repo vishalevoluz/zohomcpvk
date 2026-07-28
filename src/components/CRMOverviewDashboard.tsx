@@ -19,6 +19,7 @@ import {
 import type { Section } from "@/lib/sections";
 import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
+import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
 import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, ISSUE_CATEGORY_LABELS, type FunctionIssue } from "@/lib/functionAnalysis";
 
@@ -98,6 +99,7 @@ interface Props {
   lastRefresh: Date | null;
   onSelectSection: (s: Section) => void;
   pipelineStageCount: number;
+  pipelineStages: PipelineStagesState;
   ruleCoverage: RuleCoverage | null;
 }
 
@@ -718,28 +720,48 @@ function isHiddenModule(item: unknown): boolean {
   return r.visible === false || r.show_as_tab === false || r.viewable === false;
 }
 
+// Same "unused" definition ModulesAudit.tsx uses (api access disabled, or
+// nobody can create/edit records in it while it's still technically
+// viewable) — reused here rather than redefined so "Empty" means the same
+// thing in both places.
+function isEmptyModule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  return r.api_supported === false || (r.creatable === false && r.editable === false && r.viewable !== false && r.visible !== false);
+}
+
+type ModuleCategory = "active" | "hidden" | "empty";
+
+const MODULE_FILTER_LABELS: Record<ModuleCategory, string> = { active: "Active", hidden: "Hidden", empty: "Empty" };
+
 interface ModuleBreakdownRow {
   apiName: string;
   name: string;
-  active: boolean;
+  category: ModuleCategory;
   custom: boolean;
 }
 
-// Sorted hidden-first — same "surface the actionable ones first" convention
-// as the blueprint/workflow breakdowns elsewhere in this file.
+// A module can technically be both hidden and empty at once — hidden takes
+// priority since visibility is the more prominent state, so each module
+// gets exactly one category for filtering rather than overlapping tags.
+const MODULE_CATEGORY_ORDER: Record<ModuleCategory, number> = { hidden: 0, empty: 1, active: 2 };
+
+// Sorted actionable-first (hidden, then empty, then active) — same
+// convention as the blueprint/workflow breakdowns elsewhere in this file.
 function computeModuleBreakdown(entityData: Record<CrmEntityType, EntityState>): ModuleBreakdownRow[] {
   return entityData.modules.items
     .map((m, i) => {
       const r = (m ?? {}) as Record<string, unknown>;
       const apiName = moduleApiName(m);
+      const category: ModuleCategory = isHiddenModule(m) ? "hidden" : isEmptyModule(m) ? "empty" : "active";
       return {
         apiName: apiName || String(i),
         name: String(r.plural_label ?? r.singular_label ?? r.module_name ?? apiName ?? `Module ${i + 1}`),
-        active: !isHiddenModule(m),
+        category,
         custom: isCustomModule(m),
       };
     })
-    .sort((a, b) => Number(a.active) - Number(b.active));
+    .sort((a, b) => MODULE_CATEGORY_ORDER[a.category] - MODULE_CATEGORY_ORDER[b.category]);
 }
 
 interface WorkflowBreakdownRow {
@@ -762,6 +784,16 @@ function computeWorkflowBreakdown(entityData: Record<CrmEntityType, EntityState>
       lastTriggered: workflowLastTriggered(w),
     }))
     .sort((a, b) => Number(a.active) - Number(b.active) || Number(!!a.lastTriggered) - Number(!!b.lastTriggered));
+}
+
+// "never" isn't mutually exclusive with active/inactive (an active workflow
+// can genuinely have never fired yet), so each toggle applies its own
+// independent predicate rather than assigning one category per row.
+function matchesWorkflowFilter(row: WorkflowBreakdownRow, filter: "all" | "active" | "inactive" | "never"): boolean {
+  if (filter === "all") return true;
+  if (filter === "active") return row.active;
+  if (filter === "inactive") return !row.active;
+  return !row.lastTriggered;
 }
 
 function formatLastTriggered(iso: string | null): string {
@@ -1385,7 +1417,8 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
     {
       key: "users", label: "Active Users", value: activeUsers,
       severity: activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
-      note: `${users.length} total licensed`,
+      note: `${users.length} total licensed — click to see who's active/inactive`,
+      clickable: users.length > 0,
     },
     {
       key: "layouts", label: "Layouts", value: layouts.length,
@@ -1425,15 +1458,65 @@ interface BlueprintBreakdownRow {
 // Workflow Trigger Activity card in BusinessView.tsx.
 const BP_STATUS_ORDER: Record<BlueprintStatus, number> = { inactive: 0, draft: 1, active: 2 };
 
+// Real Zoho blueprint list responses very often carry NO top-level "name" at
+// all (blueprints are usually anonymous processes identified only by their
+// module + driving field) — so getItemName's generic fallback chain lands on
+// "Item N" far more often here than for named entities like workflows. Build
+// a real label from the module + the field the blueprint actually drives
+// (process_info.field_label / field.name, the same shape BlueprintAudit.tsx
+// already parses from live Zoho responses) before ever falling back to a
+// placeholder.
+function blueprintDisplayName(bp: unknown, i: number, moduleLabel: string): string {
+  const r = (bp ?? {}) as Record<string, unknown>;
+  if (typeof r.name === "string" && r.name) return r.name;
+  if (typeof r.blueprint_name === "string" && r.blueprint_name) return r.blueprint_name;
+  const processInfo = r.process_info as Record<string, unknown> | undefined;
+  const field = r.field as Record<string, unknown> | undefined;
+  const fieldLabel = (processInfo?.field_label ?? processInfo?.name ?? field?.name ?? field?.api_name) as string | undefined;
+  if (moduleLabel && fieldLabel) return `${moduleLabel} — ${fieldLabel} Process`;
+  if (moduleLabel) return `${moduleLabel} Blueprint`;
+  return r.id ? `Blueprint ${r.id}` : `Item ${i + 1}`;
+}
+
 function computeBlueprintBreakdown(entityData: Record<CrmEntityType, EntityState>): BlueprintBreakdownRow[] {
   return entityData.blueprints.items
-    .map((bp, i) => ({
-      id: String((bp as Record<string, unknown> | null)?.id ?? i),
-      name: getItemName(bp, i),
-      module: workflowModuleLabel(bp) || "—",
-      status: blueprintStatus(bp),
-    }))
+    .map((bp, i) => {
+      const module = workflowModuleLabel(bp) || "—";
+      return {
+        id: String((bp as Record<string, unknown> | null)?.id ?? i),
+        name: blueprintDisplayName(bp, i, module === "—" ? "" : module),
+        module,
+        status: blueprintStatus(bp),
+      };
+    })
     .sort((a, b) => BP_STATUS_ORDER[a.status] - BP_STATUS_ORDER[b.status]);
+}
+
+interface UserBreakdownRow {
+  id: string;
+  name: string;
+  profile: string;
+  active: boolean;
+}
+
+// Inactive users surface first — they're the actionable ones (a licensed seat
+// with nobody using it), same "flag the useless ones first" convention as
+// the blueprint/module breakdowns above.
+function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): UserBreakdownRow[] {
+  return entityData.users.items
+    .map((u, i) => {
+      const r = (u ?? {}) as Record<string, unknown>;
+      const profile = typeof r.profile === "object" && r.profile
+        ? String((r.profile as Record<string, unknown>).name ?? "—")
+        : String(r.role ?? "—");
+      return {
+        id: String(r.id ?? i),
+        name: getItemName(u, i),
+        profile,
+        active: !isInactiveUser(u),
+      };
+    })
+    .sort((a, b) => Number(a.active) - Number(b.active));
 }
 
 interface LayoutModuleBreakdownRow {
@@ -1542,7 +1625,6 @@ interface ConfigRow {
 
 const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Section | null }[] = [
   { type: "pipelines", label: "Pipelines", targetSection: "modules" },
-  { type: "stages",    label: "Stages",    targetSection: "blueprints" },
   { type: "workflows", label: "Workflows", targetSection: "workflows" },
   { type: "profiles",  label: "Profiles",  targetSection: null },
   { type: "tasks",     label: "Activity",  targetSection: "modules" },
@@ -1599,8 +1681,9 @@ function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label:
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function CRMOverviewDashboard({ config, tools, onLog, entityData, fetchEntity, fetchAll, lastRefresh, onSelectSection, pipelineStageCount, ruleCoverage }: Props) {
+export default function CRMOverviewDashboard({ config, tools, onLog, entityData, fetchEntity, fetchAll, lastRefresh, onSelectSection, pipelineStageCount, pipelineStages, ruleCoverage }: Props) {
   const [activeTab, setActiveTab] = useState<ReportTab>("changes");
+  const [pipelinesOpen, setPipelinesOpen] = useState(false);
   const [ziaMessages, setZiaMessages] = useState<ZiaMessage[]>([]);
   const [ziaInput, setZiaInput] = useState("");
   const [ziaLoading, setZiaLoading] = useState(false);
@@ -1616,7 +1699,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     text: string;
     usage?: { inputTokens: number; outputTokens: number; model: string };
   }>>({});
-  const [expandedKpi, setExpandedKpi] = useState<"modules" | "blueprints" | "layouts" | "schedules" | "functions" | null>(null);
+  const [expandedKpi, setExpandedKpi] = useState<"modules" | "blueprints" | "layouts" | "schedules" | "functions" | "users" | null>(null);
+  const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
+  const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never">("all");
+  const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
   const layoutsByModule = useLayoutsByModule(config, tools, entityData.modules.items, expandedKpi === "layouts", onLog);
   const scheduleRecords = useScheduleRecords(config, tools, expandedKpi === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, expandedKpi === "functions", onLog);
@@ -1815,6 +1901,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const layoutBreakdown = expandedKpi === "layouts" ? computeLayoutBreakdown(entityData.modules.items, layoutsByModule.byModule) : [];
   const scheduleBreakdown = expandedKpi === "schedules" ? computeScheduleBreakdown(scheduleRecords.items) : [];
   const ziaScheduleInsight = expandedKpi === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
+  const userBreakdown = expandedKpi === "users" ? computeUserBreakdown(entityData) : [];
 
   const functionIssueRows: FunctionIssueRow[] = expandedKpi === "functions"
     ? functionRecords.items.flatMap(fn => (functionRecords.issuesByFnId[fn.id] ?? []).map((issue, i) => ({ key: `${fn.id}-${i}`, functionName: fn.name, category: fn.category, issue })))
@@ -1830,7 +1917,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
-  const blueprintItems = entityData.blueprints.items;
   const profileItems = entityData.profiles.items;
   const userItemsForPanel = entityData.users.items;
 
@@ -2238,7 +2324,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {/* ── KPI strip ───────────────────────────────────────────────────────── */}
       <div className="kpi-strip">
         {kpis.map(k => {
-          const toggle = () => setExpandedKpi(prev => (prev === k.key ? null : (k.key as "modules" | "blueprints" | "layouts" | "schedules" | "functions")));
+          const toggle = () => setExpandedKpi(prev => (prev === k.key ? null : (k.key as "modules" | "blueprints" | "layouts" | "schedules" | "functions" | "users")));
           return (
             <div
               key={k.key}
@@ -2259,20 +2345,36 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {expandedKpi === "modules" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Modules — Active vs Inactive</h4>
+            <h4>Modules — Active / Hidden / Empty</h4>
             <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
           </div>
           <div className="kpi-drilldown-summary">
-            <span className="kpi-drilldown-stat good">{moduleBreakdown.filter(r => r.active).length} Active</span>
-            <span className="kpi-drilldown-stat bad">{moduleBreakdown.filter(r => !r.active).length} Inactive</span>
+            {(["active", "hidden", "empty"] as ModuleCategory[]).map(cat => {
+              const count = moduleBreakdown.filter(r => r.category === cat).length;
+              const statClass = cat === "active" ? "good" : cat === "hidden" ? "neutral" : "bad";
+              return (
+                <button
+                  key={cat}
+                  className={`kpi-drilldown-stat kpi-drilldown-stat-clickable ${statClass} ${moduleFilter === cat ? "selected" : ""}`}
+                  onClick={() => setModuleFilter(prev => (prev === cat ? "all" : cat))}
+                >
+                  {count} {MODULE_FILTER_LABELS[cat]}
+                </button>
+              );
+            })}
+            {moduleFilter !== "all" && (
+              <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setModuleFilter("all")}>
+                Show All
+              </button>
+            )}
           </div>
-          <div className="kpi-drilldown-table">
-            {moduleBreakdown.map(row => (
+          <div className="kpi-drilldown-table kpi-drilldown-table-single">
+            {moduleBreakdown.filter(row => moduleFilter === "all" || row.category === moduleFilter).map(row => (
               <div key={row.apiName} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.apiName}</span>
                 {row.custom && <span className="kpi-drilldown-badge neutral">custom</span>}
-                <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+                <span className={`kpi-drilldown-badge status-${row.category}`}>{MODULE_FILTER_LABELS[row.category]}</span>
               </div>
             ))}
           </div>
@@ -2282,22 +2384,64 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {expandedKpi === "blueprints" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Blueprints — Active vs Inactive</h4>
+            <h4>Blueprints — Active / Inactive / Draft</h4>
             <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
           </div>
           <div className="kpi-drilldown-summary">
-            <span className="kpi-drilldown-stat good">{blueprintBreakdown.filter(r => r.status === "active").length} Active</span>
-            <span className="kpi-drilldown-stat bad">{blueprintBreakdown.filter(r => r.status === "inactive").length} Inactive</span>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${blueprintFilter === "active" ? "selected" : ""}`}
+              onClick={() => setBlueprintFilter(prev => (prev === "active" ? "all" : "active"))}
+            >
+              {blueprintBreakdown.filter(r => r.status === "active").length} Active
+            </button>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${blueprintFilter === "inactive" ? "selected" : ""}`}
+              onClick={() => setBlueprintFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+            >
+              {blueprintBreakdown.filter(r => r.status === "inactive").length} Inactive
+            </button>
             {blueprintBreakdown.some(r => r.status === "draft") && (
-              <span className="kpi-drilldown-stat neutral">{blueprintBreakdown.filter(r => r.status === "draft").length} Draft</span>
+              <button
+                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${blueprintFilter === "draft" ? "selected" : ""}`}
+                onClick={() => setBlueprintFilter(prev => (prev === "draft" ? "all" : "draft"))}
+              >
+                {blueprintBreakdown.filter(r => r.status === "draft").length} Draft
+              </button>
+            )}
+            {blueprintFilter !== "all" && (
+              <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setBlueprintFilter("all")}>
+                Show All
+              </button>
             )}
           </div>
-          <div className="kpi-drilldown-table">
-            {blueprintBreakdown.map(row => (
+          <div className="kpi-drilldown-table kpi-drilldown-table-single">
+            {blueprintBreakdown.filter(row => blueprintFilter === "all" || row.status === blueprintFilter).map(row => (
               <div key={row.id} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.module}</span>
                 <span className={`kpi-drilldown-badge status-${row.status}`}>{row.status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {expandedKpi === "users" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Active Users — Active vs Inactive</h4>
+            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+          </div>
+          <div className="kpi-drilldown-summary">
+            <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.active).length} Active</span>
+            <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => !r.active).length} Inactive</span>
+          </div>
+          <div className="kpi-drilldown-table">
+            {userBreakdown.map(row => (
+              <div key={row.id} className="kpi-drilldown-row">
+                <span className="kpi-drilldown-name">{row.name}</span>
+                <span className="kpi-drilldown-module">{row.profile}</span>
+                <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
               </div>
             ))}
           </div>
@@ -2543,15 +2687,23 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         <h3 className="business-view-section-title">CRM Configuration</h3>
         <div className="config-grid">
           {configRows.map(row => {
-            const clickable = row.targetSection !== null;
+            // Pipelines has no dedicated audit section to navigate to (it fell back
+            // to "modules", which shows nothing pipeline-specific) — it expands an
+            // inline drilldown of the real stage names instead, same as the KPI
+            // strip's Modules/Blueprints/Active Users tiles.
+            const isPipelines = row.key === "pipelines";
+            const clickable = isPipelines || row.targetSection !== null;
+            const onActivate = isPipelines
+              ? () => setPipelinesOpen(v => !v)
+              : () => onSelectSection(row.targetSection as Section);
             return (
               <div
                 key={row.key}
-                className={`config-tile config-${row.severity} ${clickable ? "clickable" : ""}`}
-                onClick={clickable ? () => onSelectSection(row.targetSection as Section) : undefined}
+                className={`config-tile config-${row.severity} ${clickable ? "clickable" : ""} ${isPipelines && pipelinesOpen ? "kpi-expanded" : ""}`}
+                onClick={clickable ? onActivate : undefined}
                 role={clickable ? "button" : undefined}
                 tabIndex={clickable ? 0 : undefined}
-                onKeyDown={clickable ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelectSection(row.targetSection as Section); } } : undefined}
+                onKeyDown={clickable ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(); } } : undefined}
               >
                 <span className="config-tile-label">{row.label}</span>
                 <span className="config-tile-value">{row.value}</span>
@@ -2560,6 +2712,34 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             );
           })}
         </div>
+
+        {pipelinesOpen && (
+          <div className="kpi-drilldown">
+            <div className="kpi-drilldown-header">
+              <h4>Pipeline Stages</h4>
+              <button className="kpi-drilldown-close" onClick={() => setPipelinesOpen(false)}>✕</button>
+            </div>
+            {pipelineStages.loading && (
+              <p className="kpi-drilldown-progress"><span className="spinner" /> Fetching pipeline stages…</p>
+            )}
+            {!pipelineStages.loading && pipelineStages.error && (
+              <p className="business-view-hint">⚠ {pipelineStages.error}</p>
+            )}
+            {!pipelineStages.loading && !pipelineStages.error && pipelineStages.items.length === 0 && (
+              <p className="business-view-hint">No pipeline stages were found on your Deals layout.</p>
+            )}
+            {!pipelineStages.loading && pipelineStages.items.length > 0 && (
+              <div className="kpi-drilldown-table">
+                {pipelineStages.items.map(stage => (
+                  <div key={stage.apiName} className="kpi-drilldown-row">
+                    <span className="kpi-drilldown-name">{stage.name}</span>
+                    {stage.forecastType && <span className="kpi-drilldown-badge neutral">{stage.forecastType}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Workflows / Activity detail cards ──────────────────────────────────── */}
@@ -2567,12 +2747,32 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         <div className="business-view-section crm-panel-card">
           <h3 className="business-view-section-title">Workflows — Active / Inactive / Last Triggered</h3>
           <div className="kpi-drilldown-summary">
-            <span className="kpi-drilldown-stat good">{workflowBreakdown.filter(r => r.active).length} Active</span>
-            <span className="kpi-drilldown-stat bad">{workflowBreakdown.filter(r => !r.active).length} Inactive</span>
-            <span className="kpi-drilldown-stat neutral">{workflowBreakdown.filter(r => !r.lastTriggered).length} Never Triggered</span>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${workflowFilter === "active" ? "selected" : ""}`}
+              onClick={() => setWorkflowFilter(prev => (prev === "active" ? "all" : "active"))}
+            >
+              {workflowBreakdown.filter(r => r.active).length} Active
+            </button>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "inactive" ? "selected" : ""}`}
+              onClick={() => setWorkflowFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+            >
+              {workflowBreakdown.filter(r => !r.active).length} Inactive
+            </button>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter === "never" ? "selected" : ""}`}
+              onClick={() => setWorkflowFilter(prev => (prev === "never" ? "all" : "never"))}
+            >
+              {workflowBreakdown.filter(r => !r.lastTriggered).length} Never Triggered
+            </button>
+            {workflowFilter !== "all" && (
+              <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setWorkflowFilter("all")}>
+                Show All
+              </button>
+            )}
           </div>
-          <div className="kpi-drilldown-table">
-            {workflowBreakdown.map(row => (
+          <div className="kpi-drilldown-table kpi-drilldown-table-single">
+            {workflowBreakdown.filter(row => matchesWorkflowFilter(row, workflowFilter)).map(row => (
               <div key={row.id} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.module}</span>
@@ -2629,37 +2829,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       </div>
 
-      {/* ── Blueprints / Profiles / Users panels ───────────────────────────────── */}
-      <div className="crm-panels-row">
-        <div className="business-view-section crm-panel-card">
-          <h3 className="business-view-section-title">Blueprints</h3>
-          {blueprintItems.length === 0 ? (
-            <PanelEmptyState state={entityData.blueprints} label="Blueprints" onRetry={() => fetchEntity("blueprints")} />
-          ) : (
-            <>
-              <ul className="panel-item-list">
-                {blueprintItems.slice(0, 8).map((item, idx) => {
-                  const active = isActiveWorkflow(item);
-                  return (
-                    <li key={idx} className="panel-item-row">
-                      <span className="panel-item-name">{getItemName(item, idx)}</span>
-                      <span className={`panel-item-badge ${active ? "badge-active" : "badge-inactive"}`}>
-                        {active ? "Active" : "Inactive"}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-              {blueprintItems.length > 8 && (
-                <p className="panel-more">+{blueprintItems.length - 8} more</p>
-              )}
-              <button className="btn-secondary panel-remediate-btn" onClick={() => onSelectSection("blueprints")}>
-                Get remediation help
-              </button>
-            </>
-          )}
-        </div>
-
+      {/* ── Profiles / Users panels ───────────────────────────────── */}
+      <div className="crm-panels-row crm-panels-row-2up">
         <div className="business-view-section crm-panel-card">
           <h3 className="business-view-section-title">Profiles</h3>
           {profileItems.length === 0 ? (

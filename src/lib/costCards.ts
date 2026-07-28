@@ -58,7 +58,7 @@ export const COST_CARD_RULES: CostCardRule[] = [
     id: "sales-team-avoiding-crm",
     icon: "▤",
     headline: "Your Sales Team Is Avoiding the CRM",
-    body: "Excessive required fields cause reps to skip data entry or enter false data, corrupting your reports.",
+    body: "You're asking reps to fill in too much before they can save anything. So they skip it, or type in junk just to move on — and that's what's quietly wrecking your reports.",
     severity: "WARNING",
     requires: ["fields"],
     test: e => e.fields.items.filter(isMandatoryField).length > 20,
@@ -116,7 +116,7 @@ export const COST_CARD_RULES: CostCardRule[] = [
     id: "unused-complexity",
     icon: "⊞",
     headline: "You Are Running Unused Complexity",
-    body: "Multiple CRM modules are empty and inactive. This adds confusion and slows down your team — hide them from profiles rather than deleting to keep the option to reactivate later.",
+    body: "Several parts of your CRM are set up but nobody's actually using them. That just adds clutter and slows your team down — turn them off for now rather than deleting them, so you can switch them back on later if you ever need to.",
     severity: "REVIEW",
     requires: ["modules", "workflows", "blueprints"],
     test: e => {
