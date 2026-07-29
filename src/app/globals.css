@@ -4111,7 +4111,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .hsd-score-verdict.zone-critical { color: var(--bv-critical); }
 .hsd-score-potential { font-size: 12.5px; color: var(--color-text-tertiary); margin-top: 6px; }
 
-.hsd-kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 20px; }
+.hsd-kpi-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 20px; }
 .hsd-kpi-tile {
   background: var(--color-bg);
   border: 0.5px solid var(--color-border);
@@ -4312,6 +4312,12 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   color: var(--color-text-secondary);
 }
 .flow-node-detail p { font-size: 13px; color: var(--color-text-secondary); margin-bottom: 10px; }
+.flow-node-detail-explain {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  padding-top: 8px;
+  border-top: 0.5px solid var(--color-border);
+}
 .flow-node-evidence {
   list-style: none;
   margin: 0 0 10px;

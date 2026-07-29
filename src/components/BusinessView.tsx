@@ -102,12 +102,47 @@ function statusLabel(status: FlowNode["status"]): string {
   }
 }
 
+// Plain-English explanation shown under every node's status badge — what the
+// status/label actually means for someone who isn't a Zoho admin, not just
+// the raw API detail line above it.
+function statusExplanation(status: FlowNode["status"]): string {
+  switch (status) {
+    case "live":
+      return "This module genuinely exists in your CRM and is available to use — it has a real API name Zoho recognizes, so records can be created, viewed, and linked to other modules through it right now.";
+    case "configured-untested":
+      return "The module is set up, but no real record activity has been seen yet to confirm it's actually working end-to-end — worth a quick real-world check.";
+    case "configured-issues":
+      return "The module is set up, but something about it isn't behaving as expected — check the detail above for what's specifically off.";
+    case "gap":
+      return "This module either doesn't exist in your CRM or isn't wired up — there's no automation attached to it, so nothing here happens on its own.";
+    case "empty":
+      return "This step hasn't been configured in your CRM at all.";
+    default:
+      return "Still pulling this data from your CRM — check back in a moment.";
+  }
+}
+
 function edgeKindLabel(kind: FlowEdge["kind"]): string {
   switch (kind) {
     case "automated": return "Automated";
     case "manual": return "Manual";
     case "broken": return "Broken";
     default: return "Checking…";
+  }
+}
+
+// Plain-English explanation of what each connection type between two steps
+// means in practice, shown under the edge detail in the side panel.
+function edgeKindExplanation(kind: FlowEdge["kind"]): string {
+  switch (kind) {
+    case "automated":
+      return "Zoho moves records between these two steps by itself — a workflow rule, blueprint, or similar is doing the work, so nobody on your team has to remember to do it manually.";
+    case "manual":
+      return "Nothing automatic connects these two steps — a person has to notice, create, or update the record by hand for it to move from one to the other. If that doesn't happen, records simply sit there.";
+    case "broken":
+      return "This relationship should exist but doesn't work — the workflow, field link, or rule that's supposed to connect these two steps is missing or misconfigured, so records can fall through the cracks here without anyone noticing.";
+    default:
+      return "Still checking real records to confirm how these two steps are actually connected.";
   }
 }
 
@@ -323,6 +358,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
                 <span className={`flow-node-detail-status status-${selectedNode.status}`}>{statusLabel(selectedNode.status)}</span>
               </div>
               <p>{selectedNode.detail}</p>
+              <p className="flow-node-detail-explain">{statusExplanation(selectedNode.status)}</p>
               {selectedNode.evidence && selectedNode.evidence.length > 0 && (
                 <ul className="flow-node-evidence">
                   {selectedNode.evidence.map((line, i) => <li key={i}>{line}</li>)}
@@ -344,6 +380,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
                 </span>
               </div>
               <p>{selectedEdgeGeom.edge.detail ?? "No further detail available for this relationship yet."}</p>
+              <p className="flow-node-detail-explain">{edgeKindExplanation(selectedEdgeGeom.edge.kind)}</p>
             </div>
           )}
           {!selectedNode && !selectedEdgeGeom && (

@@ -244,10 +244,6 @@ export default function HealthScoreDashboard({ entityData, pipelineStageCount, r
               <span className="hsd-kpi-value">{model.resolved ? `${model.total}/100` : "—"}</span>
               <span className="hsd-kpi-label">Current Score</span>
             </div>
-            <div className="hsd-kpi-tile tone-neutral">
-              <span className="hsd-kpi-value">{model.potentialTotal}/100</span>
-              <span className="hsd-kpi-label">Potential Score</span>
-            </div>
             <div className={`hsd-kpi-tile ${model.resolved && model.gainTotal === 0 ? "tone-healthy" : "tone-warning"}`}>
               <span className="hsd-kpi-value"><TrendingUp size={14} /> {model.resolved ? `+${model.gainTotal}` : "—"}</span>
               <span className="hsd-kpi-label">Improvement Available</span>
