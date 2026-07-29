@@ -1239,12 +1239,26 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   padding: 48px 24px;
 }
 
-.wizard-page { max-width: 640px; width: 100%; margin: 0 auto; }
+.wizard-page { max-width: 700px; width: 100%; margin: 0 auto; }
 .wizard-page-intro { text-align: center; margin-bottom: 22px; }
 .wizard-page-intro h2 { font-size: 20px; font-weight: 650; color: var(--l-text); margin-bottom: 6px; }
 .wizard-page-intro p { font-size: 13.5px; color: var(--l-muted); line-height: 1.55; }
 
-.wizard-pills { display: flex; align-items: center; flex-wrap: wrap; gap: 0; margin-bottom: 16px; justify-content: center; }
+/* Single row, never wraps — a wrapped pill used to strand its leading
+   connector line dangling above the row below it (disconnected from any
+   pill), even though the row still had room and just needed a scrollbar.
+   Scrolls horizontally instead on anything too narrow to fit all 4 pills. */
+.wizard-pills {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0;
+  margin-bottom: 16px;
+  justify-content: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.wizard-pills::-webkit-scrollbar { display: none; }
 .wizard-pill-wrap { display: flex; align-items: center; }
 .wizard-connector { width: 18px; height: 1px; background: var(--l-border); flex-shrink: 0; }
 .wizard-connector.is-done { background: var(--l-accent); }
@@ -2479,13 +2493,33 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   gap: 10px;
 }
 
-/* KPI strip */
-.kpi-strip {
+/* Data & Recommendations: master-detail layout — card list left, selected
+   card's drilldown right. Proportional two-column grid (shape borrowed from
+   .hsd-grid), collapsing to one column on narrow screens; the right panel's
+   content swaps based on selection (same interaction as the old flow-map's
+   canvas+side-panel split), sized to 1fr rather than a fixed rail since some
+   drilldowns (Functions) are full data tables. */
+.crmov-master-detail {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(280px, 340px) 1fr;
+  gap: 14px;
+  align-items: start;
 }
-.kpi-tile {
+@media (max-width: 900px) {
+  .crmov-master-detail { grid-template-columns: 1fr; }
+}
+.crmov-card-list { display: flex; flex-direction: column; gap: 8px; }
+.crmov-card-list-divider {
+  margin: 10px 0 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+}
+.crmov-card {
+  width: 100%;
+  text-align: left;
   background: var(--color-bg);
   border: 0.5px solid var(--color-border);
   border-left: 3px solid var(--color-border-strong);
@@ -2494,10 +2528,34 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   display: flex;
   flex-direction: column;
   gap: 2px;
+  cursor: pointer;
+  font-family: inherit;
 }
-.kpi-tile.kpi-good { border-left-color: var(--color-success); }
-.kpi-tile.kpi-warning { border-left-color: var(--bv-warning); }
-.kpi-tile.kpi-critical { border-left-color: var(--bv-critical); }
+.crmov-card:disabled { cursor: default; opacity: 0.7; }
+.crmov-card.clickable:hover, .crmov-card:not(:disabled):hover { border-color: var(--color-border-strong); background: var(--color-bg-tertiary); }
+.crmov-card:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 1px; }
+.crmov-card.selected { border-left-width: 4px; border-color: var(--color-brand); background: var(--color-bg-tertiary); }
+.crmov-card.kpi-good, .crmov-card.config-good { border-left-color: var(--color-success); }
+.crmov-card.kpi-warning, .crmov-card.config-warning { border-left-color: var(--bv-warning); }
+.crmov-card.kpi-critical, .crmov-card.config-critical { border-left-color: var(--bv-critical); }
+.crmov-card.config-neutral { border-left-color: var(--color-border-strong); }
+.crmov-card.selected.kpi-good, .crmov-card.selected.config-good { border-left-color: var(--color-success); }
+.crmov-card.selected.kpi-warning, .crmov-card.selected.config-warning { border-left-color: var(--bv-warning); }
+.crmov-card.selected.kpi-critical, .crmov-card.selected.config-critical { border-left-color: var(--bv-critical); }
+
+.crmov-detail-panel { min-width: 0; }
+.crmov-detail-placeholder {
+  height: 100%;
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  text-align: center;
+}
+
 .kpi-tile-label {
   font-size: 10px;
   font-weight: 600;
@@ -2507,11 +2565,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .kpi-tile-value { font-size: 22px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
 .kpi-tile-note { font-size: 12px; color: var(--color-text-secondary); }
-.kpi-tile.kpi-clickable { cursor: pointer; }
-.kpi-tile.kpi-clickable:hover { border-color: var(--color-border-strong); background: var(--color-bg-tertiary); }
-.kpi-tile.kpi-clickable:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 1px; }
-.kpi-tile.kpi-expanded { border-left-width: 4px; }
-.config-tile.kpi-expanded { border-left-width: 4px; }
 
 /* KPI drill-down panels (Blueprints / Layouts) */
 .kpi-drilldown {
@@ -2655,14 +2708,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 
 /* Profiles / Users panels */
-.crm-panels-row {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1.25rem;
-}
-.crm-panels-row.crm-panels-row-2col { display: flex; flex-direction: column; grid-template-columns: none; }
-.crm-panels-row.crm-panels-row-2up { grid-template-columns: repeat(2, 1fr); }
-.crm-panel-card { display: flex; flex-direction: column; }
 .panel-item-list { display: flex; flex-direction: column; gap: 8px; }
 .panel-item-row {
   display: flex;
@@ -2772,49 +2817,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   content: "·";
   margin-right: 6px;
   color: var(--color-text-tertiary);
-}
-
-/* CRM Configuration summary grid */
-.config-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-}
-.config-tile {
-  background: var(--color-bg);
-  border: 0.5px solid var(--color-border);
-  border-left: 3px solid var(--color-border-strong);
-  border-radius: var(--radius-md);
-  padding: 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.config-tile.clickable { cursor: pointer; }
-.config-tile.clickable:hover { border-color: var(--color-brand); }
-.config-tile.clickable:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 1px; }
-.config-tile.config-good { border-left-color: var(--color-success); }
-.config-tile.config-warning { border-left-color: var(--bv-warning); }
-.config-tile.config-critical { border-left-color: var(--bv-critical); }
-.config-tile.config-neutral { border-left-color: var(--color-border-strong); }
-.config-tile-label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-tertiary);
-}
-.config-tile-value { font-size: 20px; font-weight: 700; color: var(--color-text); line-height: 1.2; }
-.config-tile-status { font-size: 12px; color: var(--color-text-secondary); }
-
-@media (max-width: 1400px) {
-  .kpi-strip { grid-template-columns: repeat(3, 1fr); }
-}
-
-@media (max-width: 1100px) {
-  .kpi-strip { grid-template-columns: repeat(2, 1fr); }
-  .crm-panels-row, .crm-panels-row.crm-panels-row-2col, .crm-panels-row.crm-panels-row-2up { grid-template-columns: 1fr; }
-  .config-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* Recommendations section */
@@ -4472,7 +4474,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .flow-map-intro-dismiss:hover { background: var(--color-brand); color: #06251b; }
 
 /* Keyboard focus — same convention used everywhere else in the app
-   (.kpi-tile.kpi-clickable:focus-visible, .config-tile.clickable:focus-visible). */
+   (.crmov-card:focus-visible). */
 .flow-node:focus-visible,
 .flow-edge-hit:focus-visible,
 .flow-tech-detail-toggle:focus-visible,
@@ -4633,10 +4635,9 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .connected-status,
 .main-card,
 .intg-card,
-.kpi-tile,
+.crmov-card,
 .crm-report-card,
 .cost-card,
-.config-tile,
 .business-view-section,
 .zia-msg-zia,
 .zia-rec,

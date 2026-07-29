@@ -8,7 +8,6 @@ import {
 } from "lucide-react";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import type { RuleCoverage } from "@/lib/crmPredicates";
-import type { Section } from "@/lib/sections";
 import {
   buildHealthAuditModel,
   type DimensionKey,
@@ -20,7 +19,6 @@ interface Props {
   entityData: Record<CrmEntityType, EntityState>;
   pipelineStageCount: number;
   ruleCoverage: RuleCoverage | null;
-  onSelectSection: (s: Section) => void;
 }
 
 const DIMENSION_ICON_COMPONENTS: Record<DimensionIconKey, LucideIcon> = {
@@ -87,12 +85,11 @@ function SectionTitle({ text, tooltip }: { text: string; tooltip: string }) {
 }
 
 function CategoryCard({
-  dim, expanded, onToggle, onSelectSection, resolved,
+  dim, expanded, onToggle, resolved,
 }: {
   dim: DimensionCard;
   expanded: boolean;
   onToggle: () => void;
-  onSelectSection: (s: Section) => void;
   resolved: boolean;
 }) {
   const Icon = DIMENSION_ICON_COMPONENTS[dim.iconKey];
@@ -183,7 +180,6 @@ function CategoryCard({
                         </span>
                       </div>
                     </div>
-                    <button className="btn-secondary" onClick={() => onSelectSection(rec.targetSection)}>View Details</button>
                   </div>
                 ))}
                 <p className="hsd-recommendation-potential">
@@ -198,7 +194,7 @@ function CategoryCard({
   );
 }
 
-export default function HealthScoreDashboard({ entityData, pipelineStageCount, ruleCoverage, onSelectSection }: Props) {
+export default function HealthScoreDashboard({ entityData, pipelineStageCount, ruleCoverage }: Props) {
   const [expandedKey, setExpandedKey] = useState<DimensionKey | null>(null);
   const [displayScore, setDisplayScore] = useState(0);
 
@@ -223,7 +219,6 @@ export default function HealthScoreDashboard({ entityData, pipelineStageCount, r
               dim={dim}
               expanded={expandedKey === dim.key}
               onToggle={() => setExpandedKey(prev => (prev === dim.key ? null : dim.key))}
-              onSelectSection={onSelectSection}
               resolved={model.resolved}
             />
           ))}

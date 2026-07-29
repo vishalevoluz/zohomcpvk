@@ -1683,7 +1683,6 @@ function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label:
 
 export default function CRMOverviewDashboard({ config, tools, onLog, entityData, fetchEntity, fetchAll, lastRefresh, onSelectSection, pipelineStageCount, pipelineStages, ruleCoverage }: Props) {
   const [activeTab, setActiveTab] = useState<ReportTab>("changes");
-  const [pipelinesOpen, setPipelinesOpen] = useState(false);
   const [ziaMessages, setZiaMessages] = useState<ZiaMessage[]>([]);
   const [ziaInput, setZiaInput] = useState("");
   const [ziaLoading, setZiaLoading] = useState(false);
@@ -1699,13 +1698,21 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     text: string;
     usage?: { inputTokens: number; outputTokens: number; model: string };
   }>>({});
-  const [expandedKpi, setExpandedKpi] = useState<"modules" | "blueprints" | "layouts" | "schedules" | "functions" | "users" | null>(null);
+  // Single source of truth for the master-detail layout below: the one card
+  // (out of the 6 KPI tiles + 4 CRM Configuration tiles) currently selected
+  // in the left-hand list, whose detail renders in the right-hand panel.
+  // Replaces the old expandedKpi + pipelinesOpen pair — those two used to
+  // gate two visually-separate "expand below" sections; now there's only one
+  // selection driving one detail slot.
+  type CardKey = "modules" | "blueprints" | "users" | "layouts" | "schedules" | "functions"
+               | "pipelines" | "workflows" | "profiles" | "activity";
+  const [selectedCard, setSelectedCard] = useState<CardKey | null>(null);
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
   const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never">("all");
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
-  const layoutsByModule = useLayoutsByModule(config, tools, entityData.modules.items, expandedKpi === "layouts", onLog);
-  const scheduleRecords = useScheduleRecords(config, tools, expandedKpi === "schedules", onLog);
-  const functionRecords = useFunctionRecords(config, tools, expandedKpi === "functions", onLog);
+  const layoutsByModule = useLayoutsByModule(config, tools, entityData.modules.items, selectedCard === "layouts", onLog);
+  const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
+  const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
   const [expandedFunctionDuplicate, setExpandedFunctionDuplicate] = useState<string | null>(null);
   const [previewFunctionId, setPreviewFunctionId] = useState<string | null>(null);
   const [functionsListExpanded, setFunctionsListExpanded] = useState(false);
@@ -1716,9 +1723,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       return next;
     });
   }
-  // Workflows/Activity are always-visible cards (not click-to-reveal like the
-  // KPI strip drilldowns above), so this fetches as soon as tools are ready
-  // rather than waiting on a click.
+  // Deliberately kept eager (fetches as soon as tools are ready) rather than
+  // gated on selectedCard === "activity" like the on-demand hooks above —
+  // this is existing behavior preserved as-is; only where its result renders
+  // changed (now behind the Activity card's selection instead of always-on).
   const activityRecords = useActivityRecords(config, tools, true, onLog);
 
   // Tick for relative-time display
@@ -1896,14 +1904,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     total: functionRecords.items.length, active: functionActiveCount, inactive: functionInactiveCount,
     fetched: functionRecords.listState.fetched,
   });
-  const moduleBreakdown = expandedKpi === "modules" ? computeModuleBreakdown(entityData) : [];
-  const blueprintBreakdown = expandedKpi === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
-  const layoutBreakdown = expandedKpi === "layouts" ? computeLayoutBreakdown(entityData.modules.items, layoutsByModule.byModule) : [];
-  const scheduleBreakdown = expandedKpi === "schedules" ? computeScheduleBreakdown(scheduleRecords.items) : [];
-  const ziaScheduleInsight = expandedKpi === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
-  const userBreakdown = expandedKpi === "users" ? computeUserBreakdown(entityData) : [];
+  const moduleBreakdown = selectedCard === "modules" ? computeModuleBreakdown(entityData) : [];
+  const blueprintBreakdown = selectedCard === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
+  const layoutBreakdown = selectedCard === "layouts" ? computeLayoutBreakdown(entityData.modules.items, layoutsByModule.byModule) : [];
+  const scheduleBreakdown = selectedCard === "schedules" ? computeScheduleBreakdown(scheduleRecords.items) : [];
+  const ziaScheduleInsight = selectedCard === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
+  const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
 
-  const functionIssueRows: FunctionIssueRow[] = expandedKpi === "functions"
+  const functionIssueRows: FunctionIssueRow[] = selectedCard === "functions"
     ? functionRecords.items.flatMap(fn => (functionRecords.issuesByFnId[fn.id] ?? []).map((issue, i) => ({ key: `${fn.id}-${i}`, functionName: fn.name, category: fn.category, issue })))
     : [];
   const sortedFunctionIssueRows = [...functionIssueRows].sort((a, b) => FUNCTION_SEVERITY_ORDER[a.issue.severity] - FUNCTION_SEVERITY_ORDER[b.issue.severity]);
@@ -2321,32 +2329,51 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       </div>
 
-      {/* ── KPI strip ───────────────────────────────────────────────────────── */}
-      <div className="kpi-strip">
-        {kpis.map(k => {
-          const toggle = () => setExpandedKpi(prev => (prev === k.key ? null : (k.key as "modules" | "blueprints" | "layouts" | "schedules" | "functions" | "users")));
+      {/* ── Data & Recommendations: card list (left) + detail panel (right) ──── */}
+      <div className="crmov-master-detail">
+      <div className="crmov-card-list">
+        {kpis.map(k => (
+          <button
+            key={k.key}
+            type="button"
+            className={`crmov-card kpi-${k.severity} ${k.clickable ? "clickable" : ""} ${selectedCard === k.key ? "selected" : ""}`}
+            onClick={k.clickable ? () => setSelectedCard(prev => (prev === k.key ? null : (k.key as CardKey))) : undefined}
+            disabled={!k.clickable}
+          >
+            <span className="kpi-tile-label">{k.label}</span>
+            <span className="kpi-tile-value">{k.value.toLocaleString()}</span>
+            <span className="kpi-tile-note">{k.note}</span>
+          </button>
+        ))}
+        <div className="crmov-card-list-divider">CRM Configuration</div>
+        {configRows.map(row => {
+          const cardKey: CardKey = row.key === "tasks" ? "activity" : (row.key as CardKey);
           return (
-            <div
-              key={k.key}
-              className={`kpi-tile kpi-${k.severity} ${k.clickable ? "kpi-clickable" : ""} ${expandedKpi === k.key ? "kpi-expanded" : ""}`}
-              onClick={k.clickable ? toggle : undefined}
-              role={k.clickable ? "button" : undefined}
-              tabIndex={k.clickable ? 0 : undefined}
-              onKeyDown={k.clickable ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } } : undefined}
+            <button
+              key={row.key}
+              type="button"
+              className={`crmov-card config-${row.severity} ${selectedCard === cardKey ? "selected" : ""}`}
+              onClick={() => setSelectedCard(prev => (prev === cardKey ? null : cardKey))}
             >
-              <span className="kpi-tile-label">{k.label}</span>
-              <span className="kpi-tile-value">{k.value.toLocaleString()}</span>
-              <span className="kpi-tile-note">{k.note}</span>
-            </div>
+              <span className="kpi-tile-label">{row.label}</span>
+              <span className="kpi-tile-value">{row.value}</span>
+              <span className="kpi-tile-note">{row.status}</span>
+            </button>
           );
         })}
       </div>
 
-      {expandedKpi === "modules" && (
+      <div className="crmov-detail-panel">
+      {selectedCard === null && (
+        <div className="crmov-detail-placeholder">
+          <p className="business-view-hint">Click a card on the left to see its details here.</p>
+        </div>
+      )}
+      {selectedCard === "modules" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
             <h4>Modules — Active / Hidden / Empty</h4>
-            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <div className="kpi-drilldown-summary">
             {(["active", "hidden", "empty"] as ModuleCategory[]).map(cat => {
@@ -2381,11 +2408,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       )}
 
-      {expandedKpi === "blueprints" && (
+      {selectedCard === "blueprints" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
             <h4>Blueprints — Active / Inactive / Draft</h4>
-            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <div className="kpi-drilldown-summary">
             <button
@@ -2426,11 +2453,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       )}
 
-      {expandedKpi === "users" && (
+      {selectedCard === "users" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
             <h4>Active Users — Active vs Inactive</h4>
-            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <div className="kpi-drilldown-summary">
             <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.active).length} Active</span>
@@ -2448,11 +2475,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       )}
 
-      {expandedKpi === "layouts" && (
+      {selectedCard === "layouts" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
             <h4>Layouts — Standard vs Custom, Per Module</h4>
-            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <p className="kpi-drilldown-note">
             More than one layout on a module usually isn&apos;t clutter — Zoho lets each profile use a different layout on the same module, so Sales and Support can see different required fields on the same Leads module. It&apos;s only worth a closer look when a module is stacking several custom layouts with no clear reason.
@@ -2491,11 +2518,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       )}
 
-      {expandedKpi === "schedules" && (
+      {selectedCard === "schedules" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
             <h4>Schedules — Active / Inactive / Last Run</h4>
-            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {scheduleRecords.unavailable && (
             <p className="business-view-hint">No schedule-listing tool is connected — schedule activity can't be checked from here.</p>
@@ -2533,11 +2560,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       )}
 
-      {expandedKpi === "functions" && (
+      {selectedCard === "functions" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
             <h4>Functions — Issues, Duplicates &amp; Code</h4>
-            <button className="kpi-drilldown-close" onClick={() => setExpandedKpi(null)}>✕</button>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <div className="kpi-drilldown-summary">
             <span className="kpi-drilldown-stat good">{functionActiveCount} Active</span>
@@ -2682,70 +2709,40 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       )}
 
-      {/* ── CRM Configuration summary ──────────────────────────────────────────── */}
-      <div className="business-view-section">
-        <h3 className="business-view-section-title">CRM Configuration</h3>
-        <div className="config-grid">
-          {configRows.map(row => {
-            // Pipelines has no dedicated audit section to navigate to (it fell back
-            // to "modules", which shows nothing pipeline-specific) — it expands an
-            // inline drilldown of the real stage names instead, same as the KPI
-            // strip's Modules/Blueprints/Active Users tiles.
-            const isPipelines = row.key === "pipelines";
-            const clickable = isPipelines || row.targetSection !== null;
-            const onActivate = isPipelines
-              ? () => setPipelinesOpen(v => !v)
-              : () => onSelectSection(row.targetSection as Section);
-            return (
-              <div
-                key={row.key}
-                className={`config-tile config-${row.severity} ${clickable ? "clickable" : ""} ${isPipelines && pipelinesOpen ? "kpi-expanded" : ""}`}
-                onClick={clickable ? onActivate : undefined}
-                role={clickable ? "button" : undefined}
-                tabIndex={clickable ? 0 : undefined}
-                onKeyDown={clickable ? e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onActivate(); } } : undefined}
-              >
-                <span className="config-tile-label">{row.label}</span>
-                <span className="config-tile-value">{row.value}</span>
-                <span className="config-tile-status">{row.status}</span>
-              </div>
-            );
-          })}
-        </div>
-
-        {pipelinesOpen && (
-          <div className="kpi-drilldown">
-            <div className="kpi-drilldown-header">
-              <h4>Pipeline Stages</h4>
-              <button className="kpi-drilldown-close" onClick={() => setPipelinesOpen(false)}>✕</button>
-            </div>
-            {pipelineStages.loading && (
-              <p className="kpi-drilldown-progress"><span className="spinner" /> Fetching pipeline stages…</p>
-            )}
-            {!pipelineStages.loading && pipelineStages.error && (
-              <p className="business-view-hint">⚠ {pipelineStages.error}</p>
-            )}
-            {!pipelineStages.loading && !pipelineStages.error && pipelineStages.items.length === 0 && (
-              <p className="business-view-hint">No pipeline stages were found on your Deals layout.</p>
-            )}
-            {!pipelineStages.loading && pipelineStages.items.length > 0 && (
-              <div className="kpi-drilldown-table">
-                {pipelineStages.items.map(stage => (
-                  <div key={stage.apiName} className="kpi-drilldown-row">
-                    <span className="kpi-drilldown-name">{stage.name}</span>
-                    {stage.forecastType && <span className="kpi-drilldown-badge neutral">{stage.forecastType}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
+      {selectedCard === "pipelines" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Pipeline Stages</h4>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
-        )}
-      </div>
+          {pipelineStages.loading && (
+            <p className="kpi-drilldown-progress"><span className="spinner" /> Fetching pipeline stages…</p>
+          )}
+          {!pipelineStages.loading && pipelineStages.error && (
+            <p className="business-view-hint">⚠ {pipelineStages.error}</p>
+          )}
+          {!pipelineStages.loading && !pipelineStages.error && pipelineStages.items.length === 0 && (
+            <p className="business-view-hint">No pipeline stages were found on your Deals layout.</p>
+          )}
+          {!pipelineStages.loading && pipelineStages.items.length > 0 && (
+            <div className="kpi-drilldown-table">
+              {pipelineStages.items.map(stage => (
+                <div key={stage.apiName} className="kpi-drilldown-row">
+                  <span className="kpi-drilldown-name">{stage.name}</span>
+                  {stage.forecastType && <span className="kpi-drilldown-badge neutral">{stage.forecastType}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* ── Workflows / Activity detail cards ──────────────────────────────────── */}
-      <div className="crm-panels-row crm-panels-row-2col">
-        <div className="business-view-section crm-panel-card">
-          <h3 className="business-view-section-title">Workflows — Active / Inactive / Last Triggered</h3>
+      {selectedCard === "workflows" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Workflows — Active / Inactive / Last Triggered</h4>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+          </div>
           <div className="kpi-drilldown-summary">
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${workflowFilter === "active" ? "selected" : ""}`}
@@ -2789,9 +2786,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <p className="zia-rec-desc">{ziaWorkflowInsight.summary}</p>
           </div>
         </div>
+      )}
 
-        <div className="business-view-section crm-panel-card">
-          <h3 className="business-view-section-title">Activity — Email / Task / Call</h3>
+      {selectedCard === "activity" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Activity — Email / Task / Call</h4>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+          </div>
           <div className="activity-subkpi-grid">
             {activityStats.map(stat => (
               <div key={stat.key} className="activity-subkpi-tile">
@@ -2827,12 +2829,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <p className="zia-rec-desc">{ziaActivityInsight.summary}</p>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* ── Profiles / Users panels ───────────────────────────────── */}
-      <div className="crm-panels-row crm-panels-row-2up">
-        <div className="business-view-section crm-panel-card">
-          <h3 className="business-view-section-title">Profiles</h3>
+      {selectedCard === "profiles" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Profiles</h4>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+          </div>
           {profileItems.length === 0 ? (
             <PanelEmptyState state={entityData.profiles} label="Profiles" onRetry={() => fetchEntity("profiles")} />
           ) : (
@@ -2853,9 +2857,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             </ul>
           )}
         </div>
+      )}
 
-        <div className="business-view-section crm-panel-card">
-          <h3 className="business-view-section-title">Users</h3>
+      {selectedCard === "users" && (
+        <div className="kpi-drilldown">
+          <h5 className="kpi-drilldown-subheading">Full User List</h5>
           {userItemsForPanel.length === 0 ? (
             <PanelEmptyState state={entityData.users} label="Users" onRetry={() => fetchEntity("users")} />
           ) : (
@@ -2885,6 +2891,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             </ul>
           )}
         </div>
+      )}
+      </div>
       </div>
 
       {/* ── Zia Recommendations ─────────────────────────────────────────────── */}

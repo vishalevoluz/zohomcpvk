@@ -1,12 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
-import FieldsAudit from "@/components/FieldsAudit";
 import ScopeHint from "@/components/ScopeHint";
-import { categorizeTools } from "@/lib/sections";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
 interface ZohoModule {
@@ -156,7 +154,7 @@ interface Props {
   onLog: (log: ExecutionLog) => void;
 }
 
-export default function ModulesAudit({ config, tools, allTools, onLog }: Props) {
+export default function ModulesAudit({ config, tools, onLog }: Props) {
   const [selectedTools, setSelectedTools] = useState<string[]>(() => tools.map(t => t.name));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -164,21 +162,6 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
   const [filter, setFilter] = useState<FilterKey>("all");
   const [search, setSearch] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
-  const [expandedModule, setExpandedModule] = useState<string | null>(null);
-  const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  const fieldsTools = useMemo(() => categorizeTools(allTools).fields, [allTools]);
-
-  useEffect(() => {
-    if (!activeMenu) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
-      setActiveMenu(null);
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [activeMenu]);
 
   useEffect(() => {
     const toolNames = tools.map(t => t.name);
@@ -246,6 +229,13 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
     String(m.status ?? "").toLowerCase() === "deleted"
   );
 
+  // "Active"/"inactive" isn't a real status value on this API — verified
+  // live against a connected org: status here is "visible" / "system_hidden"
+  // / "user_hidden", not "active"/"inactive". So "active" is defined as "not
+  // hidden", reusing the exact same check as the Hidden Modules finding
+  // below rather than inventing a second, inconsistent definition.
+  const activeModules = modules.filter(m => !hidden.includes(m));
+
   const filterMap: Record<FilterKey, ZohoModule[]> = {
     all: modules, hidden, unused, custom, deprecated,
   };
@@ -283,7 +273,15 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
           <span className="pane-icon">⊞</span>
           <h2 className="pane-title">Modules Audit</h2>
           {modules.length > 0 && (
-            <span className="pane-count">{modules.length} modules</span>
+            <>
+              <span className="pane-count">{modules.length} modules</span>
+              <span
+                className="pane-count pane-count-breakdown"
+                data-tooltip="Active = not hidden from users. Hidden = system_hidden or user_hidden status, matching the Hidden Modules finding below."
+              >
+                {activeModules.length} active · {hidden.length} hidden
+              </span>
+            </>
           )}
         </div>
         <div className="audit-toolbar">
@@ -371,49 +369,22 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
                       <th><span className="th-tip" data-tooltip-below="Unique ID of this module">Module ID<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The technical API identifier used in integrations and API calls">API Name<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The internal system name of this module">Module Name (System)<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether this is a default Zoho module or a custom module your org created">Generated Type<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The current visibility status of this module (visible, hidden, etc.)">Status<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether users can view this module in the CRM">Viewable<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether this module appears as a tab in the CRM navigation bar">Show as Tab<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether new records can be created in this module">Creatable<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether existing records can be modified in this module">Editable<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether records in this module can be deleted">Deletable<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether this module can be accessed via the Zoho CRM API">API Supported<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether Blueprint processes can be applied to this module">Blueprint Support<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether records can be quick-created from other modules">Quick Create<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Number of user profiles that have access to this module">Profile Count<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="User profiles that have access to this module">Profiles<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="The display order of this module in the CRM navigation">Seq No<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this module">Findings<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Expand to audit all fields in this module">Fields<span className="th-info">i</span></span></th>
-                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {displayed.map((m, i) => {
                       const tags = getTags(m);
-                      const modApiName = String(m.api_name ?? m.module_name ?? "");
-                      const isExpanded = expandedModule === modApiName;
                       return (
-                        <React.Fragment key={i}>
-                          <tr className={`${tags.length ? "row-flagged" : ""} ${isExpanded ? "row-selected" : ""}`}>
+                        <tr key={i} className={tags.length ? "row-flagged" : ""}>
                           <td className="cell-name">{getName(m)}</td>
-                          <td className="cell-mono fn-id">{String(m.id ?? "—")}</td>
+                          <td className="cell-mono">{String(m.id ?? "—")}</td>
                           <td className="cell-mono">{String(m.api_name ?? "—")}</td>
                           <td className="cell-mono">{String(m.module_name ?? "—")}</td>
-                          <td><span className="arg-badge">{String(m.generated_type ?? "—")}</span></td>
                           <td><span className="arg-badge">{String(m.status ?? "—")}</span></td>
-                          <td><span className={`bool-badge ${(m.viewable ?? m.visible) !== false ? "yes" : "no"}`}>{(m.viewable ?? m.visible) !== false ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.show_as_tab ? "yes" : "no"}`}>{m.show_as_tab ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.creatable ? "yes" : "no"}`}>{m.creatable ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.editable ? "yes" : "no"}`}>{m.editable ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.deletable ? "yes" : "no"}`}>{m.deletable ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.api_supported ? "yes" : "no"}`}>{m.api_supported ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.isBlueprintSupported ? "yes" : "no"}`}>{m.isBlueprintSupported ? "Yes" : "No"}</span></td>
-                          <td><span className={`bool-badge ${m.quick_create ? "yes" : "no"}`}>{m.quick_create ? "Yes" : "No"}</span></td>
-                          <td><span className="count-badge">{String(m.profile_count ?? "—")}</span></td>
                           <td className="cell-profiles">{getProfiles(m)}</td>
-                          <td className="cell-mono">{String(m.sequence_number ?? "—")}</td>
                           <td>
                             <div className="tag-list">
                               {tags.length === 0
@@ -428,64 +399,11 @@ export default function ModulesAudit({ config, tools, allTools, onLog }: Props) 
                                   ))}
                             </div>
                           </td>
-                          <td>
-                            <button
-                              className={`btn-fields ${isExpanded ? "active" : ""}`}
-                              onClick={() => setExpandedModule(isExpanded ? null : modApiName || null)}
-                              title={isExpanded ? "Close fields panel" : `View fields for ${getName(m)}`}
-                            >
-                              {isExpanded ? "▲ Close" : "⊟ Fields"}
-                            </button>
-                          </td>
-                          <td className="cell-actions">
-                            <div className="action-menu-wrap" ref={activeMenu === modApiName ? menuRef : null}>
-                              <button
-                                className={`btn-action ${activeMenu === modApiName ? "open" : ""}`}
-                                onClick={e => { e.stopPropagation(); setActiveMenu(activeMenu === modApiName ? null : modApiName); }}
-                                title="Actions"
-                              >⋯</button>
-                              {activeMenu === modApiName && (
-                                <div className="action-dropdown">
-                                  {config.crmBaseUrl ? (
-                                    <button className="action-dropdown-item" onClick={() => { window.open(`${config.crmBaseUrl}/tab/${modApiName}`, "_blank"); setActiveMenu(null); }}>
-                                      <span className="action-icon">↗</span>Open in CRM
-                                    </button>
-                                  ) : (
-                                    <button className="action-dropdown-item" disabled title="Enter your Zoho CRM URL in the connection form to enable this" style={{ opacity: 0.45, cursor: "not-allowed" }}>
-                                      <span className="action-icon">↗</span>Open in CRM
-                                    </button>
-                                  )}
-                                  <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(String(m.api_name ?? "")); setActiveMenu(null); }}>
-                                    <span className="action-icon">⎘</span>Copy API Name
-                                  </button>
-                                  <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(String(m.id ?? "")); setActiveMenu(null); }}>
-                                    <span className="action-icon">⎘</span>Copy Module ID
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          </td>
                         </tr>
-                        </React.Fragment>
                       );
                     })}
                   </tbody>
                 </table>
-              </div>
-            )}
-
-            {/* Inline fields panel */}
-            {expandedModule && (
-              <div className="module-fields-inline">
-                <FieldsAudit
-                  embedded
-                  defaultModule={expandedModule}
-                  autoLoad
-                  config={config}
-                  tools={fieldsTools}
-                  allTools={allTools}
-                  onLog={onLog}
-                />
               </div>
             )}
           </div>

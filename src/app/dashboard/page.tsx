@@ -191,7 +191,6 @@ export default function DashboardPage() {
             moduleRecordCounts={moduleRecordCounts.data}
             currencySymbol={orgCurrency.symbol}
             fetchAll={fetchAllData}
-            onSelectSection={onSelectSection}
           />
           <CRMOverviewDashboard
             config={config}
