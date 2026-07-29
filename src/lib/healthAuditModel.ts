@@ -9,8 +9,8 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
-  isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField,
-  workflowReferencesModule, ruleCoverageCount, blueprintStatus,
+  isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, hasEmailAction,
+  workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules,
 } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
@@ -18,7 +18,7 @@ import {
   computeHealthScore, zoneForValue, HEALTH_SCORE_ENTITIES,
   type HealthScoreDimensions, type HealthZone,
 } from "@/lib/businessScore";
-import { PRIORITY_ACTION_LIBRARY, type ActionImpact, type ActionEffort } from "@/lib/priorityActions";
+import type { ActionImpact, ActionEffort } from "@/lib/priorityActions";
 import type { Section } from "@/lib/sections";
 
 export type DimensionKey = keyof HealthScoreDimensions;
@@ -53,12 +53,98 @@ export const DIMENSION_TOOLTIPS: Record<DimensionKey, string> = {
   automationHealth: "What share of your existing workflows are actually turned on right now.",
 };
 
+// Same finding ids as businessFindings.ts (the "What Is Costing You" / "Top
+// Priority Actions" source of truth) — kept as a small self-contained
+// re-derivation here rather than importing that module directly, matching
+// this file's existing design principle (see header comment): every
+// checklist condition here is its own local pass/fail re-check against the
+// same predicates, so it can never disagree with the real dimension score,
+// and doesn't need the full record-sample/module-record-count context the
+// main panels use for their fuller evidence.
 const DIMENSION_TO_ACTION_IDS: Record<DimensionKey, string[]> = {
-  automationCoverage: ["activate-email-workflows", "consolidate-inactive-workflows"],
-  processCompleteness: ["build-pipeline", "deploy-blueprint"],
-  accessSecurity: ["role-based-profiles", "remove-inactive-licenses"],
-  dataArchitecture: ["reduce-mandatory-fields", "decommission-empty-modules"],
-  automationHealth: ["consolidate-inactive-workflows", "activate-email-workflows"],
+  automationCoverage: ["no-email-workflow", "workflows-inactive"],
+  processCompleteness: ["no-pipeline", "no-blueprint"],
+  accessSecurity: ["access-risk", "inactive-users"],
+  dataArchitecture: ["excessive-mandatory-fields", "empty-modules"],
+  automationHealth: ["workflows-inactive", "no-email-workflow"],
+};
+
+interface ActionInfo { title: string; why: string; impact: ActionImpact; effort: ActionEffort; targetSection: Section }
+
+const ACTION_INFO: Record<string, ActionInfo> = {
+  "no-email-workflow": {
+    title: "Activate Email Follow-Up Workflows",
+    why: "Unanswered leads go cold. Automated follow-up keeps prospects engaged without relying on reps to remember.",
+    impact: "High", effort: "Medium", targetSection: "workflows",
+  },
+  "workflows-inactive": {
+    title: "Consolidate Inactive Workflows",
+    why: "Inactive workflows create confusion and may silently fail when re-enabled. Clean them up or delete them.",
+    impact: "Medium", effort: "Easy", targetSection: "workflows",
+  },
+  "no-pipeline": {
+    title: "Build a Sales Pipeline",
+    why: "Without defined stages you cannot track deals, forecast revenue, or spot where you are losing business.",
+    impact: "High", effort: "Easy", targetSection: "crm-dashboard",
+  },
+  "no-blueprint": {
+    title: "Deploy a Blueprint for Your Key Process",
+    why: "Blueprints enforce your sales process. Without them, reps skip steps and managers have no visibility.",
+    impact: "High", effort: "Hard", targetSection: "blueprints",
+  },
+  "access-risk": {
+    title: "Create Role-Based Access Profiles",
+    why: "A sales rep should not have the same access as an admin. Separate profiles protect your data.",
+    impact: "High", effort: "Easy", targetSection: "crm-dashboard",
+  },
+  "inactive-users": {
+    title: "Remove Inactive User Licenses",
+    why: "Every inactive user with a paid license is a direct monthly cost with zero return.",
+    impact: "High", effort: "Easy", targetSection: "crm-dashboard",
+  },
+  "excessive-mandatory-fields": {
+    title: "Reduce Mandatory Field Count",
+    why: "Too many required fields push reps to enter dummy data. Fewer, smarter fields improve data quality.",
+    impact: "Medium", effort: "Medium", targetSection: "fields",
+  },
+  "empty-modules": {
+    title: "Hide Unused Empty Modules",
+    why: "Unused modules clutter the interface and confuse new team members. Hide them from each profile's module settings instead of deleting.",
+    impact: "Low", effort: "Easy", targetSection: "modules",
+  },
+};
+
+function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): boolean {
+  switch (id) {
+    case "no-email-workflow": return !entityData.workflows.items.some(hasEmailAction);
+    case "workflows-inactive": {
+      const total = entityData.workflows.items.length;
+      if (total === 0) return false;
+      return entityData.workflows.items.filter(w => !isActiveWorkflow(w)).length / total > 0.3;
+    }
+    case "no-pipeline": return pipelineStageCount === 0;
+    case "no-blueprint": return entityData.blueprints.items.length === 0;
+    case "access-risk": {
+      const profiles = entityData.profiles.items;
+      if (profiles.length === 0) return false;
+      return profiles.length === 1 || profiles.every(isAdminProfile) || profiles.filter(isAdminProfile).length > 2;
+    }
+    case "inactive-users": return entityData.users.items.some(isInactiveUser);
+    case "excessive-mandatory-fields": return entityData.fields.items.filter(isMandatoryField).length > 20;
+    case "empty-modules": return unreferencedModules(entityData.modules.items, entityData.workflows.items, entityData.blueprints.items).length > 3;
+    default: return false;
+  }
+}
+
+const ACTION_REQUIRES: Record<string, CrmEntityType[]> = {
+  "no-email-workflow": ["workflows"],
+  "workflows-inactive": ["workflows"],
+  "no-pipeline": [],
+  "no-blueprint": ["blueprints"],
+  "access-risk": ["profiles"],
+  "inactive-users": ["users"],
+  "excessive-mandatory-fields": ["fields"],
+  "empty-modules": ["modules", "workflows", "blueprints"],
 };
 
 const SEVERITY_LABEL: Record<HealthZone, "Critical" | "At Risk" | "Needs Attention" | "Healthy"> = {
@@ -168,11 +254,10 @@ export interface HealthAuditModel {
   roadmap: RoadmapEntry[];
 }
 
-function recommendationsFor(key: DimensionKey, entityData: Record<CrmEntityType, EntityState>): DimensionRecommendation[] {
-  const ids = DIMENSION_TO_ACTION_IDS[key];
-  return PRIORITY_ACTION_LIBRARY
-    .filter(rule => ids.includes(rule.id) && rule.requires.every(t => isEntityResolved(entityData[t])) && rule.test(entityData))
-    .map(({ id, title, why, impact, effort, targetSection }) => ({ id, title, why, impact, effort, targetSection }));
+function recommendationsFor(key: DimensionKey, entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): DimensionRecommendation[] {
+  return DIMENSION_TO_ACTION_IDS[key]
+    .filter(id => ACTION_REQUIRES[id].every(t => isEntityResolved(entityData[t])) && actionConditionTriggered(id, entityData, pipelineStageCount))
+    .map(id => ({ id, ...ACTION_INFO[id] }));
 }
 
 function automationCoverageChecklist(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null): ChecklistItem[] {
@@ -321,7 +406,7 @@ export function buildHealthAuditModel(
         criticalAlert = automationHealthCriticalAlert(entityData, score);
         break;
     }
-    const recommendations = recommendationsFor(key, entityData);
+    const recommendations = recommendationsFor(key, entityData, pipelineStageCount);
     return {
       key,
       label: DIMENSION_LABELS[key],

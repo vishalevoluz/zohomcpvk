@@ -184,6 +184,112 @@ export function ruleCoverageBreakdown(ruleCoverage: RuleCoverage | null, apiName
   };
 }
 
+// Modules with zero references from any workflow or blueprint — the
+// heuristic "probably unused" shortlist shared by the empty-modules finding
+// and by useModuleRecordCounts.ts (which uses it to bound how many
+// getRecordCount calls it makes to a handful, not one per module in the org).
+export function unreferencedModules(modules: unknown[], workflows: unknown[], blueprints: unknown[]): Record<string, unknown>[] {
+  return modules.filter(m => {
+    const apiName = moduleApiName(m);
+    if (!apiName) return false;
+    const referenced = workflows.some(w => workflowReferencesModule(w, apiName));
+    const hasBlueprint = blueprintsForModule(blueprints, apiName).length > 0;
+    return !referenced && !hasBlueprint;
+  }) as Record<string, unknown>[];
+}
+
+// ─── Deal-quality predicates ────────────────────────────────────────────────
+// Zoho's "Stage" field names vary by org (custom pipelines rename stages
+// freely), so "closed" is matched by keyword rather than an exact stage
+// list — every org's closed-won/closed-lost stage name contains "closed".
+function dealStage(deal: unknown): string {
+  if (!deal || typeof deal !== "object") return "";
+  const r = deal as Record<string, unknown>;
+  const stage = r.Stage ?? r.stage;
+  if (typeof stage === "string") return stage;
+  if (stage && typeof stage === "object") return String((stage as Record<string, unknown>).name ?? "");
+  return "";
+}
+
+export function isOpenDeal(deal: unknown): boolean {
+  return !/closed/i.test(dealStage(deal));
+}
+
+function dealModifiedTime(deal: unknown): Date | null {
+  if (!deal || typeof deal !== "object") return null;
+  const r = deal as Record<string, unknown>;
+  const raw = r.Modified_Time ?? r.modified_time ?? r.Modified_Time__s;
+  if (typeof raw !== "string" || !raw) return null;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function dealAgeDays(deal: unknown): number | null {
+  const modified = dealModifiedTime(deal);
+  if (!modified) return null;
+  return Math.floor((Date.now() - modified.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+export function isDealStale(deal: unknown, days = 30): boolean {
+  if (!isOpenDeal(deal)) return false;
+  const age = dealAgeDays(deal);
+  return age !== null && age > days;
+}
+
+export function dealAmount(deal: unknown): number | null {
+  if (!deal || typeof deal !== "object") return null;
+  const r = deal as Record<string, unknown>;
+  const raw = r.Amount ?? r.amount;
+  if (typeof raw === "number") return raw;
+  if (typeof raw === "string" && raw.trim() !== "" && !Number.isNaN(Number(raw))) return Number(raw);
+  return null;
+}
+
+export function isDealUnforecastable(deal: unknown): boolean {
+  if (!isOpenDeal(deal)) return false;
+  if (!deal || typeof deal !== "object") return false;
+  const r = deal as Record<string, unknown>;
+  const closingDate = r.Closing_Date ?? r.closing_date;
+  const noAmount = dealAmount(deal) === null;
+  const noCloseDate = !(typeof closingDate === "string" && closingDate.trim() !== "");
+  return noAmount || noCloseDate;
+}
+
+// ─── Lead-quality predicates ────────────────────────────────────────────────
+export function hasNoLeadSource(lead: unknown): boolean {
+  if (!lead || typeof lead !== "object") return false;
+  const r = lead as Record<string, unknown>;
+  const source = r.Lead_Source ?? r.lead_source;
+  if (source === undefined || source === null) return true;
+  if (typeof source === "string") return source.trim() === "";
+  return false;
+}
+
+// ─── User activity ──────────────────────────────────────────────────────────
+// Zoho's Users API field for this varies by version/server — checked
+// defensively across the plausible names, same style as workflowLastTriggered
+// above. Returns null (not "0 days") when no such field is present at all, so
+// callers can tell "confirmed recent" apart from "we can't tell" and skip the
+// finding entirely rather than guess (see userLoginFieldPresent below).
+export function userLoginAgeDays(user: unknown): number | null {
+  if (!user || typeof user !== "object") return null;
+  const r = user as Record<string, unknown>;
+  const raw = r.last_activity_time ?? r.lastActivityTime ?? r.last_login_time ?? r.lastLoginTime ?? r.Last_Activity_Time;
+  if (typeof raw !== "string" || !raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+// True only when at least one sampled user actually carries a readable
+// last-activity field — distinguishes "checked, and everyone's recent" from
+// "this MCP server/org doesn't expose login activity at all", so the
+// stale-logins finding can honestly not fire in the latter case instead of
+// silently reporting zero stale users.
+export function userLoginFieldPresent(users: unknown[]): boolean {
+  return users.some(u => userLoginAgeDays(u) !== null);
+}
+
 // The field a blueprint transitions records through (e.g. "Stage" for Deals,
 // "Status" for Tasks) — used to read each sampled record's current blueprint
 // state without a per-record blueprint API call.

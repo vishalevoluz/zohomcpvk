@@ -1,12 +1,40 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, moduleApiName, workflowReferencesModule, blueprintsForModule, findBlueprintFieldApiName, ruleCoverageCount, ruleCoverageBreakdown } from "@/lib/crmPredicates";
+import { isActiveWorkflow, moduleApiName, workflowReferencesModule, workflowLastTriggered, blueprintsForModule, findBlueprintFieldApiName, ruleCoverageCount, ruleCoverageBreakdown } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import type { Section } from "@/lib/sections";
 
 export type FlowLane = "entry" | "qualification" | "automation" | "outcome";
 export type NodeStatus = "live" | "configured-untested" | "configured-issues" | "gap" | "empty" | "loading";
-export type EdgeKind = "automated" | "manual" | "broken" | "loading";
+export type EdgeKind = "automated" | "manual" | "broken" | "unknown" | "loading";
+
+// Structured, non-technical explanation shown in the side panel — see
+// BusinessView.tsx's node/edge detail panel. Every field here is meant to be
+// read by a business owner with zero Zoho knowledge; `technical` is the one
+// exception, rendered collapsed by default for consultants who want it.
+export interface NodeExplanation {
+  /** One plain sentence describing what this stage IS in business terms — never the API name. */
+  whatIsThis: string;
+  /** One plain sentence matching the node's color, e.g. "Live and working." */
+  statusSentence: string;
+  /** The receipt — translated signals with real numbers and named sources. */
+  howWeKnow: string[];
+  /** Sample size + confirmed-vs-inferred framing, or an honest "couldn't check" note. */
+  honesty: string;
+  /** API names, generated_type, workflow IDs — hidden by default. */
+  technical: string[];
+}
+
+export interface EdgeExplanation {
+  /** What hand-off this connection represents, in business terms. */
+  whatIsThis: string;
+  statusSentence: string;
+  howWeKnow: string[];
+  /** Only present for broken connections — the one-sentence business consequence. */
+  consequence?: string;
+  honesty: string;
+  technical: string[];
+}
 
 export interface FlowNode {
   id: string;
@@ -15,9 +43,7 @@ export interface FlowNode {
   label: string;
   status: NodeStatus;
   recordCount?: number;
-  detail: string;
-  /** Extra bullet lines shown in the detail panel — lookups, conversion, workflow, blueprint evidence from the real record sample. */
-  evidence?: string[];
+  explanation: NodeExplanation;
   targetSection?: Section;
 }
 
@@ -26,7 +52,7 @@ export interface FlowEdge {
   from: string;
   to: string;
   kind: EdgeKind;
-  detail?: string;
+  explanation: EdgeExplanation;
 }
 
 export interface FlowMapModel {
@@ -56,6 +82,12 @@ export interface RecordSampleState {
   loading: boolean;
   error: string | null;
   lastFetched: number | null;
+  /** The MCP tool name actually used for this sample, or null if no matching
+   * tool was ever found on this server. Lets callers structurally tell "we
+   * never had a way to check this" apart from "we tried and the call
+   * failed" — both look like `error !== null` otherwise, and only one of
+   * them should ever be described to a user as an honest "unknown". */
+  toolUsed: string | null;
 }
 
 // A real Deals pipeline stage (see usePipelineStages.ts), sourced from
@@ -83,6 +115,30 @@ const STAGE_DEFINITIONS: StageDef[] = [
   { id: "accounts",  lane: "outcome",       col: 0, label: "Accounts",  matchers: [/account/i],             targetSection: "modules" },
   { id: "invoices",  lane: "outcome",       col: 1, label: "Invoices",  matchers: [/invoice/i],             targetSection: "modules" },
 ];
+
+// Plain-English "what is this" copy, written for a business owner who has
+// never touched Zoho — never the API name. Shown as the first line of every
+// node's explanation panel, regardless of status.
+const STAGE_WHAT_IS_THIS: Record<string, string> = {
+  leads: "Leads are people who've shown interest but aren't customers yet.",
+  campaigns: "Campaigns are the marketing pushes — emails, ads, events — that bring leads in.",
+  contacts: "Contacts are people you're actively engaging with, one step past a cold lead.",
+  deals: "Deals are specific sales opportunities you're trying to close, tied to a contact or account.",
+  accounts: "Accounts are the companies or organizations you do business with.",
+  invoices: "Invoices are the bills you send once a deal is won.",
+};
+
+const AUTOMATION_NODE_WHAT_IS_THIS = "This shows whether any automation — a workflow, approval process, or rule — runs for this stage without a person doing it by hand.";
+const PIPELINE_STAGE_WHAT_IS_THIS = "This is one step in your deal pipeline — deals sit here while your team works them at this stage.";
+const BLUEPRINT_WHAT_IS_THIS = "A Blueprint is a structured, enforced process that controls how a deal is allowed to move forward — reps can't skip a step it requires.";
+
+const JOURNEY_EDGE_WHAT_IS_THIS: Record<string, string> = {
+  "leads-contacts": "When a lead is ready, it should convert into a Contact — someone you're now actively working with.",
+  "campaigns-contacts": "A successful campaign should bring in new Contacts.",
+  "contacts-deals": "An engaged Contact should turn into a Deal — a real sales opportunity you're chasing.",
+  "deals-accounts": "A won Deal should be tied to an Account — the company you're now doing business with.",
+  "deals-invoices": "A won Deal should generate an Invoice, so you actually get paid for it.",
+};
 
 // Matchers for the stages a record sample can be taken for, keyed by stage id —
 // reused by useCrmRecordSamples.ts to resolve each stage to its real module.
@@ -150,6 +206,15 @@ interface AutomationInfo {
   inactiveCount: number;
   ruleCount: number;
   rules: { validation: number; layout: number; assignment: number; approval: number };
+  /** At least one active workflow has really fired (last_executed_time set),
+   * or a rule (which enforces on every save, with no separate "hasn't run
+   * yet" state) is present — the real-world signal that distinguishes green
+   * "live and working" from blue "configured but not tested" per spec 4.2.2. */
+  confirmedExecuted: boolean;
+  /** True when ruleCoverage itself was never resolved (null) — a genuinely
+   * unknown rule count, not a confirmed zero. Lets callers avoid claiming
+   * "no rules" when the truth is "we couldn't check". */
+  ruleCoverageUnknown: boolean;
 }
 
 // "Automated" matches the CRM Health Score's Automation Coverage dimension
@@ -164,9 +229,59 @@ function computeAutomation(apiName: string, workflows: unknown[], ruleCoverage: 
   const inactive = referencing.length - active.length;
   const rules = ruleCoverageBreakdown(ruleCoverage, apiName);
   const ruleCount = ruleCoverageCount(ruleCoverage, apiName);
-  if (active.length > 0 || ruleCount > 0) return { status: "live", activeCount: active.length, inactiveCount: inactive, ruleCount, rules };
-  if (inactive > 0) return { status: "configured-issues", activeCount: 0, inactiveCount: inactive, ruleCount: 0, rules };
-  return { status: "gap", activeCount: 0, inactiveCount: 0, ruleCount: 0, rules };
+  const ruleCoverageUnknown = ruleCoverage === null;
+  // Rules enforce on every save the moment they exist — there's no "hasn't
+  // fired yet" state for them the way a workflow can sit configured but
+  // never trigger, so any real rule counts as confirmed automation on its own.
+  const confirmedExecuted = active.some(w => workflowLastTriggered(w) !== null) || ruleCount > 0;
+  if (active.length > 0 || ruleCount > 0) return { status: "live", activeCount: active.length, inactiveCount: inactive, ruleCount, rules, confirmedExecuted, ruleCoverageUnknown };
+  if (inactive > 0) return { status: "configured-issues", activeCount: 0, inactiveCount: inactive, ruleCount: 0, rules, confirmedExecuted: false, ruleCoverageUnknown };
+  return { status: "gap", activeCount: 0, inactiveCount: 0, ruleCount: 0, rules, confirmedExecuted: false, ruleCoverageUnknown };
+}
+
+// Combines module presence + automation health + (for automation-tracked
+// stages) confirmed record evidence into ONE of the 5 spec-defined colors —
+// replaces the old live/gap binary. See the plan doc for the full decision
+// table; the short version: gray only fires on a *confirmed* zero (never on
+// "we don't know"), since claiming "empty" without evidence would violate
+// the "never state a conclusion the data doesn't support" rule.
+function decideStageStatus(
+  wantsAutomation: boolean,
+  automation: AutomationInfo | undefined,
+  recordCount: number | undefined,
+): NodeStatus {
+  if (!wantsAutomation) {
+    // Accounts / Invoices: no automation tracked for these (see
+    // automationCoverageApiNames' comment on lead-to-deal lifecycle scoping),
+    // so color comes from module + record evidence only.
+    if (recordCount === undefined) return "configured-untested"; // module confirmed, usage not yet checkable
+    return recordCount > 0 ? "live" : "empty";
+  }
+  if (!automation) return "configured-untested"; // workflows haven't resolved yet — can't confirm health either way
+  if (automation.status === "gap") return recordCount === 0 ? "empty" : "gap";
+  if (automation.status === "configured-issues") return "configured-issues";
+  return automation.confirmedExecuted ? "live" : "configured-untested";
+}
+
+function statusSentence(status: NodeStatus): string {
+  switch (status) {
+    case "live": return "Live and working.";
+    case "configured-untested": return "Set up, but we can't yet confirm it's actually being used.";
+    case "configured-issues": return "Working, but with some issues that need attention.";
+    case "gap": return "This is a gap — nothing automated is happening here.";
+    case "empty": return "Empty and unused — nothing is configured or flowing through it.";
+    default: return "Still checking your CRM…";
+  }
+}
+
+function edgeStatusSentence(kind: EdgeKind): string {
+  switch (kind) {
+    case "automated": return "Automated — this happens by itself.";
+    case "manual": return "Manual — someone has to do this by hand.";
+    case "broken": return "Broken — this connection doesn't exist.";
+    case "unknown": return "Unknown — we couldn't check this.";
+    default: return "Still checking…";
+  }
 }
 
 function edgeKindForStatus(status: NodeStatus): EdgeKind {
@@ -214,8 +329,13 @@ function lookupIds(record: unknown): Set<string> {
 
 interface LinkEvidence {
   kind: EdgeKind;
-  detail?: string;
+  howWeKnow: string[];
+  honesty: string;
+  consequence?: string;
 }
+
+const CANT_CHECK_TOOL_MISSING = "This CRM connection doesn't expose a way for us to sample real records here, so we genuinely can't confirm this either way — not a gap, just unknown.";
+const CANT_CHECK_TOOL_FAILED = "We tried to pull a real record sample here but the attempt failed — this isn't a confirmed gap, just unknown.";
 
 // Direction-agnostic: some relationships are held by the upstream record's lookup
 // (Deal → Account_Name) and some by the downstream record's lookup (Deal → Contact_Name),
@@ -226,24 +346,44 @@ function evaluateRecordLink(
   fromLabel: string,
   toLabel: string,
   resolved: boolean,
+  checkable: boolean,
 ): LinkEvidence {
-  if (!resolved) return { kind: "loading", detail: "Loading a sample of real records…" };
+  if (!resolved) return { kind: "loading", howWeKnow: ["Checking a sample of real records…"], honesty: "" };
   if (!fromRecords || !toRecords) {
-    return { kind: "manual", detail: `Can't confirm from real records — ${!fromRecords ? fromLabel : toLabel} sample isn't available.` };
+    const missing = !fromRecords ? fromLabel : toLabel;
+    return {
+      kind: "unknown",
+      howWeKnow: [`We couldn't pull a sample of real ${missing.toLowerCase()} records to check this connection.`],
+      honesty: checkable ? CANT_CHECK_TOOL_FAILED : CANT_CHECK_TOOL_MISSING,
+    };
   }
   if (toRecords.length === 0) {
-    return { kind: "broken", detail: `No ${toLabel.toLowerCase()} records found in the sample.` };
+    return {
+      kind: "broken",
+      howWeKnow: [`We sampled ${toLabel.toLowerCase()} and found none.`],
+      honesty: `Based on a sample of ${fromRecords.length} ${fromLabel.toLowerCase()} records — treat this as indicative, not exhaustive.`,
+      consequence: `${fromLabel} exist but nothing is arriving in ${toLabel} — that step of your process isn't happening.`,
+    };
   }
   const fromIds = idSet(fromRecords);
   const toIds = idSet(toRecords);
   const linkedTo = toRecords.filter(r => [...lookupIds(r)].some(id => fromIds.has(id))).length;
   const linkedFrom = fromRecords.filter(r => [...lookupIds(r)].some(id => toIds.has(id))).length;
   const linked = Math.max(linkedTo, linkedFrom);
-  if (linked === 0) {
-    return { kind: "broken", detail: `None of the sampled ${toLabel.toLowerCase()} link back to a sampled ${fromLabel.toLowerCase()} record.` };
-  }
   const base = linkedTo >= linkedFrom ? toRecords.length : fromRecords.length;
-  return { kind: "automated", detail: `${linked} of ${base} sampled records show a real ${fromLabel.toLowerCase()} → ${toLabel.toLowerCase()} link.` };
+  if (linked === 0) {
+    return {
+      kind: "broken",
+      howWeKnow: [`None of the ${base} sampled ${toLabel.toLowerCase()} link back to a sampled ${fromLabel.toLowerCase()} record.`],
+      honesty: `Based on a sample of ${base} records — treat this as indicative, not exhaustive.`,
+      consequence: `${fromLabel} and ${toLabel} both exist, but nothing connects them, so records don't flow from one to the other automatically.`,
+    };
+  }
+  return {
+    kind: "automated",
+    howWeKnow: [`${linked} of ${base} sampled records show a real ${fromLabel.toLowerCase()} → ${toLabel.toLowerCase()} link.`],
+    honesty: `Based on a sample of ${base} records — treat this as indicative, not exhaustive.`,
+  };
 }
 
 // Field names for "this lead converted" vary a lot by org/API version — classic
@@ -261,15 +401,37 @@ function isLeadConverted(o: Record<string, unknown>): boolean {
   return typeof recordStatus === "string" && /convert/i.test(recordStatus);
 }
 
-function evaluateLeadConversion(leadRecords: unknown[] | null, resolved: boolean): LinkEvidence {
-  if (!resolved) return { kind: "loading", detail: "Loading a sample of real leads…" };
-  if (!leadRecords) return { kind: "manual", detail: "Can't confirm from real records — Leads sample isn't available." };
-  if (leadRecords.length === 0) return { kind: "broken", detail: "No lead records found in the sample." };
+function evaluateLeadConversion(leadRecords: unknown[] | null, resolved: boolean, checkable: boolean): LinkEvidence {
+  if (!resolved) return { kind: "loading", howWeKnow: ["Checking a sample of real leads…"], honesty: "" };
+  if (!leadRecords) {
+    return {
+      kind: "unknown",
+      howWeKnow: ["We couldn't pull a sample of real lead records to check this connection."],
+      honesty: checkable ? CANT_CHECK_TOOL_FAILED : CANT_CHECK_TOOL_MISSING,
+    };
+  }
+  if (leadRecords.length === 0) {
+    return {
+      kind: "broken",
+      howWeKnow: ["No lead records were found in the sample."],
+      honesty: "Based on an empty sample of leads.",
+      consequence: "There's nothing to convert — leads aren't reaching this stage at all.",
+    };
+  }
   const converted = leadRecords.filter(r => r && typeof r === "object" && isLeadConverted(r as Record<string, unknown>)).length;
   if (converted === 0) {
-    return { kind: "broken", detail: `None of the last ${leadRecords.length} leads sampled have converted to a contact.` };
+    return {
+      kind: "broken",
+      howWeKnow: [`None of the last ${leadRecords.length} leads sampled have converted to a contact.`],
+      honesty: `Based on a sample of ${leadRecords.length} leads — treat this as indicative, not exhaustive.`,
+      consequence: "Leads are coming in but aren't turning into Contacts — that hand-off isn't happening.",
+    };
   }
-  return { kind: "automated", detail: `${converted} of ${leadRecords.length} sampled leads have converted to a contact.` };
+  return {
+    kind: "automated",
+    howWeKnow: [`${converted} of ${leadRecords.length} sampled leads have converted to a contact.`],
+    honesty: `Based on a sample of ${leadRecords.length} leads — treat this as indicative, not exhaustive.`,
+  };
 }
 
 // Which of the record's own fields are lookup-shaped (Zoho's { id, name } shape)
@@ -327,6 +489,16 @@ function blueprintEvidence(apiName: string, blueprints: unknown[], records: unkn
   return lines;
 }
 
+function loadingNodeExplanation(): NodeExplanation {
+  return {
+    whatIsThis: "",
+    statusSentence: "Still checking your CRM…",
+    howWeKnow: [],
+    honesty: "",
+    technical: [],
+  };
+}
+
 export function buildFlowMap(
   entityData: Record<CrmEntityType, EntityState>,
   recordSamples?: Partial<Record<RecordSampleStageId, RecordSampleState>>,
@@ -343,25 +515,26 @@ export function buildFlowMap(
   // unavailable = true means no real-record evidence will ever arrive for this stage
   // (feature not wired, or the getRecords tool isn't on this MCP server) — callers
   // should fall back to the old module/automation heuristic rather than wait forever.
-  function recordsOf(stageId: RecordSampleStageId): { items: unknown[] | null; resolved: boolean; unavailable: boolean } {
+  // checkable = true means a real tool call was actually attempted (toolUsed set) —
+  // false means we never had a way to check at all (no matching tool on this server).
+  function recordsOf(stageId: RecordSampleStageId): { items: unknown[] | null; resolved: boolean; unavailable: boolean; checkable: boolean } {
     const st = recordSamples?.[stageId];
-    if (!st) return { items: null, resolved: false, unavailable: true };
-    if (st.error) return { items: null, resolved: true, unavailable: true };
+    if (!st) return { items: null, resolved: false, unavailable: true, checkable: false };
+    if (st.error) return { items: null, resolved: true, unavailable: true, checkable: st.toolUsed !== null };
     const resolved = !st.loading && st.lastFetched !== null;
-    return { items: resolved ? st.items : null, resolved, unavailable: false };
+    return { items: resolved ? st.items : null, resolved, unavailable: false, checkable: true };
   }
 
   const stageStatus = new Map<string, NodeStatus>();
   const stageModule = new Map<string, Record<string, unknown>>();
-  const stageAutomation = new Map<string, ReturnType<typeof computeAutomation>>();
+  const stageAutomation = new Map<string, AutomationInfo>();
 
   // ── Entry / Qualification / Outcome stage nodes ──────────────────────────
-  // Coloring rule: green ("live") if the module is connected/configured in
-  // this CRM, red ("gap") if it isn't. Automation health is a separate signal
-  // shown on the dedicated Automation lane node below, not on this node.
+  // Color combines module presence + automation health + confirmed record
+  // evidence into one of the 5 spec colors — see decideStageStatus above.
   for (const stage of STAGE_DEFINITIONS) {
     if (!modulesResolved) {
-      nodes.push({ id: stage.id, lane: stage.lane, col: stage.col, label: stage.label, status: "loading", detail: "Loading module data…" });
+      nodes.push({ id: stage.id, lane: stage.lane, col: stage.col, label: stage.label, status: "loading", explanation: loadingNodeExplanation() });
       stageStatus.set(stage.id, "loading");
       continue;
     }
@@ -369,98 +542,148 @@ export function buildFlowMap(
     if (!mod) {
       nodes.push({
         id: stage.id, lane: stage.lane, col: stage.col, label: stage.label, status: "gap",
-        detail: `No ${stage.label.toLowerCase()} module is configured in this CRM — not connected.`,
+        explanation: {
+          whatIsThis: STAGE_WHAT_IS_THIS[stage.id] ?? stage.label,
+          statusSentence: statusSentence("gap"),
+          howWeKnow: [`We checked your CRM's module list and found no ${stage.label.toLowerCase()} module.`],
+          honesty: "Confirmed directly from your CRM's module list — not a sample or estimate.",
+          technical: [],
+        },
       });
       stageStatus.set(stage.id, "gap");
       continue;
     }
     stageModule.set(stage.id, mod);
     const apiName = moduleApiName(mod);
-    const status: NodeStatus = "live";
     const generatedType = String(mod.generated_type ?? "");
-    const detail = `${moduleLabel(mod) || stage.label} module is connected — API name: ${apiName || "unknown"}`
-      + (generatedType ? `, type: ${generatedType}.` : ".");
-    if (stage.wantsAutomation && workflowsResolved) {
-      stageAutomation.set(stage.id, computeAutomation(apiName, entityData.workflows.items, ruleCoverage ?? null));
-    }
-    stageStatus.set(stage.id, status);
+    const label = moduleLabel(mod) || stage.label;
 
-    const evidence: string[] = [];
+    let automation: AutomationInfo | undefined;
+    if (stage.wantsAutomation && workflowsResolved) {
+      automation = computeAutomation(apiName, entityData.workflows.items, ruleCoverage ?? null);
+      stageAutomation.set(stage.id, automation);
+    }
+
+    const howWeKnow: string[] = [];
+    let honesty = "Confirmed directly from your CRM's module list — not a sample or estimate.";
     let recordCount: number | undefined;
+
     if ((RECORD_SAMPLE_STAGE_IDS as readonly string[]).includes(stage.id)) {
       const rs = recordsOf(stage.id as RecordSampleStageId);
-      recordCount = rs.items?.length;
       if (rs.items) {
+        recordCount = rs.items.length;
+        howWeKnow.push(`We found the ${label} module active in your CRM with ${rs.items.length} record${rs.items.length !== 1 ? "s" : ""} in the sample we checked.`);
+        honesty = `Based on a sample of ${rs.items.length} records — treat this as indicative, not exhaustive.`;
         const fillRates = lookupFieldFillRates(rs.items);
         if (fillRates.length > 0) {
           const top = fillRates.slice(0, 4).map(f => `${f.field} (${f.filled}/${rs.items!.length})`);
-          evidence.push(`Lookups found in sample: ${top.join(", ")}.`);
+          howWeKnow.push(`In the sample, these lookups were filled in: ${top.join(", ")}.`);
         }
         if (stage.id === "leads") {
           const converted = rs.items.filter(r => r && typeof r === "object" && isLeadConverted(r as Record<string, unknown>)).length;
-          evidence.push(`${converted} of ${rs.items.length} sampled leads have converted.`);
+          howWeKnow.push(`${converted} of ${rs.items.length} sampled leads have converted.`);
         }
+      } else {
+        howWeKnow.push(`We found the ${label} module active in your CRM.`);
+        honesty = rs.unavailable
+          ? (rs.checkable ? CANT_CHECK_TOOL_FAILED : CANT_CHECK_TOOL_MISSING)
+          : "Still pulling a real record sample…";
       }
-      if (workflowsResolved) {
-        const names = activeWorkflowNames(apiName, entityData.workflows.items);
-        if (names.length > 0) {
-          evidence.push(`Active workflows: ${names.slice(0, 3).join(", ")}${names.length > 3 ? `, +${names.length - 3} more` : ""}.`);
+    } else {
+      howWeKnow.push(`We found the ${label} module active in your CRM.`);
+    }
+
+    if (stage.wantsAutomation) {
+      if (!workflowsResolved) {
+        howWeKnow.push("Still checking your workflows…");
+      } else if (automation) {
+        const workflowLine = `${automation.activeCount} active workflow${automation.activeCount !== 1 ? "s" : ""}${automation.inactiveCount > 0 ? `, ${automation.inactiveCount} inactive` : ""}`;
+        const ruleLine = automation.ruleCoverageUnknown
+          ? "we couldn't check automation rules (validation/approval/assignment/layout) for this module"
+          : `${automation.ruleCount} automation rule${automation.ruleCount !== 1 ? "s" : ""} (validation/approval/assignment/layout)`;
+        howWeKnow.push(`${workflowLine}, and ${ruleLine}.`);
+        if (automation.activeCount > 0) {
+          const names = activeWorkflowNames(apiName, entityData.workflows.items);
+          if (names.length > 0) howWeKnow.push(`Active: ${names.slice(0, 3).join(", ")}${names.length > 3 ? `, +${names.length - 3} more` : ""}.`);
         }
-      }
-      if (blueprintsResolved) {
-        evidence.push(...blueprintEvidence(apiName, entityData.blueprints.items, rs.items));
       }
     }
 
+    if (blueprintsResolved) {
+      const rs = (RECORD_SAMPLE_STAGE_IDS as readonly string[]).includes(stage.id) ? recordsOf(stage.id as RecordSampleStageId) : null;
+      howWeKnow.push(...blueprintEvidence(apiName, entityData.blueprints.items, rs?.items ?? null));
+    }
+
+    const status = decideStageStatus(!!stage.wantsAutomation, automation, recordCount);
+    stageStatus.set(stage.id, status);
+
     nodes.push({
-      id: stage.id, lane: stage.lane, col: stage.col, label: stage.label, status, detail,
-      recordCount, evidence: evidence.length > 0 ? evidence : undefined, targetSection: stage.targetSection,
+      id: stage.id, lane: stage.lane, col: stage.col, label: stage.label, status, recordCount,
+      explanation: {
+        whatIsThis: STAGE_WHAT_IS_THIS[stage.id] ?? stage.label,
+        statusSentence: statusSentence(status),
+        howWeKnow,
+        honesty,
+        technical: [`API name: ${apiName || "unknown"}`, generatedType ? `Module type: ${generatedType}` : ""].filter(Boolean),
+      },
+      targetSection: stage.targetSection,
     });
   }
 
   // ── Automation lane companion nodes ──────────────────────────────────────
-  // Coloring rule: green ("live") if this module has at least one active
-  // workflow OR any assignment/approval/validation/layout rule connected to
-  // it, red ("gap") otherwise — independent of the module node's own
-  // connected/not-connected color above. The tooltip always itemizes all
-  // five signal types (with a live count each) so it's clear exactly which
-  // ones are covering the module and which aren't, not just a combined total.
+  // One per lead-to-deal lifecycle stage (Leads/Campaigns/Contacts/Deals),
+  // showing automation health specifically — independent of the stage node's
+  // own color above, which also factors in record evidence.
   const automationStages = STAGE_DEFINITIONS.filter(s => s.wantsAutomation);
   automationStages.forEach((stage, i) => {
     const moduleStatus = stageStatus.get(stage.id) ?? "loading";
     const mod = stageModule.get(stage.id);
     let status: NodeStatus = "loading";
-    let detail = "Waiting on module data…";
+    let howWeKnow: string[] = [];
+    let honesty = "";
+    let technical: string[] = [];
+
     if (moduleStatus === "gap") {
       status = "gap";
-      detail = "No module to automate — module isn't connected.";
+      howWeKnow = ["There's no module here to automate — it isn't connected in your CRM."];
+      honesty = "Confirmed directly from your CRM's module list.";
     } else if (mod && workflowsResolved) {
-      const auto = stageAutomation.get(stage.id) ?? computeAutomation(moduleApiName(mod), entityData.workflows.items, ruleCoverage ?? null);
-      // Only an active workflow or an actual rule counts as "live" — a module
-      // whose only workflows are inactive, and has no rule coverage either,
-      // still reads as a gap (matches the original workflow-only behavior;
-      // "configured-issues" is folded into the same red state here since this
-      // node's color is a strict has-automation/doesn't binary).
-      status = auto.status === "live" ? "live" : "gap";
+      const apiName = moduleApiName(mod);
+      const auto = stageAutomation.get(stage.id) ?? computeAutomation(apiName, entityData.workflows.items, ruleCoverage ?? null);
+      status = auto.status === "gap" ? "gap" : auto.status === "configured-issues" ? "configured-issues" : (auto.confirmedExecuted ? "live" : "configured-untested");
       const label = moduleLabel(mod) || stage.label;
-      const workflowLine = `Workflows: ${auto.activeCount} active${auto.inactiveCount > 0 ? `, ${auto.inactiveCount} inactive` : ""}`;
-      const breakdown = [
-        workflowLine,
-        `Approval Process: ${auto.rules.approval}`,
-        `Validation Rules: ${auto.rules.validation}`,
-        `Layout Rules: ${auto.rules.layout}`,
-        `Assignment Rules: ${auto.rules.assignment}`,
-      ].join(" · ");
-      const verdict = status === "live"
-        ? `${label} is automated — at least one of these is active.`
-        : `${label} has no active workflow and no rule of any kind — automation isn't connected. Add any one (workflow, approval process, validation rule, layout rule, or assignment rule) to turn this green.`;
-      detail = `${breakdown}. ${verdict}`;
+      howWeKnow = [
+        `Workflows: ${auto.activeCount} active${auto.inactiveCount > 0 ? `, ${auto.inactiveCount} inactive` : ""}.`,
+        auto.ruleCoverageUnknown
+          ? "We couldn't check validation, approval, assignment, or layout rules for this module."
+          : `Rules: ${auto.rules.approval} approval, ${auto.rules.validation} validation, ${auto.rules.layout} layout, ${auto.rules.assignment} assignment.`,
+      ];
+      if (status === "gap") howWeKnow.push(`${label} has no active workflow and no rule of any kind — add any one to turn this green.`);
+      honesty = auto.ruleCoverageUnknown
+        ? "Workflow counts are confirmed; rule counts couldn't be checked on this CRM connection."
+        : "Confirmed directly from your CRM's workflow and rule configuration — not a sample.";
+      technical = [`API name: ${apiName || "unknown"}`];
+    } else if (!workflowsResolved) {
+      howWeKnow = ["Still checking your workflows…"];
     }
+
     nodes.push({
-      id: `${stage.id}-automation`, lane: "automation", col: i, label: `${stage.label} Automation`,
-      status, detail, targetSection: "workflows",
+      id: `${stage.id}-automation`, lane: "automation", col: i, label: `${stage.label} Automation`, status,
+      explanation: {
+        whatIsThis: AUTOMATION_NODE_WHAT_IS_THIS,
+        statusSentence: statusSentence(status),
+        howWeKnow, honesty, technical,
+      },
+      targetSection: "workflows",
     });
-    edges.push({ id: `${stage.id}-to-automation`, from: stage.id, to: `${stage.id}-automation`, kind: edgeKindForStatus(status) });
+    edges.push({
+      id: `${stage.id}-to-automation`, from: stage.id, to: `${stage.id}-automation`, kind: edgeKindForStatus(status),
+      explanation: {
+        whatIsThis: `Whether ${stage.label} actually feeds its own automation layer.`,
+        statusSentence: edgeStatusSentence(edgeKindForStatus(status)),
+        howWeKnow, honesty, technical: [],
+      },
+    });
   });
 
   // ── Blueprint sub-node on the Deals stage ────────────────────────────────
@@ -468,9 +691,7 @@ export function buildFlowMap(
   // configured for Leads/Tickets/etc. doesn't say anything about deals), and
   // split by Active vs Inactive/Draft — only Active blueprints are enforced by
   // Zoho, so a pile of inactive/draft blueprints must not read as "live".
-  if (!blueprintsResolved) {
-    // no placeholder node — spec treats this as an enhancement, not a required lane member
-  } else {
+  if (blueprintsResolved) {
     const dealsModule = stageModule.get("deals");
     const dealsApiName = dealsModule ? moduleApiName(dealsModule) : "";
     const dealsBlueprints = dealsApiName ? blueprintsForModule(entityData.blueprints.items, dealsApiName) : [];
@@ -483,54 +704,101 @@ export function buildFlowMap(
     });
     if (dealsBlueprints.length > 0) {
       const status: NodeStatus = activeBlueprints.length > 0 ? "live" : "gap";
-      const detail = activeBlueprints.length > 0
-        ? `${activeBlueprints.length} of ${dealsBlueprints.length} blueprint process${dealsBlueprints.length !== 1 ? "es" : ""} for Deals ${activeBlueprints.length !== 1 ? "are" : "is"} active and enforcing how deals move forward.`
-        : `${dealsBlueprints.length} blueprint process${dealsBlueprints.length !== 1 ? "es" : ""} configured for Deals, but none are active — nothing is currently enforced.`;
+      const howWeKnow = activeBlueprints.length > 0
+        ? [`${activeBlueprints.length} of ${dealsBlueprints.length} blueprint process${dealsBlueprints.length !== 1 ? "es" : ""} for Deals ${activeBlueprints.length !== 1 ? "are" : "is"} active and enforcing how deals move forward.`]
+        : [`${dealsBlueprints.length} blueprint process${dealsBlueprints.length !== 1 ? "es" : ""} configured for Deals, but none are active — nothing is currently enforced.`];
       nodes.push({
         id: "deals-blueprint", lane: "qualification", col: 2,
         label: `Blueprint${dealsBlueprints.length > 1 ? "s" : ""}`,
         status,
-        detail,
+        explanation: {
+          whatIsThis: BLUEPRINT_WHAT_IS_THIS,
+          statusSentence: statusSentence(status),
+          howWeKnow,
+          honesty: "Confirmed directly from your CRM's blueprint configuration — not a sample.",
+          technical: [],
+        },
         targetSection: "blueprints",
       });
-      edges.push({ id: "deals-to-blueprint", from: "deals", to: "deals-blueprint", kind: status === "live" ? "automated" : "broken" });
+      edges.push({
+        id: "deals-to-blueprint", from: "deals", to: "deals-blueprint", kind: status === "live" ? "automated" : "broken",
+        explanation: {
+          whatIsThis: "Whether a Blueprint actually governs deals as they move forward.",
+          statusSentence: edgeStatusSentence(status === "live" ? "automated" : "broken"),
+          howWeKnow,
+          consequence: status === "live" ? undefined : "Deals can move forward without following your intended process — reps can skip required steps.",
+          honesty: "Confirmed directly from your CRM's blueprint configuration.",
+          technical: [],
+        },
+      });
     }
   }
 
   // ── Pipeline stages, rendered as a pill chain inside Qualification ───────
   // Sourced from the real getLayouts → getPipelines chain (see usePipelineStages.ts)
   // instead of the generic "stages" entity — this MCP server has no dedicated
-  // stages-listing tool, so that entity never resolves to real data.
-  // Coloring rule: green ("live") pills once real pipeline data is connected,
-  // a single red ("gap") node if the connection failed or returned nothing.
+  // stages-listing tool.
   if (pipelineStages && pipelineStages.lastFetched !== null && pipelineStages.items.length > 0) {
     const baseCol = 3;
     pipelineStages.items.forEach((stage, i) => {
       const id = `stage-${i}`;
-      const detail = stage.forecastType
-        ? `Pipeline stage: ${stage.name} (${stage.forecastType}).`
-        : `Pipeline stage: ${stage.name}.`;
+      const howWeKnow = stage.forecastType
+        ? [`This is a real pipeline stage from your Deals layout, forecast type "${stage.forecastType}".`]
+        : ["This is a real pipeline stage from your Deals layout."];
       nodes.push({
         id, lane: "qualification", col: baseCol + i, label: stage.name, status: "live",
-        detail, targetSection: "modules",
+        explanation: {
+          whatIsThis: PIPELINE_STAGE_WHAT_IS_THIS,
+          statusSentence: statusSentence("live"),
+          howWeKnow,
+          honesty: "Confirmed directly from your CRM's deal layout — not a sample.",
+          technical: [`API name: ${stage.apiName}`],
+        },
+        targetSection: "modules",
       });
       const prevId = i === 0 ? "deals" : `stage-${i - 1}`;
-      edges.push({ id: `${prevId}-to-${id}`, from: prevId, to: id, kind: "automated" });
+      edges.push({
+        id: `${prevId}-to-${id}`, from: prevId, to: id, kind: "automated",
+        explanation: {
+          whatIsThis: "Deals should progress through your pipeline stages in order.",
+          statusSentence: edgeStatusSentence("automated"),
+          howWeKnow,
+          honesty: "Confirmed directly from your CRM's deal layout.",
+          technical: [],
+        },
+      });
     });
   } else if (pipelineStages && pipelineStages.loading) {
     nodes.push({
       id: "stage-loading", lane: "qualification", col: 3, label: "Pipeline stages", status: "loading",
-      detail: "Loading pipeline stages from getLayouts / getPipelines…",
+      explanation: loadingNodeExplanation(),
     });
   } else if (pipelineStages && (pipelineStages.error || pipelineStages.lastFetched !== null)) {
+    const howWeKnow = pipelineStages.error
+      ? [`We tried to read your pipeline stages and it failed: ${pipelineStages.error}`]
+      : ["We checked your Deals layout and found no pipeline stages defined."];
     nodes.push({
       id: "stage-gap", lane: "qualification", col: 3, label: "Pipeline stages", status: "gap",
-      detail: pipelineStages.error
-        ? `Pipeline stages aren't connected: ${pipelineStages.error}`
-        : "No pipeline stages were found for this layout — not connected.",
+      explanation: {
+        whatIsThis: "Pipeline stages are the steps a deal moves through on its way to being won or lost.",
+        statusSentence: statusSentence("gap"),
+        howWeKnow,
+        honesty: "Confirmed directly from your CRM's deal layout — not a sample.",
+        technical: [],
+      },
       targetSection: "modules",
     });
-    edges.push({ id: "deals-to-stage-gap", from: "deals", to: "stage-gap", kind: "broken" });
+    edges.push({
+      id: "deals-to-stage-gap", from: "deals", to: "stage-gap", kind: "broken",
+      explanation: {
+        whatIsThis: "Deals should move through defined pipeline stages.",
+        statusSentence: edgeStatusSentence("broken"),
+        howWeKnow,
+        consequence: "Without pipeline stages, there's no structured way to track where a deal actually is — forecasting is guesswork.",
+        honesty: "Confirmed directly from your CRM's deal layout.",
+        technical: [],
+      },
+    });
   }
 
   // ── Journey edges (entry → qualification → outcome) ──────────────────────
@@ -542,7 +810,7 @@ export function buildFlowMap(
 
     if (j.from === "leads" && j.to === "contacts") {
       const leads = recordsOf("leads");
-      if (!leads.unavailable) evidence = evaluateLeadConversion(leads.items, leads.resolved);
+      evidence = evaluateLeadConversion(leads.items, leads.resolved, leads.checkable);
     } else if (
       (j.from === "contacts" && j.to === "deals") ||
       (j.from === "deals" && j.to === "accounts") ||
@@ -550,13 +818,25 @@ export function buildFlowMap(
     ) {
       const from = recordsOf(j.from as RecordSampleStageId);
       const to = recordsOf(j.to as RecordSampleStageId);
-      if (!from.unavailable && !to.unavailable) {
-        evidence = evaluateRecordLink(from.items, to.items, j.from, j.to, from.resolved && to.resolved);
-      }
+      evidence = evaluateRecordLink(from.items, to.items, j.from, j.to, from.resolved && to.resolved, from.checkable && to.checkable);
     }
 
-    if (!evidence) evidence = { kind: edgeKindForStatus(sourceStatus) };
-    edges.push({ id: `${j.from}-to-${j.to}`, from: j.from, to: j.to, kind: evidence.kind, detail: evidence.detail });
+    if (!evidence) {
+      const kind = edgeKindForStatus(sourceStatus);
+      evidence = { kind, howWeKnow: [], honesty: "" };
+    }
+    const key = `${j.from}-${j.to}`;
+    edges.push({
+      id: key, from: j.from, to: j.to, kind: evidence.kind,
+      explanation: {
+        whatIsThis: JOURNEY_EDGE_WHAT_IS_THIS[key] ?? `${j.from} should lead to ${j.to}.`,
+        statusSentence: edgeStatusSentence(evidence.kind),
+        howWeKnow: evidence.howWeKnow,
+        consequence: evidence.consequence,
+        honesty: evidence.honesty,
+        technical: [],
+      },
+    });
   }
 
   return { nodes, edges };
@@ -595,8 +875,8 @@ export function buildFlowReport(flowMap: FlowMapModel): FlowReport {
       id: stage.id,
       label: stage.label,
       status: node?.status ?? "loading",
-      detail: node?.detail ?? "Loading…",
-      automation: automationNode ? { status: automationNode.status, detail: automationNode.detail } : undefined,
+      detail: node?.explanation.statusSentence ?? "Loading…",
+      automation: automationNode ? { status: automationNode.status, detail: automationNode.explanation.statusSentence } : undefined,
     };
   });
 
@@ -614,7 +894,7 @@ export function buildFlowReport(flowMap: FlowMapModel): FlowReport {
     const fallback = gapNode ?? loadingNode;
     pipeline = {
       status: fallback?.status ?? "loading",
-      detail: fallback?.detail ?? "Pipeline stages not yet available.",
+      detail: fallback?.explanation.statusSentence ?? "Pipeline stages not yet available.",
       stageNames: [],
     };
   }

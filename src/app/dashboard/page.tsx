@@ -22,6 +22,8 @@ import { useCrmEntities, CRM_ENTITIES, isEntityResolved } from "@/lib/useCrmEnti
 import { useCrmRecordSamples } from "@/lib/useCrmRecordSamples";
 import { usePipelineStages } from "@/lib/usePipelineStages";
 import { useRuleCoverage } from "@/lib/useRuleCoverage";
+import { useModuleRecordCounts } from "@/lib/useModuleRecordCounts";
+import { useOrgCurrency } from "@/lib/useOrgCurrency";
 import { findDealsApiName } from "@/lib/flowMapModel";
 
 export default function DashboardPage() {
@@ -45,12 +47,16 @@ export default function DashboardPage() {
   const dealsApiName = findDealsApiName(crm.entityData);
   const pipelineStages = usePipelineStages(config, tools, dealsApiName, onLog);
   const ruleCoverage = useRuleCoverage(config, tools, crm.entityData, onLog);
+  const moduleRecordCounts = useModuleRecordCounts(config, tools, crm.entityData, onLog);
+  const orgCurrency = useOrgCurrency(config, tools, onLog);
 
   function fetchAllData() {
     crm.fetchAll();
     crmRecords.refetch();
     pipelineStages.refetch();
     ruleCoverage.refetch();
+    moduleRecordCounts.refetch();
+    orgCurrency.refetch();
   }
 
   const resolvedEntityCount = CRM_ENTITIES.filter(e => isEntityResolved(crm.entityData[e.type])).length;
@@ -182,6 +188,8 @@ export default function DashboardPage() {
             recordSamples={crmRecords.data}
             pipelineStages={pipelineStages.data}
             ruleCoverage={ruleCoverage.data}
+            moduleRecordCounts={moduleRecordCounts.data}
+            currencySymbol={orgCurrency.symbol}
             fetchAll={fetchAllData}
             onSelectSection={onSelectSection}
           />

@@ -135,5 +135,94 @@ export function computeHealthScore(
   return { total, dimensions, zone, verdict, color };
 }
 
+function withEntity(
+  entityData: Record<CrmEntityType, EntityState>,
+  type: CrmEntityType,
+  items: unknown[],
+): Record<CrmEntityType, EntityState> {
+  return { ...entityData, [type]: { ...entityData[type], items } };
+}
+
+// "Top Priority Actions"' projected score-effect line ("fixing this moves
+// your score from 62 to ~69") — built by re-running the REAL scoring formulas
+// above against a hypothetical "this finding fixed" copy of entityData,
+// rather than a hand-guessed number, so it stays traceable to the same logic
+// that produced the current score. Only implemented for findings whose
+// underlying dimension formula is a clean, invertible flat penalty; returns
+// null for findings with no clean simulation (e.g. record-quality findings
+// like stale deals or duplicate emails — businessScore.ts doesn't score
+// record-level data quality at all, so there's nothing honest to project).
+export function estimateScoreGain(
+  findingId: string,
+  entityData: Record<CrmEntityType, EntityState>,
+  pipelineStageCount: number,
+  ruleCoverage: RuleCoverage | null,
+): number | null {
+  const before = computeHealthScore(entityData, pipelineStageCount, ruleCoverage).total;
+  let mutated: Record<CrmEntityType, EntityState>;
+  let mutatedPipelineStageCount = pipelineStageCount;
+
+  switch (findingId) {
+    case "no-email-workflow": {
+      const coreNames = automationCoverageApiNames(entityData.modules.items);
+      if (coreNames.length === 0) return null;
+      const projectedWorkflow = { status: { active: true }, module: coreNames[0], description: "email follow-up (projected)" };
+      mutated = withEntity(entityData, "workflows", [...entityData.workflows.items, projectedWorkflow]);
+      break;
+    }
+    case "inactive-users": {
+      mutated = withEntity(entityData, "users", entityData.users.items.filter(u => !isInactiveUser(u)));
+      break;
+    }
+    case "excessive-mandatory-fields": {
+      let mandatorySeen = 0;
+      const projectedFields = entityData.fields.items.map(f => {
+        if (!isMandatoryField(f)) return f;
+        mandatorySeen++;
+        if (mandatorySeen <= 20) return f;
+        return { ...(f as Record<string, unknown>), required: false, mandatory: false, system_mandatory: false };
+      });
+      mutated = withEntity(entityData, "fields", projectedFields);
+      break;
+    }
+    case "no-pipeline": {
+      mutated = withEntity(entityData, "pipelines", [{ id: "projected", default: true }]);
+      mutatedPipelineStageCount = Math.max(pipelineStageCount, 1);
+      break;
+    }
+    case "workflows-inactive": {
+      const wfs = entityData.workflows.items;
+      if (wfs.length === 0) return null;
+      const inactiveIdx = wfs.map((w, i) => ({ w, i })).filter(x => !isActiveWorkflow(x.w));
+      const targetInactive = Math.floor(wfs.length * 0.3);
+      const numToFlip = Math.max(0, inactiveIdx.length - targetInactive);
+      const flipSet = new Set(inactiveIdx.slice(0, numToFlip).map(x => x.i));
+      const projectedWorkflows = wfs.map((w, i) =>
+        flipSet.has(i) ? { ...(w as Record<string, unknown>), status: { active: true }, active: true, enabled: true } : w
+      );
+      mutated = withEntity(entityData, "workflows", projectedWorkflows);
+      break;
+    }
+    case "no-blueprint": {
+      mutated = withEntity(entityData, "blueprints", [{ id: "projected", status: "Active" }]);
+      break;
+    }
+    case "access-risk": {
+      const profiles = entityData.profiles.items;
+      const isUniform = profiles.length === 1 || profiles.every(isAdminProfile);
+      const projectedProfiles = isUniform
+        ? [...profiles, { name: "Standard", id: "projected-1" }, { name: "Sales Rep", id: "projected-2" }]
+        : [...profiles.filter(p => !isAdminProfile(p)), ...profiles.filter(isAdminProfile).slice(0, 2)];
+      mutated = withEntity(entityData, "profiles", projectedProfiles);
+      break;
+    }
+    default:
+      return null;
+  }
+
+  const after = computeHealthScore(mutated, mutatedPipelineStageCount, ruleCoverage).total;
+  return Math.max(0, Math.round(after) - Math.round(before));
+}
+
 // Entities that must be resolved before the score reflects real data.
 export const HEALTH_SCORE_ENTITIES: CrmEntityType[] = ["workflows", "blueprints", "pipelines", "stages", "profiles", "users", "fields", "modules"];

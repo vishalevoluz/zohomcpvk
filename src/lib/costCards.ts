@@ -1,139 +1,10 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isEntityResolved } from "@/lib/useCrmEntities";
-import { hasEmailAction, isAdminProfile, isInactiveUser, isMandatoryField } from "@/lib/crmPredicates";
-import type { PipelineStagesState } from "@/lib/flowMapModel";
+import type { PipelineStagesState, RecordSampleStageId, RecordSampleState } from "@/lib/flowMapModel";
+import type { RuleCoverage } from "@/lib/crmPredicates";
+import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
+import { evaluateFindings, type Finding } from "@/lib/businessFindings";
 
 export type CostCardSeverity = "CRITICAL" | "WARNING" | "REVIEW";
-
-export interface CostCardRule {
-  id: string;
-  icon: string;
-  headline: string;
-  // A function lets a card surface the real numbers behind the finding (e.g.
-  // "12 of 20 licensed users are active") instead of only a generic statement.
-  body: string | ((entityData: Record<CrmEntityType, EntityState>, pipelineStages: PipelineStagesState) => string);
-  severity: CostCardSeverity;
-  requires: CrmEntityType[];
-  // Zoho has no generic "list all pipelines/stages" API — a real pipeline's
-  // stages live on a module's active layout (see usePipelineStages.ts, which
-  // walks getLayouts -> getPipelines for Deals specifically). A rule that
-  // needs that real data sets this instead of/alongside `requires`, so it
-  // waits on that hook's own resolved state rather than the generic
-  // `pipelines`/`stages` entities, which never resolve on this MCP server.
-  requiresPipelineStages?: boolean;
-  test: (entityData: Record<CrmEntityType, EntityState>, pipelineStages: PipelineStagesState) => boolean;
-}
-
-// Severity isn't specified per-condition in the source spec (only the three badge
-// values and "prioritize CRITICAL first" are defined) — assigned here by business
-// urgency: direct revenue/compliance risk = CRITICAL, structural gaps = WARNING,
-// low-urgency cleanup = REVIEW.
-export const COST_CARD_RULES: CostCardRule[] = [
-  {
-    id: "no-email-automation",
-    icon: "✉",
-    headline: "Leads Are Being Followed Up Manually",
-    body: "Your team is chasing every prospect by hand. You are losing deals to faster competitors.",
-    severity: "CRITICAL",
-    requires: ["workflows"],
-    test: e => !e.workflows.items.some(hasEmailAction),
-  },
-  {
-    id: "unused-seats",
-    icon: "◎",
-    headline: "You Are Paying for Unused Seats",
-    // Surfaces the actual purchased-vs-used numbers instead of a generic
-    // statement, so this reads as a concrete cost finding, not a vague warning.
-    body: e => {
-      const total = e.users.items.length;
-      const inactive = e.users.items.filter(isInactiveUser).length;
-      const active = total - inactive;
-      return `You have ${total} licensed user${total !== 1 ? "s" : ""}, but only ${active} ${active === 1 ? "is" : "are"} active. ${inactive} inactive license${inactive !== 1 ? "s" : ""} may still be billed monthly — free them up or reassign to someone actually using the CRM.`;
-    },
-    severity: "WARNING",
-    requires: ["users"],
-    test: e => e.users.items.some(isInactiveUser),
-  },
-  {
-    id: "sales-team-avoiding-crm",
-    icon: "▤",
-    headline: "Your Sales Team Is Avoiding the CRM",
-    body: "You're asking reps to fill in too much before they can save anything. So they skip it, or type in junk just to move on — and that's what's quietly wrecking your reports.",
-    severity: "WARNING",
-    requires: ["fields"],
-    test: e => e.fields.items.filter(isMandatoryField).length > 20,
-  },
-  {
-    id: "cannot-forecast-revenue",
-    icon: "⇥",
-    headline: "You Cannot Forecast Your Revenue",
-    body: "Without a structured pipeline, your sales forecast is a guess. Investors and management cannot rely on it.",
-    severity: "CRITICAL",
-    requires: [],
-    requiresPipelineStages: true,
-    // Checks the Deals module's real pipeline stages (see PipelineStagesState
-    // above) instead of the generic `pipelines`/`stages` entities — those
-    // never resolve to anything real on Zoho, which used to fire this
-    // CRITICAL even for orgs with a normal default pipeline configured.
-    test: (_e, pipelineStages) => pipelineStages.items.length === 0,
-  },
-  {
-    id: "automation-partly-broken",
-    icon: "⟳",
-    headline: "Your Automation Is Partly Broken",
-    body: "Some of your automation has stopped running silently. Leads and tasks may be falling through the gaps.",
-    severity: "WARNING",
-    requires: ["workflows"],
-    test: e => {
-      const total = e.workflows.items.length;
-      if (total === 0) return false;
-      const inactive = e.workflows.items.filter(w => {
-        const r = w as Record<string, unknown>;
-        return r.status === "Inactive" || r.active === false || r.enabled === false;
-      }).length;
-      return inactive / total > 0.3;
-    },
-  },
-  {
-    id: "process-unenforceable",
-    icon: "◈",
-    headline: "Your Sales Process Is Unenforceable",
-    body: "There is nothing preventing reps from skipping stages or closing deals without required approvals.",
-    severity: "WARNING",
-    requires: ["blueprints"],
-    test: e => e.blueprints.items.length === 0,
-  },
-  {
-    id: "everyone-has-admin-access",
-    icon: "◑",
-    headline: "Everyone Has Admin-Level Access",
-    body: "All users can edit, delete, and export any record. This is a data security and compliance risk.",
-    severity: "CRITICAL",
-    requires: ["profiles"],
-    test: e => e.profiles.items.length > 0 && (e.profiles.items.length === 1 || e.profiles.items.every(isAdminProfile)),
-  },
-  {
-    id: "unused-complexity",
-    icon: "⊞",
-    headline: "You Are Running Unused Complexity",
-    body: "Several parts of your CRM are set up but nobody's actually using them. That just adds clutter and slows your team down — turn them off for now rather than deleting them, so you can switch them back on later if you ever need to.",
-    severity: "REVIEW",
-    requires: ["modules", "workflows", "blueprints"],
-    test: e => {
-      const wfs = e.workflows.items;
-      const bps = e.blueprints.items;
-      const unused = e.modules.items.filter(m => {
-        const r = m as Record<string, unknown>;
-        const apiName = String(r.api_name ?? r.module_name ?? "");
-        if (!apiName) return false;
-        const referenced = wfs.some(w => JSON.stringify(w).toLowerCase().includes(apiName.toLowerCase()));
-        const hasBlueprint = bps.some(b => JSON.stringify(b).toLowerCase().includes(apiName.toLowerCase()));
-        return !referenced && !hasBlueprint;
-      });
-      return unused.length > 3;
-    },
-  },
-];
 
 export interface CostCardResult {
   id: string;
@@ -141,6 +12,80 @@ export interface CostCardResult {
   headline: string;
   body: string;
   severity: CostCardSeverity;
+  offenders: string[];
+  stakeLabel?: string;
+  sampleSize?: number;
+  honesty: string;
+}
+
+// Business-consequence framing for each finding in businessFindings.ts — the
+// diagnosis/"what this is costing you" presentation. The same finding also
+// feeds priorityActions.ts's actionable-fix framing, sharing the `id` so a
+// card and its matching action can never drift apart (see "Fix this ↓" in
+// BusinessView.tsx, which cross-links purely on this shared id).
+const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Finding) => string }> = {
+  "no-email-workflow": {
+    icon: "✉", headline: "Leads Are Being Followed Up Manually",
+    body: () => "Your team is chasing every prospect by hand. You are losing deals to faster competitors.",
+  },
+  "inactive-users": {
+    icon: "◎", headline: "You Are Paying for Unused Seats",
+    body: f => `${f.count} inactive license${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} may still be billed monthly — free them up or reassign them.`,
+  },
+  "excessive-mandatory-fields": {
+    icon: "▤", headline: "Your Sales Team Is Avoiding the CRM",
+    body: f => `${f.count} mandatory fields${f.offenders.length ? ` — concentrated in ${f.offenders.join(", ")}` : ""} push reps to skip records or enter junk data just to save.`,
+  },
+  "no-pipeline": {
+    icon: "⇥", headline: "You Cannot Forecast Your Revenue",
+    body: () => "Without a structured pipeline, your sales forecast is a guess. Investors and management cannot rely on it.",
+  },
+  "workflows-inactive": {
+    icon: "⟳", headline: "Your Automation Is Partly Broken",
+    body: f => `${f.note ?? f.count} workflows have silently stopped running${f.offenders.length ? `, including ${f.offenders.slice(0, 3).join(", ")}` : ""} — leads and tasks may be falling through the gaps.`,
+  },
+  "no-blueprint": {
+    icon: "◈", headline: "Your Sales Process Is Unenforceable",
+    body: () => "There is nothing preventing reps from skipping stages or closing deals without required approvals.",
+  },
+  "access-risk": {
+    icon: "◑",
+    headline: "Everyone Has Admin-Level Access",
+    body: f => f.note === "too-many-admins"
+      ? `${f.count} profiles${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} carry full admin access — more people than necessary can edit, export, or delete any record.`
+      : "All users share identical, admin-level access. This is a data security and compliance risk.",
+  },
+  "empty-modules": {
+    icon: "⊞", headline: "You Are Running Unused Complexity",
+    body: f => `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} sit empty with zero automation — clutter that slows your team down without adding value.`,
+  },
+  "stale-deals": {
+    icon: "⌛", headline: "Deals Are Going Cold in Your Pipeline",
+    body: f => `${f.stakeLabel ?? `${f.count} open deal${f.count !== 1 ? "s" : ""}`} haven't been touched in over 30 days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} — likely to rot unless followed up.`,
+  },
+  "unforecastable-deals": {
+    icon: "❔", headline: "Deals Are Missing Key Forecast Data",
+    body: f => `${f.count} open deal${f.count !== 1 ? "s" : ""} are missing an amount or close date${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} — you can't forecast what you can't measure.`,
+  },
+  "stale-user-logins": {
+    icon: "⏱", headline: "Active Seats Nobody Is Using",
+    body: f => `${f.stakeLabel ?? `${f.count} user${f.count !== 1 ? "s" : ""}`} marked active haven't logged in for 90+ days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} — a paid seat with zero use.`,
+  },
+  "duplicate-emails": {
+    icon: "⧉", headline: "Duplicate Records Are Splitting Your Data",
+    body: f => `${f.count} lead/contact records share an email with another record${f.offenders.length ? `, e.g. ${f.offenders.slice(0, 3).join(", ")}` : ""} — inflating counts and splitting customer history.`,
+  },
+  "no-lead-source": {
+    icon: "◫", headline: "You Don't Know What's Working",
+    body: f => `${f.count} leads have no source tagged — you can't tell which marketing actually brings in business.`,
+  },
+};
+
+export interface CostCardsResult {
+  shown: CostCardResult[];
+  loadingIds: string[];
+  overflowCount: number;
+  allTriggered: CostCardResult[];
 }
 
 const SEVERITY_ORDER: Record<CostCardSeverity, number> = { CRITICAL: 0, WARNING: 1, REVIEW: 2 };
@@ -148,23 +93,24 @@ const SEVERITY_ORDER: Record<CostCardSeverity, number> = { CRITICAL: 0, WARNING:
 export function evaluateCostCards(
   entityData: Record<CrmEntityType, EntityState>,
   pipelineStages: PipelineStagesState,
-): { shown: CostCardResult[]; loadingIds: string[]; overflowCount: number; allTriggered: CostCardResult[] } {
-  const loadingIds: string[] = [];
-  const triggered: CostCardResult[] = [];
-  const pipelineStagesResolved = !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null);
+  recordSamples: Partial<Record<RecordSampleStageId, RecordSampleState>> = {},
+  ruleCoverage: RuleCoverage | null = null,
+  moduleRecordCounts: ModuleRecordCountsState = { counts: {}, toolAvailable: false, resolved: false },
+  currencySymbol: string | null = null,
+): CostCardsResult {
+  const { findings, loadingIds } = evaluateFindings({
+    entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol,
+  });
 
-  for (const rule of COST_CARD_RULES) {
-    const entitiesResolved = rule.requires.every(t => isEntityResolved(entityData[t]));
-    const resolved = entitiesResolved && (!rule.requiresPipelineStages || pipelineStagesResolved);
-    if (!resolved) {
-      loadingIds.push(rule.id);
-      continue;
-    }
-    if (rule.test(entityData, pipelineStages)) {
-      const body = typeof rule.body === "function" ? rule.body(entityData, pipelineStages) : rule.body;
-      triggered.push({ id: rule.id, icon: rule.icon, headline: rule.headline, body, severity: rule.severity });
-    }
-  }
+  const triggered: CostCardResult[] = findings
+    .filter(f => CARD_COPY[f.id])
+    .map(f => {
+      const copy = CARD_COPY[f.id];
+      return {
+        id: f.id, icon: copy.icon, headline: copy.headline, body: copy.body(f), severity: f.severity,
+        offenders: f.offenders, stakeLabel: f.stakeLabel, sampleSize: f.sampleSize, honesty: f.honesty,
+      };
+    });
 
   triggered.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
   const shown = triggered.slice(0, 5);

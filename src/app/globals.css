@@ -36,7 +36,9 @@
   --bv-warning: #fb923c;
   --bv-at-risk: #fb923c;
   --bv-critical: #f87171;
-  --bv-configured: #34d399;
+  /* "Configured but not tested" — distinct blue so it never reads as the
+     same "healthy" green; matches the spec's exact #2563EB. */
+  --bv-untested: #2563eb;
   --bv-empty: #5c6675;
   --bv-yellow: #fbbf24;
 
@@ -4156,7 +4158,13 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .flow-map-toolbar-left { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .flow-map-toolbar-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
-.flow-legend { display: flex; align-items: center; gap: 12px; }
+.flow-map-caption { font-size: 13px; color: var(--color-text-secondary); margin: 6px 0 0; max-width: 68ch; }
+/* Two separate keys, deliberately on their own rows — a line's meaning
+   (style) and a box's meaning (color) are unrelated signals and must never
+   be read together as one, so they don't share a row or a swatch shape. */
+.flow-legend-row { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; }
+.flow-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.flow-legend-heading { font-size: 11px; font-weight: 700; color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; }
 .flow-legend-item {
   display: inline-flex;
   align-items: center;
@@ -4168,7 +4176,14 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .flow-legend-swatch { display: inline-block; width: 16px; height: 0; border-top: 2px solid; }
 .flow-legend-swatch.flow-legend-solid { border-top-style: solid; border-top-color: var(--bv-healthy); }
 .flow-legend-swatch.flow-legend-dashed { border-top-style: dashed; border-top-color: var(--color-text-tertiary); }
+.flow-legend-swatch.flow-legend-dotted { border-top-style: dotted; border-top-width: 2.5px; border-top-color: var(--color-text-tertiary); }
 .flow-legend-cross { color: var(--bv-critical); font-weight: 700; font-size: 12px; }
+.flow-legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.flow-legend-dot.status-live { background: var(--bv-healthy); }
+.flow-legend-dot.status-configured-untested { background: var(--bv-untested); }
+.flow-legend-dot.status-configured-issues { background: var(--bv-warning); }
+.flow-legend-dot.status-gap { background: var(--bv-critical); }
+.flow-legend-dot.status-empty { background: var(--bv-empty); }
 .flow-map-expand-btn {
   background: none;
   border: 0.5px solid var(--color-border);
@@ -4212,21 +4227,23 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   color: var(--color-text-tertiary);
 }
 .flow-map-edges { position: absolute; top: 0; left: 0; pointer-events: none; }
-.flow-map-edges path { fill: none; stroke-width: 2; transition: stroke-width 0.12s; }
-.flow-edge-automated path { stroke: var(--bv-healthy); stroke-dasharray: 5 4; animation: flow-edge-move 0.8s linear infinite; }
+.flow-map-edges path { fill: none; stroke-width: 2; stroke-linejoin: round; transition: stroke-width 0.12s; }
+/* Line STYLE carries one meaning only (solid/dashed/dotted) — color is the
+   node's signal, not the line's, so don't read anything into these hues
+   beyond "this matches the legend swatch". Solid = automated per spec 4.2.1;
+   previously this was dashed like every other kind, which silently broke
+   the "solid = automated" promise the legend itself makes. */
+.flow-edge-automated path { stroke: var(--bv-healthy); }
 .flow-edge-manual path { stroke: var(--color-text-tertiary); stroke-dasharray: 6 4; }
 .flow-edge-broken path { stroke: var(--bv-critical); stroke-dasharray: 4 4; }
+.flow-edge-unknown path { stroke: var(--color-text-tertiary); stroke-dasharray: 1 5; opacity: 0.8; }
 .flow-edge-loading path { stroke: var(--color-border-strong); stroke-dasharray: 2 4; }
 .flow-edge-break-mark { fill: var(--bv-critical); font-size: 13px; font-weight: 700; }
+.flow-edge-unknown-mark { fill: var(--color-text-tertiary); font-size: 12px; font-weight: 700; }
 .flow-edge-automated.selected path,
 .flow-edge-manual.selected path,
-.flow-edge-broken.selected path { stroke-width: 3.5; }
-
-/* Moving dashes along automated edges — reads as "leads are actively flowing" */
-@keyframes flow-edge-move { to { stroke-dashoffset: -18; } }
-@media (prefers-reduced-motion: reduce) {
-  .flow-edge-automated path { animation: none; }
-}
+.flow-edge-broken.selected path,
+.flow-edge-unknown.selected path { stroke-width: 3.5; }
 
 /* Real, always-visible clickable badge over each edge midpoint (was an
    invisible hover-only tooltip anchor) — opens the relationship detail panel
@@ -4258,6 +4275,10 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .flow-edge-hit.selected { background: var(--color-brand-bg); border-color: var(--color-brand); color: var(--color-brand); }
 .flow-node {
   position: absolute;
+  /* Above .flow-edge-hit (z-index: 5) — a node's own label must never be
+     hidden behind an edge's hit-dot, even where a curve's midpoint happens
+     to land close to an unrelated box. */
+  z-index: 6;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4274,7 +4295,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .flow-node:hover { transform: translateY(-1px); }
 .flow-node.selected { border-color: var(--color-text); box-shadow: 0 0 0 3px rgba(0,0,0,0.08); }
 .flow-node.status-live { background: var(--bv-healthy); color: #06251b; }
-.flow-node.status-configured-untested { background: var(--bv-configured); color: #06251b; }
+.flow-node.status-configured-untested { background: var(--bv-untested); color: #fff; }
 .flow-node.status-configured-issues { background: var(--bv-warning); }
 .flow-node.status-gap { background: var(--bv-critical); }
 .flow-node.status-empty { background: var(--bv-empty); }
@@ -4312,11 +4333,34 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   color: var(--color-text-secondary);
 }
 .flow-node-detail p { font-size: 13px; color: var(--color-text-secondary); margin-bottom: 10px; }
-.flow-node-detail-explain {
+/* Part 1: "what this is" — plain sentence, never the API name. */
+.flow-node-detail-what { font-style: italic; }
+/* Part 2: status, matching the badge above it. */
+.flow-node-detail-status-sentence { font-weight: 600; color: var(--color-text); }
+.flow-node-detail-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+  margin-bottom: 5px;
+}
+/* Part 4: honesty note — sample size / confirmed-vs-inferred framing. */
+.flow-node-detail-honesty {
   font-size: 12px;
   color: var(--color-text-tertiary);
   padding-top: 8px;
   border-top: 0.5px solid var(--color-border);
+}
+/* Broken-edge business consequence — the "so what", set apart in the warning tone. */
+.flow-node-detail-consequence {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--bv-critical);
+  background: var(--color-danger-bg);
+  border-radius: var(--radius-md);
+  padding: 8px 10px;
 }
 .flow-node-evidence {
   list-style: none;
@@ -4355,7 +4399,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .flow-report-dot.small { width: 8px; height: 8px; margin-top: 2px; }
 .flow-report-dot.status-live { background: var(--bv-healthy); }
-.flow-report-dot.status-configured-untested { background: var(--bv-configured); }
+.flow-report-dot.status-configured-untested { background: var(--bv-untested); }
 .flow-report-dot.status-configured-issues { background: var(--bv-warning); }
 .flow-report-dot.status-gap { background: var(--bv-critical); }
 .flow-report-dot.status-empty { background: var(--bv-empty); }
@@ -4372,6 +4416,70 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   position: absolute;
   left: 2px;
   color: var(--color-text-tertiary, var(--color-text-secondary));
+}
+
+/* Collapsible "Technical detail" — API names/IDs, hidden by default. */
+.flow-tech-detail { margin-top: 10px; }
+.flow-tech-detail-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+.flow-tech-detail-toggle:hover { color: var(--color-text-secondary); }
+.flow-tech-detail-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.flow-tech-detail-list li { font-size: 11px; font-family: monospace; color: var(--color-text-tertiary); }
+
+/* First-run "how to read this map" banner — dismissed once, remembered via
+   localStorage (see FLOWMAP_INTRO_STORAGE_KEY in BusinessView.tsx). */
+.flow-map-intro {
+  margin: 10px 0 0;
+  padding: 12px 14px;
+  background: var(--color-brand-bg);
+  border: 0.5px solid var(--color-brand);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.flow-map-intro-title { font-size: 12.5px; font-weight: 700; color: var(--color-text); margin: 0 0 4px; }
+.flow-map-intro ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
+.flow-map-intro li { font-size: 12px; color: var(--color-text-secondary); }
+.flow-map-intro-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: 0.5px solid var(--color-brand);
+  color: var(--color-brand);
+  border-radius: var(--radius-md);
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.flow-map-intro-dismiss:hover { background: var(--color-brand); color: #06251b; }
+
+/* Keyboard focus — same convention used everywhere else in the app
+   (.kpi-tile.kpi-clickable:focus-visible, .config-tile.clickable:focus-visible). */
+.flow-node:focus-visible,
+.flow-edge-hit:focus-visible,
+.flow-tech-detail-toggle:focus-visible,
+.flow-map-intro-dismiss:focus-visible,
+.flow-map-expand-btn:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 1px;
 }
 
 /* What Is Costing You */
@@ -4408,6 +4516,19 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .cost-card-severity.sev-review { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
 .cost-card-headline { font-size: 14px; font-weight: 700; margin-top: 8px; color: var(--color-text); }
 .cost-card-body { font-size: 13px; color: var(--color-text-secondary); margin-top: 4px; line-height: 1.5; }
+.cost-card-stake { font-size: 13px; font-weight: 700; color: var(--color-text); margin-top: 6px; }
+.cost-card-honesty { font-size: 11px; color: var(--color-text-tertiary); margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--color-border); }
+.cost-card-fix-link {
+  margin-top: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-brand);
+  cursor: pointer;
+}
+.cost-card-fix-link:hover { text-decoration: underline; }
 .cost-card-skeleton {
   height: 110px;
   border-radius: var(--radius-lg);
@@ -4453,7 +4574,10 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   border: 0.5px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: 14px 18px;
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
+/* Briefly flashed when a cost card's "Fix this ↓" link scrolls here. */
+.priority-action-card.highlighted { border-color: var(--color-brand); box-shadow: 0 0 0 3px var(--color-brand-bg); }
 .priority-action-rank {
   font-size: 26px;
   font-weight: 800;
@@ -4462,10 +4586,23 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   text-align: center;
 }
 .priority-action-body { flex: 1; min-width: 0; }
+.priority-action-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .priority-action-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
+.quick-win-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-success-bg);
+  color: var(--bv-healthy);
+  cursor: help;
+}
 .priority-action-why { font-size: 13px; color: var(--color-text-secondary); margin-top: 4px; line-height: 1.5; }
-.priority-action-badges { display: flex; gap: 8px; margin-top: 8px; }
-.impact-badge, .effort-badge {
+.priority-action-offenders { font-size: 12px; color: var(--color-text-tertiary); margin-top: 4px; font-style: italic; }
+.priority-action-badges { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.impact-badge, .effort-badge, .owner-badge, .time-badge {
   font-size: 11px;
   font-weight: 600;
   padding: 2px 9px;
@@ -4479,6 +4616,9 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .effort-badge.easy { background: var(--color-success-bg); color: var(--color-success); }
 .effort-badge.medium { background: var(--color-warning-bg); color: var(--bv-warning); }
 .effort-badge.hard { background: var(--color-danger-bg); color: var(--bv-critical); }
+.priority-action-projected { font-size: 12.5px; font-weight: 600; color: var(--color-brand); margin-top: 8px; }
+.priority-action-honesty { font-size: 11px; color: var(--color-text-tertiary); margin-top: 6px; }
+.priority-actions-low-impact-note { margin-bottom: 10px; }
 .priority-action-btn { flex-shrink: 0; }
 
 @media (max-width: 720px) {

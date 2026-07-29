@@ -15,7 +15,7 @@ import {
 export const RECORDS_SAMPLE_TOOL = "ZohoCRM_getRecords";
 export const RECORDS_SAMPLE_SIZE = 50;
 
-const INIT_STATE: RecordSampleState = { items: [], loading: false, error: null, lastFetched: null };
+const INIT_STATE: RecordSampleState = { items: [], loading: false, error: null, lastFetched: null, toolUsed: null };
 
 function makeInitial(): Record<RecordSampleStageId, RecordSampleState> {
   return Object.fromEntries(RECORD_SAMPLE_STAGE_IDS.map(id => [id, { ...INIT_STATE }])) as Record<RecordSampleStageId, RecordSampleState>;
@@ -37,9 +37,12 @@ function findStageModule(modules: unknown[], stageId: RecordSampleStageId): stri
 // on top of this at fetch time, so the sample carries whatever a given org
 // actually has configured instead of just this fixed baseline.
 const STAGE_EXTRA_FIELDS: Record<RecordSampleStageId, string[]> = {
-  leads: ["Last_Name", "Email", "Record_Status__s", "Converted__s", "Converted_Date_Time", "Converted_Contact_Id", "Converted_Account_Id", "Converted_Deal_Id"],
+  leads: ["Last_Name", "Email", "Lead_Source", "Record_Status__s", "Converted__s", "Converted_Date_Time", "Converted_Contact_Id", "Converted_Account_Id", "Converted_Deal_Id"],
   contacts: ["Last_Name", "Email", "Account_Name"],
-  deals: ["Deal_Name", "Contact_Name", "Account_Name"],
+  // Amount/Closing_Date/Modified_Time/Stage power the "What Is Costing You" /
+  // "Top Priority Actions" stale-pipeline and unforecastable-deal findings —
+  // see isDealStale/isDealUnforecastable in crmPredicates.ts.
+  deals: ["Deal_Name", "Contact_Name", "Account_Name", "Amount", "Closing_Date", "Modified_Time", "Stage"],
   accounts: ["Account_Name"],
   invoices: ["Subject", "Deal_Name", "Account_Name"],
 };
@@ -187,7 +190,7 @@ export function useCrmRecordSamples(
         const next = { ...prev };
         for (const id of RECORD_SAMPLE_STAGE_IDS) {
           if (next[id].lastFetched === null && next[id].error === null) {
-            next[id] = { ...next[id], loading: false, error: "getRecords tool not available on this MCP server" };
+            next[id] = { ...next[id], loading: false, error: "getRecords tool not available on this MCP server", toolUsed: null };
             changed = true;
           }
         }
@@ -209,7 +212,7 @@ export function useCrmRecordSamples(
       const apiName = findStageModule(modules, stageId);
       if (!apiName) return; // this business module doesn't exist in this CRM — nothing to sample
 
-      setData(prev => ({ ...prev, [stageId]: { ...prev[stageId], loading: true, error: null } }));
+      setData(prev => ({ ...prev, [stageId]: { ...prev[stageId], loading: true, error: null, toolUsed: RECORDS_SAMPLE_TOOL } }));
 
       const lookupFields = await fetchModuleLookupFieldNames(config, tools, apiName, onLog);
       const blueprintField = findBlueprintFieldApiName(blueprints, apiName);
@@ -233,7 +236,7 @@ export function useCrmRecordSamples(
           tool: RECORDS_SAMPLE_TOOL, input, output, status: "success",
           durationMs: Date.now() - start, timestamp: new Date(),
         });
-        setData(prev => ({ ...prev, [stageId]: { items, loading: false, error: null, lastFetched: Date.now() } }));
+        setData(prev => ({ ...prev, [stageId]: { items, loading: false, error: null, lastFetched: Date.now(), toolUsed: RECORDS_SAMPLE_TOOL } }));
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Failed to fetch records";
         onLog({
