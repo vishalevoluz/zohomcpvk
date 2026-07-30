@@ -1,6 +1,6 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, moduleApiName, workflowReferencesModule, workflowLastTriggered, blueprintsForModule, findBlueprintFieldApiName, ruleCoverageCount, ruleCoverageBreakdown } from "@/lib/crmPredicates";
+import { isActiveWorkflow, moduleApiName, workflowReferencesModule, workflowLastTriggered, blueprintsForModule, findBlueprintFieldApiName, ruleCoverageCount, ruleCoverageBreakdown, isWorkflowExemptModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import type { Section } from "@/lib/sections";
 
@@ -186,12 +186,18 @@ export function findDealsApiName(entityData: Record<CrmEntityType, EntityState>)
 // visualizes, instead of every module the org happens to have (which for orgs
 // with hundreds of custom/junction modules makes a whole-catalog percentage
 // meaningless — 2 real automations out of 300+ modules always rounds to 0).
+// isWorkflowExemptModule is an extra safety net, not the primary guard here —
+// none of these 4 stages should ever resolve to a reference/read-only module,
+// but if one ever did (e.g. a misconfigured or renamed module), it shouldn't
+// silently count against the score for lacking a workflow it structurally
+// can't have (no create/edit event exists for a read-only module to fire on).
 export function automationCoverageApiNames(modules: unknown[]): string[] {
   return STAGE_DEFINITIONS
     .filter(s => s.wantsAutomation)
     .map(stage => {
       const mod = findModuleForStage(modules, stage);
-      return mod ? moduleApiName(mod) : null;
+      if (!mod || isWorkflowExemptModule(mod)) return null;
+      return moduleApiName(mod);
     })
     .filter((name): name is string => !!name);
 }

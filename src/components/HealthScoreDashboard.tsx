@@ -234,6 +234,16 @@ export default function HealthScoreDashboard({ entityData, pipelineStageCount, r
             <p className="hsd-score-potential">Estimated Potential Score: {model.total} → {model.potentialTotal}</p>
           )}
 
+          {model.resolved && (
+            <div className="hsd-reasons">
+              {model.dimensions.map(dim => (
+                <p key={dim.key} className={`hsd-reason-line zone-${dim.zone}`}>
+                  <strong>{dim.label} {dim.score}/20</strong> — {dim.reason}
+                </p>
+              ))}
+            </div>
+          )}
+
           <div className="hsd-kpi-row">
             <div className="hsd-kpi-tile tone-neutral">
               <span className="hsd-kpi-value">{model.resolved ? `${model.total}/100` : "—"}</span>

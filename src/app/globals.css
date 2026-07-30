@@ -4212,6 +4212,29 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .hsd-score-verdict.zone-critical { color: var(--bv-critical); }
 .hsd-score-potential { font-size: 12.5px; color: var(--color-text-tertiary); margin-top: 6px; }
 
+.hsd-reasons {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--color-border);
+  text-align: left;
+}
+.hsd-reason-line {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  padding-left: 9px;
+  border-left: 2px solid var(--color-border-strong);
+}
+.hsd-reason-line strong { color: var(--color-text); font-weight: 700; }
+.hsd-reason-line.zone-healthy { border-left-color: var(--bv-healthy); }
+.hsd-reason-line.zone-needs-attention,
+.hsd-reason-line.zone-at-risk { border-left-color: var(--bv-warning); }
+.hsd-reason-line.zone-critical { border-left-color: var(--bv-critical); }
+
 .hsd-kpi-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 20px; }
 .hsd-kpi-tile {
   background: var(--color-bg);

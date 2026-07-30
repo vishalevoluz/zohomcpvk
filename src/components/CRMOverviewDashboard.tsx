@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout, isDeletedModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout, isDeletedModule, isHiddenModule, isEmptyModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -712,22 +712,6 @@ function formatRelative(date: Date): string {
   if (diff < 60) return "just now";
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
   return `${Math.floor(diff / 3600)}h ago`;
-}
-
-function isHiddenModule(item: unknown): boolean {
-  if (!item || typeof item !== "object") return false;
-  const r = item as Record<string, unknown>;
-  return r.visible === false || r.show_as_tab === false || r.viewable === false;
-}
-
-// Same "unused" definition ModulesAudit.tsx uses (api access disabled, or
-// nobody can create/edit records in it while it's still technically
-// viewable) — reused here rather than redefined so "Empty" means the same
-// thing in both places.
-function isEmptyModule(item: unknown): boolean {
-  if (!item || typeof item !== "object") return false;
-  const r = item as Record<string, unknown>;
-  return r.api_supported === false || (r.creatable === false && r.editable === false && r.viewable !== false && r.visible !== false);
 }
 
 type ModuleCategory = "active" | "hidden" | "empty";

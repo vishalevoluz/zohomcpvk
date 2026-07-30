@@ -126,6 +126,45 @@ export function isDeletedModule(item: unknown): boolean {
   return String(r.status ?? "").toLowerCase() === "deleted";
 }
 
+// Real Zoho API uses "viewable", not "visible" — checked defensively across
+// both plus show_as_tab, matching ModulesAudit.tsx's own hidden-module check.
+export function isHiddenModule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  return r.visible === false || r.show_as_tab === false || r.viewable === false;
+}
+
+function isReadOnlyModule(r: Record<string, unknown>): boolean {
+  return r.api_supported === false || (r.creatable === false && r.editable === false);
+}
+
+// "Unused" here means api access disabled, or nobody can create/edit records
+// in it while it's still technically viewable — same definition ModulesAudit.tsx
+// and CRMOverviewDashboard.tsx use, so "Empty" means the same thing everywhere.
+export function isEmptyModule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  return isReadOnlyModule(r) && r.viewable !== false && r.visible !== false;
+}
+
+const WORKFLOW_EXEMPT_MODULE_NAMES = new Set(["Products", "Price_Books"]);
+
+// Some modules are reference/catalog data by design — a product catalog or
+// price book is maintained by hand or synced from an external system, never
+// something a workflow rule (which only fires on record create/edit) would
+// touch. Counting these against automation-coverage scoring would penalize
+// the mere existence of the module, not a real process gap. Read-only modules
+// (api access disabled, or nobody can create/edit records in them) are exempt
+// for the same reason regardless of name — there's no create/edit event for a
+// workflow to ever fire on.
+export function isWorkflowExemptModule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  const apiName = String(r.api_name ?? r.module_name ?? "");
+  if (WORKFLOW_EXEMPT_MODULE_NAMES.has(apiName)) return true;
+  return isReadOnlyModule(r);
+}
+
 function workflowModuleRef(workflow: unknown): string {
   if (!workflow || typeof workflow !== "object") return "";
   const r = workflow as Record<string, unknown>;

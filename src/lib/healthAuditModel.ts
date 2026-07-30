@@ -11,6 +11,7 @@ import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, hasEmailAction,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
+  isEmptyModule, moduleApiName,
 } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
@@ -227,6 +228,8 @@ export interface DimensionCard {
   checklist: ChecklistItem[];
   recommendations: DimensionRecommendation[];
   allSet: boolean;
+  /** One plain-English line tracing this score to the real finding(s) that produced it — e.g. "3 active modules have no follow-up workflow: Leads, Deals, Cases". Shown under the gauge so a client's "why did I lose those points?" always has a defensible, specific answer. */
+  reason: string;
   /** Only ever non-null for automationHealth, and only when its score is below 10. */
   criticalAlert: string | null;
   /** Only ever non-null for dataArchitecture — a full module-attribute breakdown from the raw getModules() data. */
@@ -289,6 +292,26 @@ function automationCoverageChecklist(entityData: Record<CrmEntityType, EntitySta
   });
 }
 
+// One plain-English line naming exactly which core modules are missing
+// automation — the same fail/pass split automationCoverageChecklist computes,
+// re-derived independently (per this file's header comment) so it can never
+// drift from the real score or the checklist rows shown alongside it.
+function automationCoverageReason(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null): string {
+  const coreApiNames = automationCoverageApiNames(entityData.modules.items);
+  if (coreApiNames.length === 0) {
+    return "Leads, Campaigns, Contacts, and Deals weren't found in this org, so this dimension defaults to full marks.";
+  }
+  const activeWorkflows = entityData.workflows.items.filter(isActiveWorkflow);
+  const failing = coreApiNames.filter(apiName => {
+    const hasWorkflow = activeWorkflows.some(w => workflowReferencesModule(w, apiName));
+    return !hasWorkflow && ruleCoverageCount(ruleCoverage, apiName) === 0;
+  });
+  if (failing.length === 0) {
+    return `All ${coreApiNames.length} core module${coreApiNames.length !== 1 ? "s" : ""} (${coreApiNames.join(", ")}) have an active workflow or rule watching them.`;
+  }
+  return `${failing.length} active module${failing.length !== 1 ? "s" : ""} ${failing.length !== 1 ? "have" : "has"} no follow-up workflow or rule: ${failing.join(", ")}.`;
+}
+
 function processCompletenessChecklist(entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): ChecklistItem[] {
   const pipelineCount = entityData.pipelines.items.length;
   const blueprintCount = entityData.blueprints.items.length;
@@ -309,6 +332,15 @@ function processCompletenessChecklist(entityData: Record<CrmEntityType, EntitySt
       weight: 7,
     },
   ];
+}
+
+function processCompletenessReason(entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): string {
+  const missing: string[] = [];
+  if (entityData.pipelines.items.length === 0) missing.push("no sales pipeline");
+  if (entityData.blueprints.items.length === 0) missing.push("no blueprint process");
+  if (pipelineStageCount === 0) missing.push("no defined pipeline stages");
+  if (missing.length === 0) return "A sales pipeline, blueprint process, and defined pipeline stages are all in place.";
+  return `Missing: ${missing.join(", ")}.`;
 }
 
 function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
@@ -334,9 +366,26 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   ];
 }
 
+function accessSecurityReason(entityData: Record<CrmEntityType, EntityState>): string {
+  const adminCount = entityData.profiles.items.filter(isAdminProfile).length;
+  const inactiveUsers = entityData.users.items.filter(isInactiveUser).length;
+  const profileCount = entityData.profiles.items.length;
+  const issues: string[] = [];
+  if (adminCount > 2) issues.push(`${adminCount} admin profiles (more than 2)`);
+  if (inactiveUsers > 0) issues.push(`${inactiveUsers} inactive user${inactiveUsers !== 1 ? "s" : ""} still licensed`);
+  if (profileCount === 1) issues.push("only one profile exists, so there's no role separation");
+  if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive users hold a license.";
+  return `${issues.join("; ")}.`;
+}
+
 function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
-  const moduleCount = entityData.modules.items.filter(m => !isDeletedModule(m)).length;
+  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m));
+  const moduleCount = activeModules.length;
+  const emptyModules = activeModules.filter(isEmptyModule);
+  // A high module count only fails this check when it's actually inflated by
+  // empty/unused modules — see scoreDataArchitecture's matching condition.
+  const tooManyDueToClutter = moduleCount > 15 && emptyModules.length > 0;
   return [
     {
       id: "data-mandatory-fields", label: "Mandatory field count is reasonable", status: mandatoryCount <= 20 ? "pass" : "fail",
@@ -344,11 +393,29 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
       weight: mandatoryCount > 20 ? Math.min(15, mandatoryCount - 20) : 15,
     },
     {
-      id: "data-module-count", label: "Module count is reasonable", status: moduleCount <= 15 ? "pass" : "fail",
-      detail: `${moduleCount} module${moduleCount !== 1 ? "s" : ""} found${moduleCount > 15 ? " (over the 15 recommended)." : "."}`,
+      id: "data-module-count", label: "Module count is reasonable", status: tooManyDueToClutter ? "fail" : "pass",
+      detail: tooManyDueToClutter
+        ? `${moduleCount} modules found, including ${emptyModules.length} empty/unused one${emptyModules.length !== 1 ? "s" : ""} (${emptyModules.slice(0, 3).map(m => moduleApiName(m) || "unnamed").join(", ")}${emptyModules.length > 3 ? `, +${emptyModules.length - 3} more` : ""}) driving the count up.`
+        : moduleCount > 15
+          ? `${moduleCount} modules found — over 15, but all are actively used, so this isn't penalized.`
+          : `${moduleCount} module${moduleCount !== 1 ? "s" : ""} found.`,
       weight: 5,
     },
   ];
+}
+
+function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>): string {
+  const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
+  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m));
+  const emptyModules = activeModules.filter(isEmptyModule);
+  const issues: string[] = [];
+  if (mandatoryCount > 20) issues.push(`${mandatoryCount} mandatory fields (over the 20 recommended)`);
+  if (activeModules.length > 15 && emptyModules.length > 0) {
+    const names = emptyModules.slice(0, 3).map(m => moduleApiName(m) || "unnamed").join(", ");
+    issues.push(`${activeModules.length} modules, including ${emptyModules.length} empty one${emptyModules.length !== 1 ? "s" : ""} (${names}${emptyModules.length > 3 ? ", +more" : ""})`);
+  }
+  if (issues.length === 0) return "Mandatory field count and module count are both reasonable.";
+  return `${issues.join("; ")}.`;
 }
 
 // Pass/fail is derived from the same healthy-zone threshold the dimension's
@@ -366,6 +433,14 @@ function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState
     detail: total === 0 ? "No workflows configured yet — nothing to break." : `${active} of ${total} workflow${total !== 1 ? "s" : ""} are active.`,
     weight: 20,
   }];
+}
+
+function automationHealthReason(entityData: Record<CrmEntityType, EntityState>, score: number): string {
+  const total = entityData.workflows.items.length;
+  const active = entityData.workflows.items.filter(isActiveWorkflow).length;
+  if (total === 0) return "No workflows configured yet — nothing to break.";
+  if (zoneForValue(score, 20) === "healthy") return `${active} of ${total} workflow${total !== 1 ? "s" : ""} are active — a healthy ratio.`;
+  return `${total - active} of ${total} workflow${total !== 1 ? "s" : ""} ${total - active !== 1 ? "are" : "is"} inactive.`;
 }
 
 function automationHealthCriticalAlert(entityData: Record<CrmEntityType, EntityState>, score: number): string | null {
@@ -391,18 +466,30 @@ export function buildHealthAuditModel(
     const score = scores[key];
     const dimZone = zoneForValue(score, 20);
     let checklist: ChecklistItem[];
+    let reason: string;
     let criticalAlert: string | null = null;
     let moduleBreakdown: ModuleBreakdownGroup[] | null = null;
     switch (key) {
-      case "automationCoverage": checklist = automationCoverageChecklist(entityData, ruleCoverage); break;
-      case "processCompleteness": checklist = processCompletenessChecklist(entityData, pipelineStageCount); break;
-      case "accessSecurity": checklist = accessSecurityChecklist(entityData); break;
+      case "automationCoverage":
+        checklist = automationCoverageChecklist(entityData, ruleCoverage);
+        reason = automationCoverageReason(entityData, ruleCoverage);
+        break;
+      case "processCompleteness":
+        checklist = processCompletenessChecklist(entityData, pipelineStageCount);
+        reason = processCompletenessReason(entityData, pipelineStageCount);
+        break;
+      case "accessSecurity":
+        checklist = accessSecurityChecklist(entityData);
+        reason = accessSecurityReason(entityData);
+        break;
       case "dataArchitecture":
         checklist = dataArchitectureChecklist(entityData);
+        reason = dataArchitectureReason(entityData);
         moduleBreakdown = buildModuleBreakdown(entityData.modules.items);
         break;
       case "automationHealth":
         checklist = automationHealthChecklist(entityData, score);
+        reason = automationHealthReason(entityData, score);
         criticalAlert = automationHealthCriticalAlert(entityData, score);
         break;
     }
@@ -417,6 +504,7 @@ export function buildHealthAuditModel(
       gain: 20 - score,
       zone: dimZone,
       checklist,
+      reason,
       recommendations,
       allSet: recommendations.length === 0 && checklist.every(item => item.status === "pass"),
       criticalAlert,

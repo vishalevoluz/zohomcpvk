@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
@@ -70,7 +70,13 @@ function scoreDataArchitecture(fields: unknown[], modules: unknown[]): number {
   let score = 20;
   const mandatoryCount = fields.filter(isMandatoryField).length;
   if (mandatoryCount > 20) score -= Math.min(15, mandatoryCount - 20);
-  if (modules.length > 15) score -= 5;
+  // A high module count isn't a problem by itself — plenty of well-run orgs
+  // have 20+ modules doing real work. It only costs points when the count is
+  // actually being inflated by empty/unused ones (read-only or nobody can
+  // create/edit records in them) — that's the real clutter, not the number.
+  const activeModules = modules.filter(m => !isDeletedModule(m));
+  const emptyModuleCount = activeModules.filter(isEmptyModule).length;
+  if (activeModules.length > 15 && emptyModuleCount > 0) score -= 5;
   return Math.max(0, score);
 }
 
