@@ -10,7 +10,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, hasEmailAction,
-  workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules,
+  workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
 } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
@@ -336,7 +336,7 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
 
 function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
-  const moduleCount = entityData.modules.items.length;
+  const moduleCount = entityData.modules.items.filter(m => !isDeletedModule(m)).length;
   return [
     {
       id: "data-mandatory-fields", label: "Mandatory field count is reasonable", status: mandatoryCount <= 20 ? "pass" : "fail",

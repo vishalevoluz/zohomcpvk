@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout, isDeletedModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -186,7 +186,7 @@ function generateRecommendations(
 
   const wfs      = entityData.workflows.items;
   const bps      = entityData.blueprints.items;
-  const mods     = entityData.modules.items;
+  const mods     = entityData.modules.items.filter(m => !isDeletedModule(m));
   const pipes    = entityData.pipelines.items;
   const stages   = entityData.stages.items;
   const layouts  = entityData.layouts.items;
@@ -750,6 +750,7 @@ const MODULE_CATEGORY_ORDER: Record<ModuleCategory, number> = { hidden: 0, empty
 // convention as the blueprint/workflow breakdowns elsewhere in this file.
 function computeModuleBreakdown(entityData: Record<CrmEntityType, EntityState>): ModuleBreakdownRow[] {
   return entityData.modules.items
+    .filter(m => !isDeletedModule(m))
     .map((m, i) => {
       const r = (m ?? {}) as Record<string, unknown>;
       const apiName = moduleApiName(m);
@@ -1383,7 +1384,7 @@ function buildFunctionZiaSummary(
 interface FunctionKpiSummary { total: number; active: number; inactive: number; fetched: boolean; }
 
 function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null, functionSummary: FunctionKpiSummary): KpiItem[] {
-  const modules = entityData.modules.items;
+  const modules = entityData.modules.items.filter(m => !isDeletedModule(m));
   const blueprints = entityData.blueprints.items;
   const users = entityData.users.items;
   const layouts = entityData.layouts.items;
@@ -1683,6 +1684,7 @@ function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label:
 
 export default function CRMOverviewDashboard({ config, tools, onLog, entityData, fetchEntity, fetchAll, lastRefresh, onSelectSection, pipelineStageCount, pipelineStages, ruleCoverage }: Props) {
   const [activeTab, setActiveTab] = useState<ReportTab>("changes");
+  const [ziaRecsExpanded, setZiaRecsExpanded] = useState(false);
   const [ziaMessages, setZiaMessages] = useState<ZiaMessage[]>([]);
   const [ziaInput, setZiaInput] = useState("");
   const [ziaLoading, setZiaLoading] = useState(false);
@@ -1723,6 +1725,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [expandedFunctionDuplicate, setExpandedFunctionDuplicate] = useState<string | null>(null);
   const [previewFunctionId, setPreviewFunctionId] = useState<string | null>(null);
   const [functionsListExpanded, setFunctionsListExpanded] = useState(false);
+  type FunctionsSubTab = "issues" | "duplicates" | "all";
+  const [functionsSubTab, setFunctionsSubTab] = useState<FunctionsSubTab>("issues");
   function toggleFunctionPreview(fnId: string) {
     setPreviewFunctionId(prev => {
       const next = prev === fnId ? null : fnId;
@@ -2579,44 +2583,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <span className="kpi-drilldown-stat neutral">{functionDuplicates.length} Duplicate Names</span>
           </div>
 
-          {/* Issues first, per the requested output order */}
-          <h5 className="kpi-drilldown-subheading">Issues</h5>
-          {functionRecords.scanProgress.loading && (
-            <p className="kpi-drilldown-progress">
-              <span className="spinner" /> Scanning function code for issues… {functionRecords.scanProgress.done} of {functionRecords.scanProgress.total}
-            </p>
-          )}
-          {!functionRecords.scanProgress.loading && functionRecords.scanProgress.total > 0 && (
-            <p className="kpi-drilldown-note">
-              Scanned {scannedFnCount} of {functionRecords.items.length} functions
-              {scannedFnCount >= FUNCTION_CODE_SCAN_CAP && scannedFnCount < functionRecords.items.length ? ` (capped at ${FUNCTION_CODE_SCAN_CAP})` : ""}
-              {scannedFnCount > 0 ? ` — ${functionsWithIssuesPct}% have at least one flagged issue.` : "."}
-            </p>
-          )}
-          {!functionRecords.scanProgress.loading && sortedFunctionIssueRows.length === 0 && scannedFnCount > 0 && (
-            <p className="business-view-hint">No issues flagged in the functions scanned.</p>
-          )}
-          {sortedFunctionIssueRows.length > 0 && (
-            <div className="kpi-drilldown-table">
-              {sortedFunctionIssueRows.slice(0, 15).map(row => (
-                <div key={row.key} className="kpi-drilldown-row kpi-drilldown-row-layouts">
-                  <div className="kpi-drilldown-row-top">
-                    <span className="kpi-drilldown-name">{row.functionName}</span>
-                    <span className="kpi-drilldown-module">{row.category}</span>
-                    <span className={`kpi-drilldown-badge status-${row.issue.severity === "high" ? "inactive" : row.issue.severity === "medium" ? "draft" : "active"}`}>
-                      {ISSUE_CATEGORY_LABELS[row.issue.category]}
-                    </span>
-                  </div>
-                  <p className="function-issue-message">{row.issue.message}</p>
-                </div>
-              ))}
-              {sortedFunctionIssueRows.length > 15 && (
-                <p className="business-view-hint">+{sortedFunctionIssueRows.length - 15} more issues found</p>
-              )}
-            </div>
-          )}
-
-          {/* Recommendations second */}
+          {/* Recommendations stay visible regardless of which tab below is open */}
           <h5 className="kpi-drilldown-subheading">Recommendations</h5>
           <div className="zia-rec zia-rec-medium activity-zia-rec">
             <div className="zia-rec-header">
@@ -2626,92 +2593,160 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <p className="zia-rec-desc">{functionZiaSummary}</p>
           </div>
 
-          {/* Duplicate names — clickable, lists every duplicate and its module/category */}
-          <h5 className="kpi-drilldown-subheading">Duplicate Function Names ({functionDuplicates.length})</h5>
-          {functionDuplicates.length === 0 ? (
-            <p className="business-view-hint">No duplicate function names found.</p>
-          ) : (
-            <div className="kpi-drilldown-table">
-              {functionDuplicates.map(group => (
-                <div key={group.name} className="kpi-drilldown-row kpi-drilldown-row-layouts">
-                  <button
-                    className="function-dup-toggle"
-                    onClick={() => setExpandedFunctionDuplicate(prev => (prev === group.name ? null : group.name))}
-                  >
-                    <span className="kpi-drilldown-name">{group.name}</span>
-                    <span className="kpi-drilldown-badge neutral">{group.items.length}×</span>
-                    <span className="function-dup-caret">{expandedFunctionDuplicate === group.name ? "▾" : "▸"}</span>
-                  </button>
-                  {expandedFunctionDuplicate === group.name && (
-                    <div className="kpi-drilldown-layout-names">
-                      {group.items.map(it => (
-                        <span key={it.id} className="kpi-drilldown-layout-chip custom">{it.apiName || it.id} · {it.category}</span>
-                      ))}
+          <div className="function-tabs">
+            <button
+              type="button"
+              className={`function-tab ${functionsSubTab === "issues" ? "active" : ""}`}
+              onClick={() => setFunctionsSubTab("issues")}
+            >
+              <span>Issues</span>
+              <span className="function-tab-count">{sortedFunctionIssueRows.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`function-tab ${functionsSubTab === "duplicates" ? "active" : ""}`}
+              onClick={() => setFunctionsSubTab("duplicates")}
+            >
+              <span>Duplicate Function Names</span>
+              <span className="function-tab-count">{functionDuplicates.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`function-tab ${functionsSubTab === "all" ? "active" : ""}`}
+              onClick={() => setFunctionsSubTab("all")}
+            >
+              <span>All Functions</span>
+              <span className="function-tab-count">{functionRecords.items.length}</span>
+            </button>
+          </div>
+
+          {functionsSubTab === "issues" && (
+            <>
+              {functionRecords.scanProgress.loading && (
+                <p className="kpi-drilldown-progress">
+                  <span className="spinner" /> Scanning function code for issues… {functionRecords.scanProgress.done} of {functionRecords.scanProgress.total}
+                </p>
+              )}
+              {!functionRecords.scanProgress.loading && functionRecords.scanProgress.total > 0 && (
+                <p className="kpi-drilldown-note">
+                  Scanned {scannedFnCount} of {functionRecords.items.length} functions
+                  {scannedFnCount >= FUNCTION_CODE_SCAN_CAP && scannedFnCount < functionRecords.items.length ? ` (capped at ${FUNCTION_CODE_SCAN_CAP})` : ""}
+                  {scannedFnCount > 0 ? ` — ${functionsWithIssuesPct}% have at least one flagged issue.` : "."}
+                </p>
+              )}
+              {!functionRecords.scanProgress.loading && sortedFunctionIssueRows.length === 0 && scannedFnCount > 0 && (
+                <p className="business-view-hint">No issues flagged in the functions scanned.</p>
+              )}
+              {sortedFunctionIssueRows.length > 0 && (
+                <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                  {sortedFunctionIssueRows.slice(0, 15).map(row => (
+                    <div key={row.key} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                      <div className="kpi-drilldown-row-top">
+                        <span className="kpi-drilldown-name">{row.functionName}</span>
+                        <span className="kpi-drilldown-module">{row.category}</span>
+                        <span className={`kpi-drilldown-badge status-${row.issue.severity === "high" ? "inactive" : row.issue.severity === "medium" ? "draft" : "active"}`}>
+                          {ISSUE_CATEGORY_LABELS[row.issue.category]}
+                        </span>
+                      </div>
+                      <p className="function-issue-message">{row.issue.message}</p>
                     </div>
+                  ))}
+                  {sortedFunctionIssueRows.length > 15 && (
+                    <p className="business-view-hint">+{sortedFunctionIssueRows.length - 15} more issues found</p>
                   )}
                 </div>
-              ))}
-            </div>
+              )}
+            </>
           )}
 
-          {/* Full list, each with an on-demand code preview + per-function recommendations */}
-          <h5 className="kpi-drilldown-subheading">All Functions ({functionRecords.items.length})</h5>
-          <div className="kpi-drilldown-table">
-            {(functionsListExpanded ? functionRecords.items : functionRecords.items.slice(0, 8)).map(fn => (
-              <div key={fn.id} className="kpi-drilldown-row kpi-drilldown-row-layouts">
-                <div className="kpi-drilldown-row-top">
-                  <span className="kpi-drilldown-name">{fn.name}</span>
-                  <span className="kpi-drilldown-module">{fn.category}</span>
-                  <span className={`kpi-drilldown-badge status-${fn.active ? "active" : "inactive"}`}>{fn.active ? "active" : "inactive"}</span>
-                  <button className="btn-secondary function-preview-btn" onClick={() => toggleFunctionPreview(fn.id)}>
-                    {previewFunctionId === fn.id ? "Hide Code" : "Preview Code"}
-                  </button>
-                </div>
-                {previewFunctionId === fn.id && (
-                  <div className="function-code-preview">
-                    {functionRecords.codeByFnId[fn.id]?.loading && (
-                      <p className="kpi-drilldown-progress"><span className="spinner" /> Downloading code from Zoho…</p>
-                    )}
-                    {functionRecords.codeByFnId[fn.id]?.unavailable && (
-                      <p className="business-view-hint">Code not available for this function.</p>
-                    )}
-                    {functionRecords.codeByFnId[fn.id]?.code && (
-                      <>
-                        <pre className="function-code-block"><code>{functionRecords.codeByFnId[fn.id]!.code}</code></pre>
-
-                        <div className="zia-rec zia-rec-low activity-zia-rec">
-                          <div className="zia-rec-header">
-                            <span className="zia-rec-icon">✦</span>
-                            <span className="zia-rec-title">Zia Recommendation — Formatting &amp; Comments</span>
-                          </div>
-                          <p className="zia-rec-desc">{reviewCodeQuality(functionRecords.codeByFnId[fn.id]!.code!).summary}</p>
-                        </div>
-
-                        <strong className="function-code-issues-label">Recommendations for this function</strong>
-                        {(functionRecords.issuesByFnId[fn.id]?.length ?? 0) > 0 ? (
-                          <ul className="function-code-issues">
-                            {sortIssuesBySeverity(functionRecords.issuesByFnId[fn.id]!).map((iss, i) => (
-                              <li key={i}>
-                                <span className={`kpi-drilldown-badge status-${iss.severity === "high" ? "inactive" : iss.severity === "medium" ? "draft" : "active"}`}>
-                                  {ISSUE_CATEGORY_LABELS[iss.category]}
-                                </span> {iss.message}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="business-view-hint">No issues flagged in this function.</p>
-                        )}
-                      </>
+          {functionsSubTab === "duplicates" && (
+            functionDuplicates.length === 0 ? (
+              <p className="business-view-hint">No duplicate function names found.</p>
+            ) : (
+              <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                {functionDuplicates.map(group => (
+                  <div key={group.name} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                    <button
+                      className="function-dup-toggle"
+                      onClick={() => setExpandedFunctionDuplicate(prev => (prev === group.name ? null : group.name))}
+                    >
+                      <span className="kpi-drilldown-name">{group.name}</span>
+                      <span className="kpi-drilldown-badge neutral">{group.items.length}×</span>
+                      <span className="function-dup-caret">{expandedFunctionDuplicate === group.name ? "▾" : "▸"}</span>
+                    </button>
+                    {expandedFunctionDuplicate === group.name && (
+                      <div className="kpi-drilldown-layout-names">
+                        {group.items.map(it => (
+                          <span key={it.id} className="kpi-drilldown-layout-chip custom">{it.apiName || it.id} · {it.category}</span>
+                        ))}
+                      </div>
                     )}
                   </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
-          {functionRecords.items.length > 8 && !functionsListExpanded && (
-            <button className="cost-cards-more" onClick={() => setFunctionsListExpanded(true)}>
-              + {functionRecords.items.length - 8} more functions
-            </button>
+            )
+          )}
+
+          {functionsSubTab === "all" && (
+            <>
+              <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                {(functionsListExpanded ? functionRecords.items : functionRecords.items.slice(0, 8)).map(fn => (
+                  <div key={fn.id} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                    <div className="kpi-drilldown-row-top">
+                      <span className="kpi-drilldown-name">{fn.name}</span>
+                      <span className="kpi-drilldown-module">{fn.category}</span>
+                      <span className={`kpi-drilldown-badge status-${fn.active ? "active" : "inactive"}`}>{fn.active ? "active" : "inactive"}</span>
+                      <button className="btn-secondary function-preview-btn" onClick={() => toggleFunctionPreview(fn.id)}>
+                        {previewFunctionId === fn.id ? "Hide Code" : "Preview Code"}
+                      </button>
+                    </div>
+                    {previewFunctionId === fn.id && (
+                      <div className="function-code-preview">
+                        {functionRecords.codeByFnId[fn.id]?.loading && (
+                          <p className="kpi-drilldown-progress"><span className="spinner" /> Downloading code from Zoho…</p>
+                        )}
+                        {functionRecords.codeByFnId[fn.id]?.unavailable && (
+                          <p className="business-view-hint">Code not available for this function.</p>
+                        )}
+                        {functionRecords.codeByFnId[fn.id]?.code && (
+                          <>
+                            <pre className="function-code-block"><code>{functionRecords.codeByFnId[fn.id]!.code}</code></pre>
+
+                            <div className="zia-rec zia-rec-low activity-zia-rec">
+                              <div className="zia-rec-header">
+                                <span className="zia-rec-icon">✦</span>
+                                <span className="zia-rec-title">Zia Recommendation — Formatting &amp; Comments</span>
+                              </div>
+                              <p className="zia-rec-desc">{reviewCodeQuality(functionRecords.codeByFnId[fn.id]!.code!).summary}</p>
+                            </div>
+
+                            <strong className="function-code-issues-label">Recommendations for this function</strong>
+                            {(functionRecords.issuesByFnId[fn.id]?.length ?? 0) > 0 ? (
+                              <ul className="function-code-issues">
+                                {sortIssuesBySeverity(functionRecords.issuesByFnId[fn.id]!).map((iss, i) => (
+                                  <li key={i}>
+                                    <span className={`kpi-drilldown-badge status-${iss.severity === "high" ? "inactive" : iss.severity === "medium" ? "draft" : "active"}`}>
+                                      {ISSUE_CATEGORY_LABELS[iss.category]}
+                                    </span> {iss.message}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="business-view-hint">No issues flagged in this function.</p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {functionRecords.items.length > 8 && !functionsListExpanded && (
+                <button className="cost-cards-more" onClick={() => setFunctionsListExpanded(true)}>
+                  + {functionRecords.items.length - 8} more functions
+                </button>
+              )}
+            </>
           )}
         </div>
       )}
@@ -2907,11 +2942,22 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         <div className="crm-right">
           <div className="crm-right-header">
             <p className="crm-panel-label">Zia Recommendations</p>
-            {ziaTool && (
-              <span className="zia-tool-badge" title={ziaTool.description ?? ziaTool.name}>
-                ⚡ {ziaTool.name}
-              </span>
-            )}
+            <div className="crm-right-header-actions">
+              {ziaTool && (
+                <span className="zia-tool-badge" title={ziaTool.description ?? ziaTool.name}>
+                  ⚡ {ziaTool.name}
+                </span>
+              )}
+              {filteredRecs.length > 0 && (
+                <button
+                  type="button"
+                  className="zia-recs-expand-btn"
+                  onClick={() => setZiaRecsExpanded(prev => !prev)}
+                >
+                  {ziaRecsExpanded ? "Collapse ↑" : "Expand ↓"}
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="zia-tabs">
@@ -2931,7 +2977,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             })}
           </div>
 
-          <div className="zia-recs">
+          <div className={`zia-recs ${ziaRecsExpanded ? "zia-recs-expanded" : ""}`}>
             {filteredRecs.length === 0 ? (
               <div className="zia-recs-empty">No recommendations for this category.</div>
             ) : (

@@ -115,6 +115,17 @@ export function moduleApiName(m: unknown): string {
   return String(r.api_name ?? r.module_name ?? "");
 }
 
+// A module can still show up in the metadata list for a short window after
+// deletion. recycle_bin_on_delete only appears on real, fully-populated
+// module records, so its presence is what confirms `status` is trustworthy
+// here — only then do we treat "deleted" as a reason to exclude the module.
+export function isDeletedModule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  if (r.recycle_bin_on_delete === undefined) return false;
+  return String(r.status ?? "").toLowerCase() === "deleted";
+}
+
 function workflowModuleRef(workflow: unknown): string {
   if (!workflow || typeof workflow !== "object") return "";
   const r = workflow as Record<string, unknown>;
