@@ -202,7 +202,13 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
           ))}
         </div>
         {costCards.loadingIds.length === 0 && costCards.shown.length === 0 && (
-          <p className="business-view-hint">No urgent cost issues detected right now — nice work.</p>
+          costCards.uncertain.length > 0 ? (
+            <p className="business-view-hint business-view-hint-warn">
+              Couldn&apos;t verify {costCards.uncertain.length} check{costCards.uncertain.length !== 1 ? "s" : ""} — {costCards.uncertain.map(u => u.reason).join("; ")}. No issues were found in what we <em>could</em> check, but this isn&apos;t a confirmed all-clear.
+            </p>
+          ) : (
+            <p className="business-view-hint">No urgent cost issues detected right now — nice work.</p>
+          )
         )}
         {costCards.overflowCount > 0 && !costCardsExpanded && (
           <button className="cost-cards-more" onClick={() => setCostCardsExpanded(true)}>
@@ -222,7 +228,13 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
             <span className="spinner" /> Working out what to fix first…
           </div>
         ) : priorityResult.actions.length === 0 ? (
-          <p className="business-view-hint">Nothing urgent right now — your CRM setup looks solid.</p>
+          priorityResult.uncertain.length > 0 ? (
+            <p className="business-view-hint business-view-hint-warn">
+              Couldn&apos;t verify {priorityResult.uncertain.length} check{priorityResult.uncertain.length !== 1 ? "s" : ""} — {priorityResult.uncertain.map(u => u.reason).join("; ")}. Nothing urgent turned up in what we <em>could</em> check, but this isn&apos;t a confirmed all-clear.
+            </p>
+          ) : (
+            <p className="business-view-hint">Nothing urgent right now — your CRM setup looks solid.</p>
+          )
         ) : (
           <>
             {priorityResult.allLowImpact && (

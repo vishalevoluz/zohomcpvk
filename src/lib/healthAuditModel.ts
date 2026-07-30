@@ -11,7 +11,7 @@ import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, hasEmailAction,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
-  isEmptyModule, moduleApiName,
+  isEmptyModule, moduleApiName, blueprintsForModule,
 } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
@@ -350,7 +350,9 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   return [
     {
       id: "access-admin-count", label: "Admin access is limited", status: adminCount <= 2 ? "pass" : "fail",
-      detail: `${adminCount} admin profile${adminCount !== 1 ? "s" : ""} found${adminCount > 2 ? " — more than 2 increases risk." : "."}`,
+      detail: profileCount > 0
+        ? `${adminCount} of ${profileCount} profile${profileCount !== 1 ? "s" : ""} ${adminCount !== 1 ? "are" : "is"} named like admin roles — we can see profile names but not their exact permissions, so confirm in Setup${adminCount > 2 ? " (more than 2 increases risk)" : ""}.`
+        : "No profiles found.",
       weight: 5,
     },
     {
@@ -371,11 +373,27 @@ function accessSecurityReason(entityData: Record<CrmEntityType, EntityState>): s
   const inactiveUsers = entityData.users.items.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
   const issues: string[] = [];
-  if (adminCount > 2) issues.push(`${adminCount} admin profiles (more than 2)`);
+  if (adminCount > 2) issues.push(`${adminCount} of ${profileCount} profiles are named like admin roles (more than 2) — we can see names but not exact permissions, so confirm in Setup`);
   if (inactiveUsers > 0) issues.push(`${inactiveUsers} inactive user${inactiveUsers !== 1 ? "s" : ""} still licensed`);
   if (profileCount === 1) issues.push("only one profile exists, so there's no role separation");
   if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive users hold a license.";
   return `${issues.join("; ")}.`;
+}
+
+// Before a module gets named as a cleanup candidate, check whether a
+// workflow or blueprint we've already fetched still points at it — "empty"
+// (read-only/no create-edit access) and "unused" are not the same claim, and
+// a referenced module shouldn't read as safe to delete just because it's
+// empty right now.
+function emptyModuleLabel(m: unknown, workflows: unknown[], blueprints: unknown[]): string {
+  const apiName = moduleApiName(m) || "unnamed";
+  const wfCount = workflows.filter(w => workflowReferencesModule(w, apiName)).length;
+  const bpCount = blueprintsForModule(blueprints, apiName).length;
+  if (wfCount === 0 && bpCount === 0) return apiName;
+  const refs: string[] = [];
+  if (wfCount > 0) refs.push(`${wfCount} workflow${wfCount !== 1 ? "s" : ""}`);
+  if (bpCount > 0) refs.push(`${bpCount} blueprint${bpCount !== 1 ? "s" : ""}`);
+  return `${apiName} (empty, but referenced by ${refs.join(" and ")} — don't delete blindly)`;
 }
 
 function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
@@ -395,7 +413,7 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
     {
       id: "data-module-count", label: "Module count is reasonable", status: tooManyDueToClutter ? "fail" : "pass",
       detail: tooManyDueToClutter
-        ? `${moduleCount} modules found, including ${emptyModules.length} empty/unused one${emptyModules.length !== 1 ? "s" : ""} (${emptyModules.slice(0, 3).map(m => moduleApiName(m) || "unnamed").join(", ")}${emptyModules.length > 3 ? `, +${emptyModules.length - 3} more` : ""}) driving the count up.`
+        ? `${moduleCount} modules found, including ${emptyModules.length} empty/unused one${emptyModules.length !== 1 ? "s" : ""} (${emptyModules.slice(0, 3).map(m => emptyModuleLabel(m, entityData.workflows.items, entityData.blueprints.items)).join(", ")}${emptyModules.length > 3 ? `, +${emptyModules.length - 3} more` : ""}) driving the count up.`
         : moduleCount > 15
           ? `${moduleCount} modules found — over 15, but all are actively used, so this isn't penalized.`
           : `${moduleCount} module${moduleCount !== 1 ? "s" : ""} found.`,
@@ -411,7 +429,7 @@ function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>):
   const issues: string[] = [];
   if (mandatoryCount > 20) issues.push(`${mandatoryCount} mandatory fields (over the 20 recommended)`);
   if (activeModules.length > 15 && emptyModules.length > 0) {
-    const names = emptyModules.slice(0, 3).map(m => moduleApiName(m) || "unnamed").join(", ");
+    const names = emptyModules.slice(0, 3).map(m => emptyModuleLabel(m, entityData.workflows.items, entityData.blueprints.items)).join(", ");
     issues.push(`${activeModules.length} modules, including ${emptyModules.length} empty one${emptyModules.length !== 1 ? "s" : ""} (${names}${emptyModules.length > 3 ? ", +more" : ""})`);
   }
   if (issues.length === 0) return "Mandatory field count and module count are both reasonable.";

@@ -2,7 +2,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import type { PipelineStagesState, RecordSampleStageId, RecordSampleState } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
-import { evaluateFindings, type Finding } from "@/lib/businessFindings";
+import { evaluateFindings, type Finding, type UncertainFinding } from "@/lib/businessFindings";
 
 export type CostCardSeverity = "CRITICAL" | "WARNING" | "REVIEW";
 
@@ -84,6 +84,8 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
 export interface CostCardsResult {
   shown: CostCardResult[];
   loadingIds: string[];
+  /** Findings that couldn't be confirmed clean because a required data source failed to fetch — never fold these into "no issues found". */
+  uncertain: UncertainFinding[];
   overflowCount: number;
   allTriggered: CostCardResult[];
 }
@@ -98,7 +100,7 @@ export function evaluateCostCards(
   moduleRecordCounts: ModuleRecordCountsState = { counts: {}, toolAvailable: false, resolved: false },
   currencySymbol: string | null = null,
 ): CostCardsResult {
-  const { findings, loadingIds } = evaluateFindings({
+  const { findings, loadingIds, uncertain } = evaluateFindings({
     entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol,
   });
 
@@ -116,5 +118,5 @@ export function evaluateCostCards(
   const shown = triggered.slice(0, 5);
   const overflowCount = Math.max(0, triggered.length - 5);
 
-  return { shown, loadingIds, overflowCount, allTriggered: triggered };
+  return { shown, loadingIds, uncertain, overflowCount, allTriggered: triggered };
 }

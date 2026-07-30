@@ -411,7 +411,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
       label: "Unused Custom Fields",
       count: unusedCustom.length,
       severity: unusedCustom.length > 0 ? "warn" : "ok",
-      tip: "Custom fields hidden from all views — they store no visible data and clutter the schema. Consider removing or re-enabling them.",
+      tip: "Custom fields hidden from all views — candidates to review with your consultant. We can only see view visibility here, not whether a workflow, function, or external integration still reads or writes this field.",
     },
     {
       key: "naming_violation",
@@ -690,7 +690,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
                                       <span key={tag} className={`audit-tag tag-fn-${tag === "duplicate" || tag === "missing_required" ? "missing_ref" : tag === "naming_violation" ? "invalid_binding" : "unused"}`} title={
                                         tag === "duplicate"           ? "Another field shares this API name — duplicates cause data conflicts in API calls and reports." :
                                         tag === "missing_required"    ? "This mandatory picklist field has no values defined — users cannot fill it in, blocking record saves." :
-                                        tag === "unused_custom"       ? "This custom field is hidden from all views — it holds no visible data and may be safe to remove." :
+                                        tag === "unused_custom"       ? "This custom field is hidden from all views — a candidate to review with your consultant. We can only confirm view visibility here, not whether a workflow, function, or external integration still depends on it." :
                                         tag === "naming_violation"    ? "API name doesn't follow Zoho convention (PascalCase: starts with capital, only letters/numbers/underscores)." :
                                         tag === "excessive_picklist"  ? `Picklist has more than ${PICKLIST_EXCESS_THRESHOLD} values — large lists are hard to use. Consider a lookup field instead.` :
                                         tag

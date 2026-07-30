@@ -2,7 +2,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import type { PipelineStagesState, RecordSampleStageId, RecordSampleState } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
-import { evaluateFindings, type Finding, type FindingImpact, type FindingEffort } from "@/lib/businessFindings";
+import { evaluateFindings, type Finding, type FindingImpact, type FindingEffort, type UncertainFinding } from "@/lib/businessFindings";
 import { computeHealthScore, estimateScoreGain } from "@/lib/businessScore";
 import type { Section } from "@/lib/sections";
 
@@ -111,13 +111,13 @@ export function computeTopActions(
   ruleCoverage: RuleCoverage | null = null,
   moduleRecordCounts: ModuleRecordCountsState = { counts: {}, toolAvailable: false, resolved: false },
   pipelineStageCount: number = pipelineStages.items.length,
-): { actions: PriorityAction[]; allActions: PriorityAction[]; allResolved: boolean; overflowCount: number; allLowImpact: boolean; currentScore: number } {
+): { actions: PriorityAction[]; allActions: PriorityAction[]; allResolved: boolean; overflowCount: number; allLowImpact: boolean; currentScore: number; uncertain: UncertainFinding[] } {
   const currentScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage).total;
-  const { findings, loadingIds } = evaluateFindings({
+  const { findings, loadingIds, uncertain } = evaluateFindings({
     entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol: null,
   });
   const allResolved = loadingIds.length === 0;
-  if (!allResolved) return { actions: [], allActions: [], allResolved: false, overflowCount: 0, allLowImpact: false, currentScore };
+  if (!allResolved) return { actions: [], allActions: [], allResolved: false, overflowCount: 0, allLowImpact: false, currentScore, uncertain: [] };
 
   const candidates = findings.filter(f => ACTION_COPY[f.id]);
 
@@ -143,5 +143,5 @@ export function computeTopActions(
     };
   });
 
-  return { actions: allActions.slice(0, 5), allActions, allResolved: true, overflowCount, allLowImpact, currentScore };
+  return { actions: allActions.slice(0, 5), allActions, allResolved: true, overflowCount, allLowImpact, currentScore, uncertain };
 }

@@ -7,7 +7,7 @@ import {
   hasEmailAction, isInactiveUser, isMandatoryField, isAdminProfile, isActiveWorkflow,
   workflowModuleLabel, moduleApiName, unreferencedModules,
   isDealStale, isDealUnforecastable, dealAmount,
-  hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent,
+  hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent, userLastLoginDate,
 } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
 import { formatMoney } from "@/lib/money";
@@ -77,6 +77,12 @@ function recordEmail(r: unknown): string | null {
   if (!r || typeof r !== "object") return null;
   const email = (r as Record<string, unknown>).Email ?? (r as Record<string, unknown>).email;
   return typeof email === "string" && email.trim() ? email.trim().toLowerCase() : null;
+}
+
+const STALE_LOGIN_THRESHOLD_DAYS = 90;
+
+function formatShortDate(d: Date): string {
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 function groupByEmail(records: unknown[]): Map<string, unknown[]> {
@@ -191,11 +197,14 @@ const FINDING_DEFS: FindingDef[] = [
       if (!singleProfile && !allAdmin && !tooManyAdmins) return null;
       const isUniform = singleProfile || allAdmin;
       const offenders = (isUniform ? profiles : profiles.filter(isAdminProfile)).map((p, i) => getItemName(p, i)).filter(Boolean);
+      const evidenceCount = isUniform ? profiles.length : adminCount;
       return {
         offenders: offenders.slice(0, 5),
-        count: isUniform ? profiles.length : adminCount,
+        count: evidenceCount,
         note: isUniform ? "uniform-access" : "too-many-admins",
-        honesty: `Confirmed from all ${profiles.length} profile${profiles.length !== 1 ? "s" : ""} in your CRM.`,
+        honesty: singleProfile
+          ? "Only 1 profile exists in your CRM, so every user shares the same access level — we can see profile names but not their exact permissions, so confirm the actual permission set in Setup."
+          : `${evidenceCount} of ${profiles.length} profile${profiles.length !== 1 ? "s" : ""} ${evidenceCount !== 1 ? "are" : "is"} named like admin roles — we can see profile names but not their exact permissions, so confirm each one's real access in Setup.`,
       };
     },
   },
@@ -264,13 +273,18 @@ const FINDING_DEFS: FindingDef[] = [
     build: ({ entityData }) => {
       const activeUsers = entityData.users.items.filter(u => !isInactiveUser(u));
       if (!userLoginFieldPresent(activeUsers)) return null; // this MCP server/org doesn't expose login activity — don't guess
-      const stale = activeUsers.filter(u => { const age = userLoginAgeDays(u); return age !== null && age > 90; });
+      const stale = activeUsers.filter(u => { const age = userLoginAgeDays(u); return age !== null && age > STALE_LOGIN_THRESHOLD_DAYS; });
       if (stale.length === 0) return null;
+      const offenders = stale.slice(0, 5).map((u, i) => {
+        const name = getItemName(u, i) || "Unnamed user";
+        const lastLogin = userLastLoginDate(u);
+        return lastLogin ? `${name} (no login since ${formatShortDate(lastLogin)})` : name;
+      });
       return {
-        offenders: stale.map((u, i) => getItemName(u, i)).filter(Boolean).slice(0, 5),
+        offenders,
         count: stale.length,
         stakeLabel: `${stale.length} paid seat${stale.length !== 1 ? "s" : ""}`,
-        honesty: `Confirmed from login activity on all ${activeUsers.length} active users in your CRM.`,
+        honesty: `Confirmed from login activity on all ${activeUsers.length} active users in your CRM — flagged when no login in over ${STALE_LOGIN_THRESHOLD_DAYS} days.`,
       };
     },
   },
@@ -314,9 +328,20 @@ const FINDING_DEFS: FindingDef[] = [
 // that need to iterate/look up defs without re-deriving them.
 export const FINDING_IDS: string[] = FINDING_DEFS.map(d => d.id);
 
-export function evaluateFindings(ctx: FindingContext): { findings: Finding[]; loadingIds: string[] } {
+// A finding that returned "no issue" while one of its required entities
+// actually failed to fetch (rather than confirming a real zero) is not
+// verified clean — it just couldn't be checked. Callers must show "couldn't
+// verify" for these instead of folding them into a silent, false "all clear".
+export interface UncertainFinding {
+  id: string;
+  /** Which required data source(s) failed, and why — e.g. "profiles: Failed to fetch". */
+  reason: string;
+}
+
+export function evaluateFindings(ctx: FindingContext): { findings: Finding[]; loadingIds: string[]; uncertain: UncertainFinding[] } {
   const loadingIds: string[] = [];
   const findings: Finding[] = [];
+  const uncertain: UncertainFinding[] = [];
   const pipelineResolved = !ctx.pipelineStages.loading && (ctx.pipelineStages.lastFetched !== null || ctx.pipelineStages.error !== null);
 
   for (const def of FINDING_DEFS) {
@@ -333,8 +358,22 @@ export function evaluateFindings(ctx: FindingContext): { findings: Finding[]; lo
       continue;
     }
 
+    // Entities that resolved via a fetch error (not real data) can't confirm
+    // a clean result — items defaults to [] on both a real empty org and a
+    // failed fetch, so a build() that returns null here means "couldn't
+    // check", not "checked, and it's fine".
+    const erroredEntities = def.requires.filter(t => ctx.entityData[t].error !== null);
+
     const dynamic = def.build(ctx);
-    if (!dynamic) continue;
+    if (!dynamic) {
+      if (erroredEntities.length > 0) {
+        uncertain.push({
+          id: def.id,
+          reason: erroredEntities.map(t => `${t}: ${ctx.entityData[t].error}`).join("; "),
+        });
+      }
+      continue;
+    }
     findings.push({
       id: def.id,
       severity: def.severity,
@@ -345,7 +384,7 @@ export function evaluateFindings(ctx: FindingContext): { findings: Finding[]; lo
     });
   }
 
-  return { findings, loadingIds };
+  return { findings, loadingIds, uncertain };
 }
 
 export type { FindingContext };

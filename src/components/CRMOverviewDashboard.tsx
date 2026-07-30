@@ -103,7 +103,7 @@ interface Props {
   ruleCoverage: RuleCoverage | null;
 }
 
-type Severity = "critical" | "warning" | "good";
+type Severity = "critical" | "warning" | "good" | "unknown";
 
 interface KpiItem {
   key: string;
@@ -112,6 +112,10 @@ interface KpiItem {
   severity: Severity;
   note: string;
   clickable?: boolean;
+  /** True when the underlying fetch failed and this count could not be confirmed — render "—", not a fake 0. */
+  unknown?: boolean;
+  /** Hover/click attribution: which tool this came from and how many records it saw — shown as a tooltip on the tile. */
+  source: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -1367,11 +1371,27 @@ function buildFunctionZiaSummary(
 
 interface FunctionKpiSummary { total: number; active: number; inactive: number; fetched: boolean; }
 
+// Source attribution shown on hover — names the tool the count came from and
+// how many records it actually saw, so every number on the tile traces back
+// to a real fetch instead of being taken on faith.
+function kpiSource(state: EntityState, count: number): string {
+  return state.toolUsed ? `Source: ${state.toolUsed} — ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found for this data";
+}
+
 function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null, functionSummary: FunctionKpiSummary): KpiItem[] {
   const modules = entityData.modules.items.filter(m => !isDeletedModule(m));
   const blueprints = entityData.blueprints.items;
   const users = entityData.users.items;
   const layouts = entityData.layouts.items;
+
+  // A fetch that failed before returning any pages leaves items at [] — the
+  // same shape as a genuinely empty org. Treating both alike would render a
+  // false "0 found, all good" tile instead of an honest "couldn't verify"
+  // one, so each entity's real error must gate its tile's severity/note.
+  const modulesFailed = entityData.modules.error !== null && modules.length === 0;
+  const blueprintsFailed = entityData.blueprints.error !== null && blueprints.length === 0;
+  const usersFailed = entityData.users.error !== null && users.length === 0;
+  const layoutsFailed = entityData.layouts.error !== null && layouts.length === 0;
 
   const hiddenCount = modules.filter(isHiddenModule).length;
   const hiddenPct = modules.length ? Math.round((hiddenCount / modules.length) * 100) : 0;
@@ -1389,27 +1409,35 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
   return [
     {
       key: "modules", label: "Modules", value: modules.length,
-      severity: hiddenPct >= 40 ? "critical" : hiddenPct >= 15 ? "warning" : "good",
-      note: modules.length ? `${activePct}% active · ${hiddenPct}% inactive — click to see which` : "No modules found",
-      clickable: modules.length > 0,
+      severity: modulesFailed ? "unknown" : hiddenPct >= 40 ? "critical" : hiddenPct >= 15 ? "warning" : "good",
+      note: modulesFailed ? `Couldn't verify — ${entityData.modules.error}` : modules.length ? `${activePct}% active · ${hiddenPct}% inactive — click to see which` : "No modules found",
+      clickable: modules.length > 0 || modulesFailed,
+      unknown: modulesFailed,
+      source: modulesFailed ? `Source: ${entityData.modules.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.modules, modules.length),
     },
     {
       key: "blueprints", label: "Blueprints", value: blueprints.length,
-      severity: blueprints.length > 0 && inactiveBps + draftBps === blueprints.length ? "critical" : inactiveBps > 0 ? "warning" : "good",
-      note: blueprints.length ? `${inactiveBps} inactive${draftBps > 0 ? `, ${draftBps} draft` : ""} — click to see which` : "No blueprints found",
-      clickable: blueprints.length > 0,
+      severity: blueprintsFailed ? "unknown" : blueprints.length > 0 && inactiveBps + draftBps === blueprints.length ? "critical" : inactiveBps > 0 ? "warning" : "good",
+      note: blueprintsFailed ? `Couldn't verify — ${entityData.blueprints.error}` : blueprints.length ? `${inactiveBps} inactive${draftBps > 0 ? `, ${draftBps} draft` : ""} — click to see which` : "No blueprints found",
+      clickable: blueprints.length > 0 || blueprintsFailed,
+      unknown: blueprintsFailed,
+      source: blueprintsFailed ? `Source: ${entityData.blueprints.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.blueprints, blueprints.length),
     },
     {
       key: "users", label: "Active Users", value: activeUsers,
-      severity: activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
-      note: `${users.length} total licensed — click to see who's active/inactive`,
-      clickable: users.length > 0,
+      severity: usersFailed ? "unknown" : activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
+      note: usersFailed ? `Couldn't verify — ${entityData.users.error}` : `${users.length} total licensed — click to see who's active/inactive`,
+      clickable: users.length > 0 || usersFailed,
+      unknown: usersFailed,
+      source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
     },
     {
       key: "layouts", label: "Layouts", value: layouts.length,
-      severity: layouts.length === 0 && modules.length > 0 ? "critical" : layoutGap > 0 ? "warning" : "good",
-      note: layoutGap > 0 ? `${layoutGap} module${layoutGap === 1 ? "" : "s"} missing a layout — click for breakdown` : "Covers all modules — click for breakdown",
-      clickable: layouts.length > 0,
+      severity: layoutsFailed ? "unknown" : layouts.length === 0 && modules.length > 0 ? "critical" : layoutGap > 0 ? "warning" : "good",
+      note: layoutsFailed ? `Couldn't verify — ${entityData.layouts.error}` : layoutGap > 0 ? `${layoutGap} module${layoutGap === 1 ? "" : "s"} missing a layout — click for breakdown` : "Covers all modules — click for breakdown",
+      clickable: layouts.length > 0 || layoutsFailed,
+      unknown: layoutsFailed,
+      source: layoutsFailed ? `Source: ${entityData.layouts.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.layouts, layouts.length),
     },
     {
       key: "schedules", label: "Schedules", value: ruleCoverage?.scheduleCount ?? 0,
@@ -1419,6 +1447,7 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
         : ruleCoverage.scheduleCount === 0 ? "No schedules configured"
         : "click to see active/inactive and last run",
       clickable: !!ruleCoverage?.scheduleCount,
+      source: ruleCoverage?.scheduleCount === null ? "Source: no schedule-listing tool connected for this CRM" : `Source: schedule listing — ${ruleCoverage?.scheduleCount ?? 0} record${(ruleCoverage?.scheduleCount ?? 0) !== 1 ? "s" : ""}`,
     },
     {
       key: "functions", label: "Functions", value: functionSummary.active,
@@ -1427,6 +1456,7 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
         : functionSummary.total === 0 ? "No functions found"
         : `${functionSummary.inactive} inactive of ${functionSummary.total} — click for issues, duplicates & code`,
       clickable: functionSummary.total > 0,
+      source: `Source: function list — ${functionSummary.total} record${functionSummary.total !== 1 ? "s" : ""}`,
     },
   ];
 }
@@ -1606,6 +1636,7 @@ interface ConfigRow {
   status: string;
   severity: Severity | "neutral";
   targetSection: Section | null;
+  source: string;
 }
 
 const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Section | null }[] = [
@@ -1619,11 +1650,19 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>): Conf
   return CONFIG_ROW_DEFS.map(def => {
     const st = entityData[def.type];
     if (!isEntityResolved(st)) {
-      return { key: def.type, label: def.label, value: "…", status: "Loading", severity: "neutral" as const, targetSection: def.targetSection };
+      return { key: def.type, label: def.label, value: "…", status: "Loading", severity: "neutral" as const, targetSection: def.targetSection, source: "Loading…" };
     }
     const count = st.items.length;
+    const source = st.toolUsed ? `Source: ${st.toolUsed} — ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found";
     if (count === 0) {
-      return { key: def.type, label: def.label, value: "N/A", status: "Not found", severity: "critical" as const, targetSection: def.targetSection };
+      // A fetch error and a genuinely empty CRM both leave items at [] — only
+      // the former means "couldn't verify". Conflating them into the same
+      // critical "Not found" reads as a confirmed gap when it might just be
+      // a broken connection.
+      if (st.error) {
+        return { key: def.type, label: def.label, value: "—", status: `Couldn't verify — ${st.error}`, severity: "unknown" as const, targetSection: def.targetSection, source: `Source: ${st.toolUsed ?? "no matching tool found"} — fetch failed` };
+      }
+      return { key: def.type, label: def.label, value: "N/A", status: "Not found", severity: "critical" as const, targetSection: def.targetSection, source };
     }
 
     let status: string;
@@ -1645,7 +1684,7 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>): Conf
         severity = "good";
     }
 
-    return { key: def.type, label: def.label, value: String(count), status, severity, targetSection: def.targetSection };
+    return { key: def.type, label: def.label, value: String(count), status, severity, targetSection: def.targetSection, source };
   });
 }
 
@@ -2334,9 +2373,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             className={`crmov-card kpi-${k.severity} ${k.clickable ? "clickable" : ""} ${selectedCard === k.key ? "selected" : ""}`}
             onClick={k.clickable ? () => setSelectedCard(prev => (prev === k.key ? null : (k.key as CardKey))) : undefined}
             disabled={!k.clickable}
+            data-tooltip={k.source}
           >
             <span className="kpi-tile-label">{k.label}</span>
-            <span className="kpi-tile-value">{k.value.toLocaleString()}</span>
+            <span className="kpi-tile-value">{k.unknown ? "—" : k.value.toLocaleString()}</span>
             <span className="kpi-tile-note">{k.note}</span>
           </button>
         ))}
@@ -2349,6 +2389,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               type="button"
               className={`crmov-card config-${row.severity} ${selectedCard === cardKey ? "selected" : ""}`}
               onClick={() => setSelectedCard(prev => (prev === cardKey ? null : cardKey))}
+              data-tooltip={row.source}
             >
               <span className="kpi-tile-label">{row.label}</span>
               <span className="kpi-tile-value">{row.value}</span>
@@ -2370,6 +2411,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <h4>Modules — Active / Hidden / Empty</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
+          {entityData.modules.error && entityData.modules.items.length === 0 ? (
+            <PanelEmptyState state={entityData.modules} label="modules" onRetry={() => fetchEntity("modules")} />
+          ) : (
+          <>
           <div className="kpi-drilldown-summary">
             {(["active", "hidden", "empty"] as ModuleCategory[]).map(cat => {
               const count = moduleBreakdown.filter(r => r.category === cat).length;
@@ -2400,6 +2445,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </div>
             ))}
           </div>
+          </>
+          )}
         </div>
       )}
 
@@ -2409,6 +2456,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <h4>Blueprints — Active / Inactive / Draft</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
+          {entityData.blueprints.error && entityData.blueprints.items.length === 0 ? (
+            <PanelEmptyState state={entityData.blueprints} label="blueprints" onRetry={() => fetchEntity("blueprints")} />
+          ) : (
+          <>
           <div className="kpi-drilldown-summary">
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${blueprintFilter === "active" ? "selected" : ""}`}
@@ -2445,6 +2496,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </div>
             ))}
           </div>
+          </>
+          )}
         </div>
       )}
 
@@ -2454,6 +2507,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <h4>Active Users — Active vs Inactive</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
+          {entityData.users.error && entityData.users.items.length === 0 ? (
+            <PanelEmptyState state={entityData.users} label="users" onRetry={() => fetchEntity("users")} />
+          ) : (
+          <>
           <div className="kpi-drilldown-summary">
             <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.active).length} Active</span>
             <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => !r.active).length} Inactive</span>
@@ -2467,6 +2524,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </div>
             ))}
           </div>
+          </>
+          )}
         </div>
       )}
 
@@ -2476,6 +2535,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <h4>Layouts — Standard vs Custom, Per Module</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
+          {entityData.layouts.error && entityData.layouts.items.length === 0 ? (
+            <PanelEmptyState state={entityData.layouts} label="layouts" onRetry={() => fetchEntity("layouts")} />
+          ) : (
+          <>
           <p className="kpi-drilldown-note">
             More than one layout on a module usually isn&apos;t clutter — Zoho lets each profile use a different layout on the same module, so Sales and Support can see different required fields on the same Leads module. It&apos;s only worth a closer look when a module is stacking several custom layouts with no clear reason.
           </p>
@@ -2510,6 +2573,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </div>
             ))}
           </div>
+          </>
+          )}
         </div>
       )}
 

@@ -2579,7 +2579,8 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .crmov-card.kpi-good, .crmov-card.config-good { border-left-color: var(--color-success); }
 .crmov-card.kpi-warning, .crmov-card.config-warning { border-left-color: var(--bv-warning); }
 .crmov-card.kpi-critical, .crmov-card.config-critical { border-left-color: var(--bv-critical); }
-.crmov-card.config-neutral { border-left-color: var(--color-border-strong); }
+.crmov-card.config-neutral, .crmov-card.kpi-unknown, .crmov-card.config-unknown { border-left-color: var(--color-border-strong); }
+.crmov-card.kpi-unknown .kpi-tile-value, .crmov-card.config-unknown .kpi-tile-value { color: var(--color-text-tertiary); }
 .crmov-card.selected.kpi-good, .crmov-card.selected.config-good { border-left-color: var(--color-success); }
 .crmov-card.selected.kpi-warning, .crmov-card.selected.config-warning { border-left-color: var(--bv-warning); }
 .crmov-card.selected.kpi-critical, .crmov-card.selected.config-critical { border-left-color: var(--bv-critical); }
@@ -4034,6 +4035,13 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   font-size: 13px;
   color: var(--color-text-secondary);
   padding: 8px 0;
+}
+.business-view-hint-warn {
+  color: var(--bv-warning);
+  background: color-mix(in srgb, var(--bv-warning) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bv-warning) 30%, transparent);
+  border-radius: 8px;
+  padding: 10px 12px;
 }
 
 /* ── CRM Health Score dashboard ───────────────────────────────────────────

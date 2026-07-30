@@ -321,13 +321,22 @@ export function hasNoLeadSource(lead: unknown): boolean {
 // above. Returns null (not "0 days") when no such field is present at all, so
 // callers can tell "confirmed recent" apart from "we can't tell" and skip the
 // finding entirely rather than guess (see userLoginFieldPresent below).
-export function userLoginAgeDays(user: unknown): number | null {
+// Raw last-activity Date, shared by userLoginAgeDays (the day-count used for
+// the >90-day threshold check) and any caller that needs to show the actual
+// date to the user (e.g. "no login since 12 Mar 2026") rather than just an
+// age in days.
+export function userLastLoginDate(user: unknown): Date | null {
   if (!user || typeof user !== "object") return null;
   const r = user as Record<string, unknown>;
   const raw = r.last_activity_time ?? r.lastActivityTime ?? r.last_login_time ?? r.lastLoginTime ?? r.Last_Activity_Time;
   if (typeof raw !== "string" || !raw) return null;
   const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function userLoginAgeDays(user: unknown): number | null {
+  const d = userLastLoginDate(user);
+  if (!d) return null;
   return Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
 }
 
