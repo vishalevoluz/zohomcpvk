@@ -17,8 +17,8 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     label: "Extended coverage (nice to have)",
     tools: [
       "ZohoCRM_getOrganization", "ZohoCRM_getEmailTemplates", "ZohoCRM_getValidationRules",
-      "ZohoCRM_getAssignmentRules", "ZohoCRM_getApprovalRules", "ZohoCRM_getLayoutRules",
-      "ZohoCRM_getSchedules", "ZohoCRM_getConnections",
+      "ZohoCRM_getAssignmentRules", "ZohoCRM_getApprovalProcess", "ZohoCRM_getLayoutRules",
+      "ZohoCRM_getScheduledJobs", "ZohoCRM_getConnections",
     ],
   },
 ];
