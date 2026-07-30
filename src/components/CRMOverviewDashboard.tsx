@@ -1706,7 +1706,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // selection driving one detail slot.
   type CardKey = "modules" | "blueprints" | "users" | "layouts" | "schedules" | "functions"
                | "pipelines" | "workflows" | "profiles" | "activity";
-  const [selectedCard, setSelectedCard] = useState<CardKey | null>(null);
+  const [selectedCard, setSelectedCard] = useState<CardKey | null>("modules");
+  const detailPanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Cards further down the left-hand list can sit well below the fold;
+    // without this, selecting one pops the detail panel in at the top of
+    // the grid row, off-screen from where the user just clicked.
+    if (selectedCard) detailPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selectedCard]);
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
   const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never">("all");
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
@@ -2363,7 +2370,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         })}
       </div>
 
-      <div className="crmov-detail-panel">
+      <div className="crmov-detail-panel" ref={detailPanelRef}>
       {selectedCard === null && (
         <div className="crmov-detail-placeholder">
           <p className="business-view-hint">Click a card on the left to see its details here.</p>

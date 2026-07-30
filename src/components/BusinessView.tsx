@@ -5,7 +5,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from "@/lib/flowMapModel";
 import { evaluateCostCards, type CostCardResult } from "@/lib/costCards";
-import { computeTopActions } from "@/lib/priorityActions";
+import { computeTopActions, type PriorityAction } from "@/lib/priorityActions";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
 import HealthScoreDashboard from "@/components/HealthScoreDashboard";
 
@@ -71,13 +71,84 @@ function CostCard({ card, hasMatchingAction, onFixThis }: { card: CostCardResult
   );
 }
 
+function PriorityActionCard({
+  action, isHighlighted, isExpanded, onToggleExpand, currentScore, cardRef,
+}: {
+  action: PriorityAction;
+  isHighlighted: boolean;
+  isExpanded: boolean;
+  onToggleExpand: (id: string) => void;
+  currentScore: number;
+  cardRef?: (el: HTMLDivElement | null) => void;
+}) {
+  return (
+    <div ref={cardRef} className={`priority-action-row ${isExpanded ? "expanded" : ""}`}>
+      <div className={`priority-action-card ${isHighlighted ? "highlighted" : ""}`}>
+        <span className="priority-action-rank">{action.rank}</span>
+        <div className="priority-action-body">
+          <div className="priority-action-title-row">
+            <h4 className="priority-action-title">{action.title}</h4>
+            {action.quickWin && <span className="quick-win-badge" data-tooltip="High impact, easy to do — the best return for the least effort.">Quick Win</span>}
+          </div>
+          <p className="priority-action-why">{action.why}</p>
+          <div className="priority-action-badges">
+            <span className={`impact-badge ${action.impact.toLowerCase()}`} data-tooltip={IMPACT_TOOLTIPS[action.impact]}>
+              Impact: {action.impact}
+            </span>
+            <span className={`effort-badge ${action.effort.toLowerCase()}`} data-tooltip={EFFORT_TOOLTIPS[action.effort]}>
+              Effort: {action.effort}
+            </span>
+            <span className="owner-badge">Owner: {action.owner}</span>
+            <span className="time-badge">{action.timeToValue}</span>
+          </div>
+        </div>
+        <button type="button" className="priority-action-btn btn-secondary" onClick={() => onToggleExpand(action.id)}>
+          {isExpanded ? "Hide Details" : "View Details"}
+        </button>
+      </div>
+      {isExpanded && (
+        <div className="priority-action-detail">
+          {action.stakeLabel && <p className="priority-action-detail-stake">{action.stakeLabel}</p>}
+          {action.offenders.length > 0 && (
+            <div className="priority-action-detail-block">
+              <span className="priority-action-detail-label">Where this shows up</span>
+              <ul className="priority-action-detail-list">
+                {action.offenders.map((offender, i) => <li key={i}>{offender}</li>)}
+              </ul>
+            </div>
+          )}
+          {action.projectedGain !== null && action.projectedGain > 0 && (
+            <p className="priority-action-projected">
+              Fixing this moves your CRM Health Score from {currentScore} to ~{Math.min(100, currentScore + action.projectedGain)} points — a {action.projectedGain}-point gain.
+            </p>
+          )}
+          <div className="priority-action-detail-block">
+            <span className="priority-action-detail-label">How we know this</span>
+            <p className="priority-action-honesty">{action.honesty}</p>
+          </div>
+          <p className="priority-action-detail-owner">
+            Best handled by <strong>{action.owner}</strong> — usually takes about {action.timeToValue}.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BusinessView({ entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol, fetchAll }: Props) {
   const [costCardsExpanded, setCostCardsExpanded] = useState(false);
   const [actionsExpanded, setActionsExpanded] = useState(false);
   const [highlightedActionId, setHighlightedActionId] = useState<string | null>(null);
+  const [expandedActionId, setExpandedActionId] = useState<string | null>(null);
   const actionRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // Only one action's detail is ever open at a time — clicking "View Details"
+  // on another card closes whichever was previously expanded.
+  function toggleActionDetail(id: string) {
+    setExpandedActionId(prev => (prev === id ? null : id));
+  }
 
   // "Fix this ↓" on a cost card scrolls to (and briefly highlights) the
   // matching priority action sharing the same finding id — both panels
@@ -161,39 +232,15 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
             )}
             <div className="priority-actions-list">
               {priorityResult.actions.map(action => (
-                <div
+                <PriorityActionCard
                   key={action.id}
-                  ref={el => { if (el) actionRefs.current.set(action.id, el); else actionRefs.current.delete(action.id); }}
-                  className={`priority-action-card ${highlightedActionId === action.id ? "highlighted" : ""}`}
-                >
-                  <span className="priority-action-rank">{action.rank}</span>
-                  <div className="priority-action-body">
-                    <div className="priority-action-title-row">
-                      <h4 className="priority-action-title">{action.title}</h4>
-                      {action.quickWin && <span className="quick-win-badge" data-tooltip="High impact, easy to do — the best return for the least effort.">Quick Win</span>}
-                    </div>
-                    <p className="priority-action-why">{action.why}</p>
-                    {action.offenders.length > 0 && (
-                      <p className="priority-action-offenders">{action.offenders.join(", ")}</p>
-                    )}
-                    <div className="priority-action-badges">
-                      <span className={`impact-badge ${action.impact.toLowerCase()}`} data-tooltip={IMPACT_TOOLTIPS[action.impact]}>
-                        Impact: {action.impact}
-                      </span>
-                      <span className={`effort-badge ${action.effort.toLowerCase()}`} data-tooltip={EFFORT_TOOLTIPS[action.effort]}>
-                        Effort: {action.effort}
-                      </span>
-                      <span className="owner-badge">Owner: {action.owner}</span>
-                      <span className="time-badge">{action.timeToValue}</span>
-                    </div>
-                    {action.projectedGain !== null && action.projectedGain > 0 && (
-                      <p className="priority-action-projected">
-                        Fixing this moves your CRM Health Score from {priorityResult.currentScore} to ~{Math.min(100, priorityResult.currentScore + action.projectedGain)}.
-                      </p>
-                    )}
-                    <p className="priority-action-honesty">{action.honesty}</p>
-                  </div>
-                </div>
+                  action={action}
+                  isHighlighted={highlightedActionId === action.id}
+                  isExpanded={expandedActionId === action.id}
+                  onToggleExpand={toggleActionDetail}
+                  currentScore={priorityResult.currentScore}
+                  cardRef={el => { if (el) actionRefs.current.set(action.id, el); else actionRefs.current.delete(action.id); }}
+                />
               ))}
             </div>
             {priorityResult.overflowCount > 0 && !actionsExpanded && (
@@ -202,24 +249,14 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
               </button>
             )}
             {actionsExpanded && priorityResult.allActions.slice(5).map(action => (
-              <div key={action.id} className="priority-action-card">
-                <span className="priority-action-rank">{action.rank}</span>
-                <div className="priority-action-body">
-                  <div className="priority-action-title-row">
-                    <h4 className="priority-action-title">{action.title}</h4>
-                    {action.quickWin && <span className="quick-win-badge">Quick Win</span>}
-                  </div>
-                  <p className="priority-action-why">{action.why}</p>
-                  {action.offenders.length > 0 && <p className="priority-action-offenders">{action.offenders.join(", ")}</p>}
-                  <div className="priority-action-badges">
-                    <span className={`impact-badge ${action.impact.toLowerCase()}`} data-tooltip={IMPACT_TOOLTIPS[action.impact]}>Impact: {action.impact}</span>
-                    <span className={`effort-badge ${action.effort.toLowerCase()}`} data-tooltip={EFFORT_TOOLTIPS[action.effort]}>Effort: {action.effort}</span>
-                    <span className="owner-badge">Owner: {action.owner}</span>
-                    <span className="time-badge">{action.timeToValue}</span>
-                  </div>
-                  <p className="priority-action-honesty">{action.honesty}</p>
-                </div>
-              </div>
+              <PriorityActionCard
+                key={action.id}
+                action={action}
+                isHighlighted={false}
+                isExpanded={expandedActionId === action.id}
+                onToggleExpand={toggleActionDetail}
+                currentScore={priorityResult.currentScore}
+              />
             ))}
           </>
         )}

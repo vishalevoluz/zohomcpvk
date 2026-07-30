@@ -2518,22 +2518,47 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   color: var(--color-text-tertiary);
 }
 .crmov-card {
+  position: relative;
   width: 100%;
   text-align: left;
   background: var(--color-bg);
   border: 0.5px solid var(--color-border);
   border-left: 3px solid var(--color-border-strong);
   border-radius: var(--radius-md);
-  padding: 10px 14px;
+  padding: 8px 14px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   cursor: pointer;
   font-family: inherit;
+  transition: padding 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
 }
 .crmov-card:disabled { cursor: default; opacity: 0.7; }
-.crmov-card.clickable:hover, .crmov-card:not(:disabled):hover { border-color: var(--color-border-strong); background: var(--color-bg-tertiary); }
+.crmov-card.clickable:hover, .crmov-card:not(:disabled):hover {
+  border-color: var(--color-border-strong);
+  background: var(--color-bg-tertiary);
+  padding: 14px 16px;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  z-index: 1;
+}
 .crmov-card:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 1px; }
+/* Collapsed by default (label + value only); hover/select reveals the note
+   line so the resting list stays compact and only grows on interaction. */
+.crmov-card .kpi-tile-note {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  overflow: hidden;
+  transition: max-height 0.18s ease, opacity 0.14s ease, margin-top 0.18s ease;
+}
+.crmov-card.clickable:hover .kpi-tile-note,
+.crmov-card:not(:disabled):hover .kpi-tile-note,
+.crmov-card.selected .kpi-tile-note {
+  max-height: 40px;
+  opacity: 1;
+  margin-top: 2px;
+}
 .crmov-card.selected { border-left-width: 4px; border-color: var(--color-brand); background: var(--color-bg-tertiary); }
 .crmov-card.kpi-good, .crmov-card.config-good { border-left-color: var(--color-success); }
 .crmov-card.kpi-warning, .crmov-card.config-warning { border-left-color: var(--bv-warning); }
@@ -4568,6 +4593,20 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   padding: 12px 0;
 }
 .priority-actions-list { display: flex; flex-direction: column; gap: 10px; }
+/* Each action is a row: the summary card, plus — only while its own "View
+   Details" is toggled on — a detail pane to its right. Only one row can be
+   expanded at a time (single expandedActionId in BusinessView), so at most
+   one detail pane ever shows. */
+.priority-action-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.priority-action-row.expanded { grid-template-columns: minmax(0, 1fr) minmax(220px, 320px); }
+@media (max-width: 720px) {
+  .priority-action-row.expanded { grid-template-columns: 1fr; }
+}
 .priority-action-card {
   display: flex;
   align-items: center;
@@ -4578,6 +4617,35 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   padding: 14px 18px;
   transition: border-color 0.3s, box-shadow 0.3s;
 }
+.priority-action-detail {
+  background: var(--color-bg-tertiary);
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  min-width: 0;
+}
+.priority-action-detail-block { margin-bottom: 10px; }
+.priority-action-detail-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+  margin-bottom: 4px;
+}
+.priority-action-detail-stake { font-size: 13px; font-weight: 700; color: var(--color-text); margin-bottom: 10px; }
+.priority-action-detail-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+.priority-action-detail-owner { font-size: 12.5px; color: var(--color-text-secondary); margin-top: 10px; }
+.priority-action-detail-owner strong { color: var(--color-text); }
 /* Briefly flashed when a cost card's "Fix this ↓" link scrolls here. */
 .priority-action-card.highlighted { border-color: var(--color-brand); box-shadow: 0 0 0 3px var(--color-brand-bg); }
 .priority-action-rank {
@@ -4602,7 +4670,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   cursor: help;
 }
 .priority-action-why { font-size: 13px; color: var(--color-text-secondary); margin-top: 4px; line-height: 1.5; }
-.priority-action-offenders { font-size: 12px; color: var(--color-text-tertiary); margin-top: 4px; font-style: italic; }
 .priority-action-badges { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .impact-badge, .effort-badge, .owner-badge, .time-badge {
   font-size: 11px;
