@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ArrowRight, Lock, Rocket, ListChecks, KeyRound, Link2, CircleCheck, CircleX } from "lucide-react";
 import type { McpConfig, McpTool } from "@/types/mcp";
 import { listTools } from "@/lib/zohoMcp";
-import { CONNECT_WIZARD_STEP_LABELS, CONNECT_WIZARD_TOOL_GROUPS } from "@/lib/connectWizardContent";
+import { CONNECT_WIZARD_STEP_LABELS, CONNECT_WIZARD_TOOL_GROUPS, displayToolName } from "@/lib/connectWizardContent";
 
 interface Props {
   onConnected: (config: McpConfig, tools: McpTool[]) => void;
@@ -48,7 +48,7 @@ export default function ConnectWizard({ onConnected }: Props) {
   }
 
   async function copyToolList() {
-    const allTools = CONNECT_WIZARD_TOOL_GROUPS.flatMap(g => g.tools);
+    const allTools = CONNECT_WIZARD_TOOL_GROUPS.flatMap(g => g.tools).map(displayToolName);
     await navigator.clipboard.writeText(allTools.join("\n"));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -131,7 +131,7 @@ export default function ConnectWizard({ onConnected }: Props) {
                 <p>{group.label}</p>
                 <div className="wizard-tool-chips">
                   {group.tools.map(tool => (
-                    <span key={tool} className="wizard-tool-chip">{tool}</span>
+                    <span key={tool} className="wizard-tool-chip">{displayToolName(tool)}</span>
                   ))}
                 </div>
               </div>
@@ -243,7 +243,7 @@ export default function ConnectWizard({ onConnected }: Props) {
                 <CircleX size={13} strokeWidth={1.75} />
                 <span>
                   {missingRequired.length} required tool{missingRequired.length > 1 ? "s are" : " is"} not
-                  enabled on this server: <strong>{missingRequired.join(", ")}</strong>. Go back to{" "}
+                  enabled on this server: <strong>{missingRequired.map(displayToolName).join(", ")}</strong>. Go back to{" "}
                   <strong>Enable tools</strong> and add {missingRequired.length > 1 ? "them" : "it"} — the
                   audit is blocked until every required tool is present.
                 </span>
@@ -258,7 +258,7 @@ export default function ConnectWizard({ onConnected }: Props) {
                     return (
                       <span key={tool} className={`wizard-readiness-item ${present ? "is-present" : "is-missing"}`}>
                         {present ? <CircleCheck size={12} strokeWidth={2} /> : <CircleX size={12} strokeWidth={2} />}
-                        {tool}
+                        {displayToolName(tool)}
                       </span>
                     );
                   })}

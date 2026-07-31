@@ -1,5 +1,14 @@
 export const CONNECT_WIZARD_STEP_LABELS = ["Create MCP server", "Enable tools", "Authorize & copy URL", "Start audit"];
 
+// The MCP server prefixes every tool name with "ZohoCRM_", but the Zoho MCP
+// Console's own tool search only matches the un-prefixed name (e.g.
+// "getModules") — so strip it for anything the user reads or searches with,
+// while CONNECT_WIZARD_TOOL_GROUPS itself keeps the real prefixed names for
+// matching against the live tools/list response.
+export function displayToolName(tool: string): string {
+  return tool.replace(/^ZohoCRM_/, "");
+}
+
 export const CONNECT_WIZARD_TOOL_GROUPS = [
   {
     label: "Core structure & automation (required)",
