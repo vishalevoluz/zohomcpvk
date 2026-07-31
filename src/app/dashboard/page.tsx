@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
@@ -62,38 +62,17 @@ export default function DashboardPage() {
   const resolvedEntityCount = CRM_ENTITIES.filter(e => isEntityResolved(crm.entityData[e.type])).length;
   const isPrefetching = !!config && resolvedEntityCount < CRM_ENTITIES.length;
 
-  // Gates the CRM Dashboard tab behind a single loading screen for the initial
-  // load only — once all data sources have resolved once, it stays revealed
-  // even if a later manual refresh sets isPrefetching back to true.
-  const [dashboardReady, setDashboardReady] = useState(false);
-  useEffect(() => {
-    if (config && !isPrefetching) setDashboardReady(true);
-  }, [config, isPrefetching]);
-
-  const wasConnected = useRef(false);
-  useLayoutEffect(() => {
-    // Newly-mounted dashboard content pushes page height way past the connect
-    // form's — keep the viewport pinned where the user was instead of letting
-    // the browser jump it around as that content streams in.
-    if (config && !wasConnected.current) {
-      window.scrollTo({ top: 0 });
-    }
-    wasConnected.current = !!config;
-  }, [config]);
-
   function onConnected(cfg: McpConfig, t: McpTool[]) {
     setConfig(cfg);
     setTools(t);
     setActiveSection("crm-dashboard");
     setSelectedTool(null);
-    setDashboardReady(false);
   }
 
   function onDisconnect() {
     setConfig(null);
     setTools([]);
     setSelectedTool(null);
-    setDashboardReady(false);
   }
 
   function onSelectSection(s: Section) {
@@ -131,7 +110,11 @@ export default function DashboardPage() {
     );
   }
 
-  if (!dashboardReady) {
+  // Gates the entire app shell behind a single full-page loading screen
+  // whenever core CRM data isn't resolved yet — both on the initial connect
+  // and on every later manual refresh, so refreshing shows the same loader
+  // instead of a slim inline bar under an already-rendered dashboard.
+  if (isPrefetching) {
     return (
       <div className="evo-loader-page">
         <div className="evo-loader-wrap">
@@ -161,26 +144,9 @@ export default function DashboardPage() {
 
       <div className="app-main">
         <ConnectedStatus config={config} onDisconnect={onDisconnect} />
-        {isPrefetching && (
-          <div className="connect-progress">
-            <span className="spinner" />
-            <span className="connect-progress-label">
-              Loading {resolvedEntityCount}/{CRM_ENTITIES.length} data sources…
-            </span>
-            <div className="connect-progress-track">
-              <div
-                className="connect-progress-fill"
-                style={{ width: `${(resolvedEntityCount / CRM_ENTITIES.length) * 100}%` }}
-              />
-            </div>
-            <span className="connect-progress-pct">
-              {Math.round((resolvedEntityCount / CRM_ENTITIES.length) * 100)}%
-            </span>
-          </div>
-        )}
 
         {/* Keep audit panels mounted so loaded data survives section switches.
-            No loading fallback needed here — dashboardReady is guaranteed true
+            No loading fallback needed here — isPrefetching is guaranteed false
             by the time this renders (see the full-page loader early-return above). */}
         <div style={{ display: activeSection === "crm-dashboard" ? undefined : "none" }}>
           <BusinessView
