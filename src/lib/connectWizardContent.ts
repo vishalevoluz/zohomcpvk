@@ -23,11 +23,14 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     tools: ["ZohoCRM_executeCOQLQuery", "ZohoCRM_getRecords", "ZohoCRM_getRecordCount"],
   },
   {
+    // getApprovalProcess and getScheduledJobs were removed from this list —
+    // neither exists in Zoho's real MCP tool catalogue, so they showed red
+    // forever and sent users hunting for a checkbox the console never had.
+    // Approvals and schedules are treated as manual-review items instead.
     label: "Extended coverage (nice to have)",
     tools: [
       "ZohoCRM_getOrganization", "ZohoCRM_getEmailTemplates", "ZohoCRM_getValidationRules",
-      "ZohoCRM_getAssignmentRules", "ZohoCRM_getApprovalProcess", "ZohoCRM_getLayoutRules",
-      "ZohoCRM_getScheduledJobs", "ZohoCRM_getConnections",
+      "ZohoCRM_getAssignmentRules", "ZohoCRM_getLayoutRules", "ZohoCRM_getConnections",
     ],
   },
 ];

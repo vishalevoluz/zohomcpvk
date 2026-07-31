@@ -111,8 +111,9 @@ export function computeTopActions(
   ruleCoverage: RuleCoverage | null = null,
   moduleRecordCounts: ModuleRecordCountsState = { counts: {}, toolAvailable: false, resolved: false },
   pipelineStageCount: number = pipelineStages.items.length,
+  outOfOrderStageCount: number = pipelineStages.items.filter(s => s.outOfOrder).length,
 ): { actions: PriorityAction[]; allActions: PriorityAction[]; allResolved: boolean; overflowCount: number; allLowImpact: boolean; currentScore: number; uncertain: UncertainFinding[] } {
-  const currentScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage).total;
+  const currentScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount).total;
   const { findings, loadingIds, uncertain } = evaluateFindings({
     entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol: null,
   });
@@ -138,7 +139,7 @@ export function computeTopActions(
       id: f.id, title: copy.title, why: copy.why(f), owner: copy.owner, timeToValue: copy.timeToValue,
       impact: f.impact, effort: f.effort, quickWin: f.impact === "High" && f.effort === "Easy",
       targetSection: f.targetSection, offenders: f.offenders, stakeLabel: f.stakeLabel, honesty: f.honesty,
-      projectedGain: estimateScoreGain(f.id, entityData, pipelineStageCount, ruleCoverage),
+      projectedGain: estimateScoreGain(f.id, entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount),
       rank: i + 1,
     };
   });

@@ -375,10 +375,7 @@ function generateRecommendations(
 
   // User-based recommendations
   if (users.length > 0) {
-    const inactiveUsers = users.filter(u => {
-      const r = u as Record<string, unknown>;
-      return r.status === "Inactive" || r.active === false || r.enabled === false;
-    });
+    const inactiveUsers = users.filter(isInactiveUser);
     if (inactiveUsers.length > 0) {
       recs.push({
         id: "inactive-users",
@@ -1441,12 +1438,17 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
     },
     {
       key: "schedules", label: "Schedules", value: ruleCoverage?.scheduleCount ?? 0,
-      severity: ruleCoverage?.scheduleCount === 0 ? "critical" : ruleCoverage?.scheduleCount ? "good" : "warning",
+      // No MCP tool exists for listing schedules at all (not in Zoho's real
+      // catalogue) — this must read the same as any other "couldn't verify"
+      // tile (a dash, not a number), never a fake "0" or a spuriously-wrapped
+      // count from a loosely-matched tool.
+      severity: ruleCoverage === null || ruleCoverage.scheduleCount === null ? "unknown" : ruleCoverage.scheduleCount === 0 ? "critical" : "good",
       note: ruleCoverage === null ? "Loading…"
-        : ruleCoverage.scheduleCount === null ? "No schedule-listing tool connected"
+        : ruleCoverage.scheduleCount === null ? "Couldn't check — no schedule-listing tool found"
         : ruleCoverage.scheduleCount === 0 ? "No schedules configured"
         : "click to see active/inactive and last run",
       clickable: !!ruleCoverage?.scheduleCount,
+      unknown: ruleCoverage !== null && ruleCoverage.scheduleCount === null,
       source: ruleCoverage?.scheduleCount === null ? "Source: no schedule-listing tool connected for this CRM" : `Source: schedule listing — ${ruleCoverage?.scheduleCount ?? 0} record${(ruleCoverage?.scheduleCount ?? 0) !== 1 ? "s" : ""}`,
     },
     {
@@ -1646,13 +1648,18 @@ const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Sect
   { type: "tasks",     label: "Activity",  targetSection: "modules" },
 ];
 
-function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOfOrderStageCount: number): ConfigRow[] {
+function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOfOrderStageCount: number, pipelineCount: number | null): ConfigRow[] {
   return CONFIG_ROW_DEFS.map(def => {
     const st = entityData[def.type];
     if (!isEntityResolved(st)) {
       return { key: def.type, label: def.label, value: "…", status: "Loading", severity: "neutral" as const, targetSection: def.targetSection, source: "Loading…" };
     }
-    const count = st.items.length;
+    // The generic zero-param getPipelines() call this entity state comes from
+    // has no layout_id to scope by, so it can undercount an org with more
+    // than one pipeline on the Deals layout — pipelineCount (from the real
+    // getLayouts -> getPipelines chain in usePipelineStages.ts) is the
+    // authoritative number once it's resolved.
+    const count = def.type === "pipelines" && pipelineCount !== null ? pipelineCount : st.items.length;
     const source = st.toolUsed ? `Source: ${st.toolUsed} — ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found";
     if (count === 0) {
       // A fetch error and a genuinely empty CRM both leave items at [] — only
@@ -1968,7 +1975,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const functionsWithIssuesCount = scannedFnIds.filter(id => (functionRecords.issuesByFnId[id]?.length ?? 0) > 0).length;
   const functionsWithIssuesPct = scannedFnCount > 0 ? Math.round((functionsWithIssuesCount / scannedFnCount) * 100) : 0;
   const functionZiaSummary = buildFunctionZiaSummary(functionsWithIssuesPct, scannedFnCount, functionDuplicates, functionSuspiciousNames.length, functionRecords.failureCount);
-  const configRows = computeConfigRows(entityData, pipelineStages.items.filter(s => s.outOfOrder).length);
+  const configRows = computeConfigRows(
+    entityData,
+    pipelineStages.items.filter(s => s.outOfOrder).length,
+    pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null,
+  );
   const workflowBreakdown = computeWorkflowBreakdown(entityData);
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);

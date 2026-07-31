@@ -87,10 +87,39 @@ export function isAdminProfile(item: unknown): boolean {
   return /admin/i.test(String(r.name ?? r.label ?? ""));
 }
 
+// The name of the profile a *user* is assigned, as opposed to isAdminProfile
+// above (which tests a profile catalog entry itself). Zoho's Users API nests
+// this as profile: { id, name } rather than a flat string.
+export function userProfileName(user: unknown): string {
+  if (!user || typeof user !== "object") return "";
+  const r = user as Record<string, unknown>;
+  const p = r.profile ?? r.Profile;
+  if (!p) return "";
+  if (typeof p === "string") return p;
+  if (typeof p === "object") return String((p as Record<string, unknown>).name ?? (p as Record<string, unknown>).label ?? "");
+  return "";
+}
+
+// Counting admin-profile PROFILES (isAdminProfile over the profile catalog)
+// answers a different question than counting admin-profile USERS — an org
+// can have just one "Administrator" profile definition while assigning it to
+// every single user. Team Security cares about the latter: how many people
+// actually hold elevated access, regardless of how many profile definitions
+// exist.
+export function isAdminProfileUser(user: unknown): boolean {
+  return /admin/i.test(userProfileName(user));
+}
+
 export function isInactiveUser(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
   const r = item as Record<string, unknown>;
-  return r.status === "Inactive" || r.active === false || r.enabled === false;
+  if (r.active === false || r.enabled === false) return true;
+  // Case-insensitive: Zoho's Users API returns a lowercase "active"/"inactive"
+  // status string — an exact-case match against "Inactive" let every real
+  // inactive user fall through as active, which fed both the Active Users
+  // count and the Team Security "no inactive licenses" claim being wrong in
+  // exactly opposite directions from the truth.
+  return String(r.status ?? "").toLowerCase() === "inactive";
 }
 
 export function isCustomModule(item: unknown): boolean {

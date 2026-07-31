@@ -77,6 +77,13 @@ interface StageDef {
 export const RECORD_SAMPLE_STAGE_IDS = ["leads", "contacts", "deals", "accounts", "invoices"] as const;
 export type RecordSampleStageId = (typeof RECORD_SAMPLE_STAGE_IDS)[number];
 
+// The per_page cap useCrmRecordSamples.ts requests (a single, unpaginated
+// call) — re-exported here so businessFindings.ts can tell "this sample IS
+// the full population" (fewer records came back than were asked for) apart
+// from "this is a genuine partial sample" (the cap was hit) without importing
+// a "use client" hook module into a plain data/scoring lib.
+export const RECORDS_SAMPLE_SIZE = 50;
+
 export interface RecordSampleState {
   items: unknown[];
   loading: boolean;
@@ -106,6 +113,14 @@ export interface PipelineStage {
 
 export interface PipelineStagesState {
   items: PipelineStage[];
+  // The real count of pipeline configs found via the getLayouts -> getPipelines
+  // chain for the Deals layout — distinct from `items.length` (the STAGE count
+  // of just the one picked/default pipeline). A generic zero-param getPipelines
+  // call elsewhere (entityData.pipelines) can undercount when an org has more
+  // than one pipeline on the same layout, since it has no layout_id to scope
+  // by and Zoho pipelines only ever exist on the Deals module anyway — this is
+  // the authoritative number for "how many pipelines does this org have."
+  pipelineCount: number;
   loading: boolean;
   error: string | null;
   lastFetched: number | null;

@@ -77,7 +77,7 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
   },
   "no-lead-source": {
     icon: "◫", headline: "You Don't Know What's Working",
-    body: f => `${f.count} leads have no source tagged — you can't tell which marketing actually brings in business.`,
+    body: f => `${f.count} lead${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "have" : "has"} no source tagged — you can't tell which marketing actually brings in business.`,
   },
 };
 

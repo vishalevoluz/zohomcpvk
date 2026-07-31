@@ -2,6 +2,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
 import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from "@/lib/flowMapModel";
+import { RECORDS_SAMPLE_SIZE } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import {
   hasEmailAction, isInactiveUser, isMandatoryField, isAdminProfile, isActiveWorkflow,
@@ -80,6 +81,21 @@ function recordEmail(r: unknown): string | null {
 }
 
 const STALE_LOGIN_THRESHOLD_DAYS = 90;
+
+// Zoho's getRecords sample is a single, unpaginated per_page=RECORDS_SAMPLE_SIZE
+// fetch — fewer records coming back than were asked for is the sample's own
+// proof that this IS the full population, not a partial slice of a much
+// bigger table (e.g. 25-of-25 deals). Only ever call it "a sample" when the
+// cap was actually hit and there could genuinely be more beyond it.
+function isFullPopulation(itemsLength: number): boolean {
+  return itemsLength < RECORDS_SAMPLE_SIZE;
+}
+
+function sampleHonesty(itemsLength: number, label: string): string {
+  return isFullPopulation(itemsLength)
+    ? `Confirmed from all ${itemsLength} ${label}${itemsLength !== 1 ? "s" : ""} in your CRM.`
+    : `Based on a sample of ${itemsLength} ${label}s — treat this as indicative, not exhaustive.`;
+}
 
 function formatShortDate(d: Date): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -245,8 +261,8 @@ const FINDING_DEFS: FindingDef[] = [
         offenders: stale.map((d, i) => getItemName(d, i)).filter(Boolean).slice(0, 5),
         count: stale.length,
         stakeLabel: totalValue > 0 ? `${formatMoney(totalValue, currencySymbol)} of pipeline value` : undefined,
-        sampleSize: items.length,
-        honesty: `Based on a sample of ${items.length} deals — treat this as indicative, not exhaustive.`,
+        sampleSize: isFullPopulation(items.length) ? undefined : items.length,
+        honesty: sampleHonesty(items.length, "deal"),
       };
     },
   },
@@ -261,8 +277,8 @@ const FINDING_DEFS: FindingDef[] = [
       return {
         offenders: bad.map((d, i) => getItemName(d, i)).filter(Boolean).slice(0, 5),
         count: bad.length,
-        sampleSize: items.length,
-        honesty: `Based on a sample of ${items.length} deals — treat this as indicative, not exhaustive.`,
+        sampleSize: isFullPopulation(items.length) ? undefined : items.length,
+        honesty: sampleHonesty(items.length, "deal"),
       };
     },
   },
@@ -299,11 +315,14 @@ const FINDING_DEFS: FindingDef[] = [
       const dupGroups = [...groupByEmail(all).entries()].filter(([, recs]) => recs.length > 1);
       if (dupGroups.length === 0) return null;
       const totalDupRecords = dupGroups.reduce((sum, [, recs]) => sum + recs.length, 0);
+      const fullyConfirmed = isFullPopulation(leadItems.length) && isFullPopulation(contactItems.length);
       return {
         offenders: dupGroups.slice(0, 5).map(([email, recs]) => `${email} (${recs.length}×)`),
         count: totalDupRecords,
-        sampleSize: all.length,
-        honesty: `Based on a sample of ${all.length} leads and contacts combined — the real duplicate count across your full database is likely higher.`,
+        sampleSize: fullyConfirmed ? undefined : all.length,
+        honesty: fullyConfirmed
+          ? `Confirmed from all ${all.length} leads and contacts combined in your CRM.`
+          : `Based on a sample of ${all.length} leads and contacts combined — the real duplicate count across your full database is likely higher.`,
       };
     },
   },
@@ -317,8 +336,8 @@ const FINDING_DEFS: FindingDef[] = [
       if (noSource.length === 0) return null;
       return {
         offenders: [], count: noSource.length,
-        sampleSize: items.length,
-        honesty: `Based on a sample of ${items.length} leads — treat this as indicative, not exhaustive.`,
+        sampleSize: isFullPopulation(items.length) ? undefined : items.length,
+        honesty: sampleHonesty(items.length, "lead"),
       };
     },
   },

@@ -6,7 +6,7 @@ import { executeTool, findParamLocations, findParam, setParam } from "@/lib/zoho
 import { extractArray, findToolForEntity } from "@/lib/useCrmEntities";
 import type { PipelineStage, PipelineStagesState } from "@/lib/flowMapModel";
 
-const INIT_STATE: PipelineStagesState = { items: [], loading: false, error: null, lastFetched: null };
+const INIT_STATE: PipelineStagesState = { items: [], pipelineCount: 0, loading: false, error: null, lastFetched: null };
 
 // This MCP server has no dedicated "list stages" tool — real stage names live in
 // a module's active layout's pipeline config, reached via getLayouts (module ->
@@ -120,7 +120,7 @@ export function usePipelineStages(
       }
 
       if (!layout) {
-        setData({ items: [], loading: false, error: null, lastFetched: Date.now() });
+        setData({ items: [], pipelineCount: 0, loading: false, error: null, lastFetched: Date.now() });
         return;
       }
 
@@ -139,7 +139,7 @@ export function usePipelineStages(
           durationMs: Date.now() - pipelinesStart, timestamp: new Date(),
         });
         const items = toPipelineStages(pickPipeline(pipelines));
-        setData({ items, loading: false, error: null, lastFetched: Date.now() });
+        setData({ items, pipelineCount: pipelines.length, loading: false, error: null, lastFetched: Date.now() });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Failed to fetch pipelines";
         onLog({

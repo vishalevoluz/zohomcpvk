@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
@@ -48,17 +48,25 @@ function scoreAutomationCoverage(modules: unknown[], workflows: unknown[], ruleC
   return Math.round(20 * (covered / coreApiNames.length));
 }
 
-function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], pipelineStageCount: number): number {
+function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], pipelineStageCount: number, outOfOrderStageCount: number): number {
   let score = 20;
   if (pipelines.length === 0) score -= 7;
   if (blueprints.length === 0) score -= 7;
   if (pipelineStageCount === 0) score -= 7;
+  // A pipeline with stages sequenced after Closed Won/Lost is misconfigured
+  // even though stages technically exist — deals shouldn't have anywhere to
+  // go once a pipeline is closed, so this can't score as if stages were fine.
+  if (outOfOrderStageCount > 0) score -= 7;
   return Math.max(0, score);
 }
 
 function scoreAccessSecurity(profiles: unknown[], users: unknown[]): number {
   let score = 20;
-  const adminCount = profiles.filter(isAdminProfile).length;
+  // How many USERS actually hold elevated access, not how many admin-named
+  // profile definitions exist — an org can have a single "Administrator"
+  // profile assigned to every user, which the profile-catalog count alone
+  // would completely miss.
+  const adminCount = users.filter(isAdminProfileUser).length;
   if (adminCount > 2) score -= 5;
   const inactiveUsers = users.filter(isInactiveUser).length;
   score -= Math.min(10, inactiveUsers * 3);
@@ -75,7 +83,10 @@ function scoreDataArchitecture(fields: unknown[], modules: unknown[]): number {
   // actually being inflated by empty/unused ones (read-only or nobody can
   // create/edit records in them) — that's the real clutter, not the number.
   const activeModules = modules.filter(m => !isDeletedModule(m));
-  const emptyModuleCount = activeModules.filter(isEmptyModule).length;
+  // Hidden takes precedence over empty — same rule the Modules panel's own
+  // Active/Hidden/Empty breakdown uses, so a module counted as "hidden" there
+  // can't also inflate a separate "empty" count shown elsewhere.
+  const emptyModuleCount = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m)).length;
   if (activeModules.length > 15 && emptyModuleCount > 0) score -= 5;
   return Math.max(0, score);
 }
@@ -127,11 +138,12 @@ function zoneForTotal(total: number): { zone: HealthZone; verdict: string; color
 export function computeHealthScore(
   entityData: Record<CrmEntityType, EntityState>,
   pipelineStageCount: number = entityData.stages.items.length,
-  ruleCoverage: RuleCoverage | null = null
+  ruleCoverage: RuleCoverage | null = null,
+  outOfOrderStageCount: number = 0,
 ): HealthScoreResult {
   const dimensions: HealthScoreDimensions = {
     automationCoverage: scoreAutomationCoverage(entityData.modules.items, entityData.workflows.items, ruleCoverage),
-    processCompleteness: scoreProcessCompleteness(entityData.pipelines.items, entityData.blueprints.items, pipelineStageCount),
+    processCompleteness: scoreProcessCompleteness(entityData.pipelines.items, entityData.blueprints.items, pipelineStageCount, outOfOrderStageCount),
     accessSecurity: scoreAccessSecurity(entityData.profiles.items, entityData.users.items),
     dataArchitecture: scoreDataArchitecture(entityData.fields.items, entityData.modules.items),
     automationHealth: scoreAutomationHealth(entityData.workflows.items),
@@ -163,8 +175,9 @@ export function estimateScoreGain(
   entityData: Record<CrmEntityType, EntityState>,
   pipelineStageCount: number,
   ruleCoverage: RuleCoverage | null,
+  outOfOrderStageCount = 0,
 ): number | null {
-  const before = computeHealthScore(entityData, pipelineStageCount, ruleCoverage).total;
+  const before = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount).total;
   let mutated: Record<CrmEntityType, EntityState>;
   let mutatedPipelineStageCount = pipelineStageCount;
 
@@ -226,7 +239,7 @@ export function estimateScoreGain(
       return null;
   }
 
-  const after = computeHealthScore(mutated, mutatedPipelineStageCount, ruleCoverage).total;
+  const after = computeHealthScore(mutated, mutatedPipelineStageCount, ruleCoverage, outOfOrderStageCount).total;
   return Math.max(0, Math.round(after) - Math.round(before));
 }
 

@@ -171,13 +171,20 @@ export function getItemName(item: unknown, idx: number): string {
   if (typeof item === "number") return String(item);
   if (!item || typeof item !== "object") return `Item ${idx + 1}`;
   const r = item as Record<string, unknown>;
-  const fullName = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
+  // Zoho module records (Deals/Leads/Contacts/etc, fetched via COQL/getRecords)
+  // use Capitalized_With_Underscores field names, unlike the flatter entity
+  // list endpoints (workflows/blueprints/pipelines/users) this function also
+  // serves — without checking both casings, every record from a module whose
+  // primary field isn't literally "name" (e.g. Deals' "Deal_Name") fell
+  // through to the "Item N" placeholder regardless of having a real name.
+  const fullName = [r.First_Name ?? r.first_name, r.Last_Name ?? r.last_name].filter(Boolean).join(" ").trim();
   return String(
-    r.name ?? r.display_name ?? r.display_label ?? r.label ?? r.api_name ??
+    r.name ?? r.Deal_Name ?? r.Account_Name ?? r.Subject ?? r.Product_Name ?? r.Case_Number ??
+    r.display_name ?? r.display_label ?? r.label ?? r.api_name ??
     r.workflow_name ?? r.blueprint_name ?? r.pipeline_name ?? r.layout_name ??
     r.rule_name ?? r.process_name ??
     r.stage_name ?? r.title ?? r.full_name ?? (fullName || undefined) ??
-    r.email ??
+    r.email ?? r.Email ??
     // Zoho Blueprint list responses don't always carry a top-level name —
     // fall back to the driving field/layout/process label before giving up.
     nestedName(r.process_info) ?? nestedName(r.field) ?? nestedName(r.layout) ??

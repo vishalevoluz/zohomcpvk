@@ -188,6 +188,8 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
         entityData={entityData}
         pipelineStageCount={pipelineStages.items.length}
         ruleCoverage={ruleCoverage}
+        outOfOrderStageCount={pipelineStages.items.filter(s => s.outOfOrder).length}
+        pipelineCount={pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null}
       />
 
       {/* ── 3. What Is Costing You ── */}

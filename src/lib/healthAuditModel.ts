@@ -9,9 +9,9 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
-  isActiveWorkflow, isAdminProfile, isInactiveUser, isMandatoryField, hasEmailAction,
+  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isMandatoryField, hasEmailAction,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
-  isEmptyModule, moduleApiName, blueprintsForModule,
+  isEmptyModule, isHiddenModule, moduleApiName, blueprintsForModule,
 } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
@@ -312,9 +312,19 @@ function automationCoverageReason(entityData: Record<CrmEntityType, EntityState>
   return `${failing.length} active module${failing.length !== 1 ? "s" : ""} ${failing.length !== 1 ? "have" : "has"} no follow-up workflow or rule: ${failing.join(", ")}.`;
 }
 
-function processCompletenessChecklist(entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): ChecklistItem[] {
-  const pipelineCount = entityData.pipelines.items.length;
+function processCompletenessChecklist(
+  entityData: Record<CrmEntityType, EntityState>,
+  pipelineStageCount: number,
+  outOfOrderStageCount: number,
+  pipelineCountOverride: number | null,
+): ChecklistItem[] {
+  // The generic zero-param getPipelines() entityData.pipelines comes from has
+  // no layout_id to scope by, so it can undercount an org with more than one
+  // pipeline on the Deals layout — the override (from the real getLayouts ->
+  // getPipelines chain) is the authoritative number once it's resolved.
+  const pipelineCount = pipelineCountOverride ?? entityData.pipelines.items.length;
   const blueprintCount = entityData.blueprints.items.length;
+  const stagesOk = pipelineStageCount > 0 && outOfOrderStageCount === 0;
   return [
     {
       id: "process-pipeline", label: "A sales pipeline exists", status: pipelineCount > 0 ? "pass" : "fail",
@@ -327,32 +337,41 @@ function processCompletenessChecklist(entityData: Record<CrmEntityType, EntitySt
       weight: 7,
     },
     {
-      id: "process-stages", label: "Pipeline stages are defined", status: pipelineStageCount > 0 ? "pass" : "fail",
-      detail: pipelineStageCount > 0 ? `${pipelineStageCount} stage${pipelineStageCount !== 1 ? "s" : ""} defined on your Deals layout.` : "No pipeline stages were found.",
+      id: "process-stages", label: "Pipeline stages are in a valid order", status: stagesOk ? "pass" : "fail",
+      detail: pipelineStageCount === 0
+        ? "No pipeline stages were found."
+        : outOfOrderStageCount > 0
+          ? `${pipelineStageCount} stage${pipelineStageCount !== 1 ? "s" : ""} defined, but ${outOfOrderStageCount} ${outOfOrderStageCount !== 1 ? "are" : "is"} sequenced after a Closed Won/Lost stage.`
+          : `${pipelineStageCount} stage${pipelineStageCount !== 1 ? "s" : ""} defined on your Deals layout, in order.`,
       weight: 7,
     },
   ];
 }
 
-function processCompletenessReason(entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): string {
+function processCompletenessReason(entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number, outOfOrderStageCount: number): string {
   const missing: string[] = [];
   if (entityData.pipelines.items.length === 0) missing.push("no sales pipeline");
   if (entityData.blueprints.items.length === 0) missing.push("no blueprint process");
   if (pipelineStageCount === 0) missing.push("no defined pipeline stages");
+  else if (outOfOrderStageCount > 0) missing.push(`${outOfOrderStageCount} pipeline stage${outOfOrderStageCount !== 1 ? "s" : ""} sequenced after Closed Won/Lost`);
   if (missing.length === 0) return "A sales pipeline, blueprint process, and defined pipeline stages are all in place.";
   return `Missing: ${missing.join(", ")}.`;
 }
 
 function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
-  const adminCount = entityData.profiles.items.filter(isAdminProfile).length;
+  // Admin-profile USERS, not admin-named profile catalog entries — an org can
+  // define a single "Administrator" profile and still assign it to most of
+  // the team, which counting profile definitions alone would completely miss.
+  const adminCount = entityData.users.items.filter(isAdminProfileUser).length;
   const inactiveUsers = entityData.users.items.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
+  const userCount = entityData.users.items.length;
   return [
     {
       id: "access-admin-count", label: "Admin access is limited", status: adminCount <= 2 ? "pass" : "fail",
-      detail: profileCount > 0
-        ? `${adminCount} of ${profileCount} profile${profileCount !== 1 ? "s" : ""} ${adminCount !== 1 ? "are" : "is"} named like admin roles — we can see profile names but not their exact permissions, so confirm in Setup${adminCount > 2 ? " (more than 2 increases risk)" : ""}.`
-        : "No profiles found.",
+      detail: userCount > 0
+        ? `${adminCount} of ${userCount} user${userCount !== 1 ? "s" : ""} hold an admin-named profile${adminCount > 2 ? " (more than 2 increases risk)" : ""}.`
+        : "No users found.",
       weight: 5,
     },
     {
@@ -369,11 +388,12 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
 }
 
 function accessSecurityReason(entityData: Record<CrmEntityType, EntityState>): string {
-  const adminCount = entityData.profiles.items.filter(isAdminProfile).length;
+  const adminCount = entityData.users.items.filter(isAdminProfileUser).length;
   const inactiveUsers = entityData.users.items.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
+  const userCount = entityData.users.items.length;
   const issues: string[] = [];
-  if (adminCount > 2) issues.push(`${adminCount} of ${profileCount} profiles are named like admin roles (more than 2) — we can see names but not exact permissions, so confirm in Setup`);
+  if (adminCount > 2) issues.push(`${adminCount} of ${userCount} users hold an admin-named profile (more than 2)`);
   if (inactiveUsers > 0) issues.push(`${inactiveUsers} inactive user${inactiveUsers !== 1 ? "s" : ""} still licensed`);
   if (profileCount === 1) issues.push("only one profile exists, so there's no role separation");
   if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive users hold a license.";
@@ -400,7 +420,10 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
   const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m));
   const moduleCount = activeModules.length;
-  const emptyModules = activeModules.filter(isEmptyModule);
+  // Hidden takes precedence over empty — same rule the Modules panel's own
+  // Active/Hidden/Empty breakdown uses (see CRMOverviewDashboard.tsx), so this
+  // dimension's "N empty" figure can't disagree with that panel's count.
+  const emptyModules = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m));
   // A high module count only fails this check when it's actually inflated by
   // empty/unused modules — see scoreDataArchitecture's matching condition.
   const tooManyDueToClutter = moduleCount > 15 && emptyModules.length > 0;
@@ -425,7 +448,7 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
 function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>): string {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
   const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m));
-  const emptyModules = activeModules.filter(isEmptyModule);
+  const emptyModules = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m));
   const issues: string[] = [];
   if (mandatoryCount > 20) issues.push(`${mandatoryCount} mandatory fields (over the 20 recommended)`);
   if (activeModules.length > 15 && emptyModules.length > 0) {
@@ -476,8 +499,10 @@ export function buildHealthAuditModel(
   entityData: Record<CrmEntityType, EntityState>,
   pipelineStageCount: number,
   ruleCoverage: RuleCoverage | null,
+  outOfOrderStageCount = 0,
+  pipelineCountOverride: number | null = null,
 ): HealthAuditModel {
-  const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage);
+  const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount);
   const resolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t]));
 
   const dimensions: DimensionCard[] = DIMENSION_ORDER.map(key => {
@@ -493,8 +518,8 @@ export function buildHealthAuditModel(
         reason = automationCoverageReason(entityData, ruleCoverage);
         break;
       case "processCompleteness":
-        checklist = processCompletenessChecklist(entityData, pipelineStageCount);
-        reason = processCompletenessReason(entityData, pipelineStageCount);
+        checklist = processCompletenessChecklist(entityData, pipelineStageCount, outOfOrderStageCount, pipelineCountOverride);
+        reason = processCompletenessReason(entityData, pipelineStageCount, outOfOrderStageCount);
         break;
       case "accessSecurity":
         checklist = accessSecurityChecklist(entityData);

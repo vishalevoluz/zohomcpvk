@@ -8,12 +8,12 @@ import { moduleApiName, findBlueprintFieldApiName } from "@/lib/crmPredicates";
 import {
   RECORD_SAMPLE_STAGE_IDS,
   RECORD_SAMPLE_STAGE_MATCHERS,
+  RECORDS_SAMPLE_SIZE,
   type RecordSampleStageId,
   type RecordSampleState,
 } from "@/lib/flowMapModel";
 
 export const RECORDS_SAMPLE_TOOL = "ZohoCRM_getRecords";
-export const RECORDS_SAMPLE_SIZE = 50;
 
 const INIT_STATE: RecordSampleState = { items: [], loading: false, error: null, lastFetched: null, toolUsed: null };
 
