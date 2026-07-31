@@ -1742,10 +1742,15 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                | "pipelines" | "workflows" | "profiles" | "activity";
   const [selectedCard, setSelectedCard] = useState<CardKey | null>("modules");
   const detailPanelRef = useRef<HTMLDivElement>(null);
+  const isFirstCardRender = useRef(true);
   useEffect(() => {
     // Cards further down the left-hand list can sit well below the fold;
     // without this, selecting one pops the detail panel in at the top of
-    // the grid row, off-screen from where the user just clicked.
+    // the grid row, off-screen from where the user just clicked. Skip the
+    // very first render though — "modules" is preselected by default, and
+    // scrolling then would auto-scroll the page the instant it connects,
+    // before the user has clicked anything.
+    if (isFirstCardRender.current) { isFirstCardRender.current = false; return; }
     if (selectedCard) detailPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedCard]);
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
