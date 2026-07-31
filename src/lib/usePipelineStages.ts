@@ -28,9 +28,17 @@ function pickPipeline(pipelines: unknown[]): Record<string, unknown> | null {
   return (def ?? pipelines[0]) as Record<string, unknown>;
 }
 
+// Zoho stage configs signal a closed stage either through forecast_type
+// ("Closed Won"/"Closed Lost") or, on servers that omit that field, through
+// the stage name itself — both are checked so the flag doesn't silently no-op
+// on an MCP server that doesn't return forecast_type.
+function isClosedStage(s: { name: string; forecastType?: string }): boolean {
+  return /won|lost/i.test(s.forecastType ?? "") || /won|lost/i.test(s.name);
+}
+
 function toPipelineStages(pipeline: Record<string, unknown> | null): PipelineStage[] {
   const maps = Array.isArray(pipeline?.maps) ? (pipeline!.maps as unknown[]) : [];
-  return maps
+  const stages = maps
     .map(m => {
       const r = (m ?? {}) as Record<string, unknown>;
       const name = String(r.display_value ?? r.actual_value ?? "");
@@ -43,6 +51,10 @@ function toPipelineStages(pipeline: Record<string, unknown> | null): PipelineSta
     })
     .filter(s => s.name)
     .sort((a, b) => a.sequence - b.sequence);
+
+  const firstClosedIdx = stages.findIndex(isClosedStage);
+  if (firstClosedIdx === -1) return stages;
+  return stages.map((s, i) => (i > firstClosedIdx && !isClosedStage(s) ? { ...s, outOfOrder: true } : s));
 }
 
 // Fetches the real Deals pipeline stage names for the "How a Lead Moves Through

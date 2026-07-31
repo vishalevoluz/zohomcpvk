@@ -138,7 +138,7 @@ function getModule(w: ZohoWorkflow): string {
   if (!w.module) return "—";
   if (typeof w.module === "string") return w.module;
   const m = w.module as Record<string, unknown>;
-  return String(m.api_name ?? m.plural_label ?? m.name ?? "—");
+  return String(m.plural_label ?? m.name ?? m.api_name ?? "—");
 }
 function getTriggerEvents(w: ZohoWorkflow): string {
   if (w.execute_when?.type) return String(w.execute_when.type).replace(/_/g, " ");

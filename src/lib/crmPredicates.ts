@@ -43,7 +43,7 @@ export function workflowModuleLabel(item: unknown): string {
   if (typeof mod === "string") return mod;
   if (typeof mod === "object") {
     const m = mod as Record<string, unknown>;
-    return String(m.api_name ?? m.plural_label ?? m.name ?? "");
+    return String(m.plural_label ?? m.name ?? m.api_name ?? "");
   }
   return String(mod);
 }

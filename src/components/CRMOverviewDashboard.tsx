@@ -1646,7 +1646,7 @@ const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Sect
   { type: "tasks",     label: "Activity",  targetSection: "modules" },
 ];
 
-function computeConfigRows(entityData: Record<CrmEntityType, EntityState>): ConfigRow[] {
+function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOfOrderStageCount: number): ConfigRow[] {
   return CONFIG_ROW_DEFS.map(def => {
     const st = entityData[def.type];
     if (!isEntityResolved(st)) {
@@ -1678,6 +1678,15 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>): Conf
       case "profiles":
         status = count === 1 ? "Single profile" : "Configured";
         severity = count === 1 ? "warning" : "good";
+        break;
+      case "pipelines":
+        if (outOfOrderStageCount > 0) {
+          status = `${outOfOrderStageCount} stage${outOfOrderStageCount !== 1 ? "s" : ""} out of order`;
+          severity = "critical";
+        } else {
+          status = "Configured";
+          severity = "good";
+        }
         break;
       default:
         status = "Configured";
@@ -1954,7 +1963,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const functionsWithIssuesCount = scannedFnIds.filter(id => (functionRecords.issuesByFnId[id]?.length ?? 0) > 0).length;
   const functionsWithIssuesPct = scannedFnCount > 0 ? Math.round((functionsWithIssuesCount / scannedFnCount) * 100) : 0;
   const functionZiaSummary = buildFunctionZiaSummary(functionsWithIssuesPct, scannedFnCount, functionDuplicates, functionSuspiciousNames.length, functionRecords.failureCount);
-  const configRows = computeConfigRows(entityData);
+  const configRows = computeConfigRows(entityData, pipelineStages.items.filter(s => s.outOfOrder).length);
   const workflowBreakdown = computeWorkflowBreakdown(entityData);
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
@@ -2820,6 +2829,9 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               {pipelineStages.items.map(stage => (
                 <div key={stage.apiName} className="kpi-drilldown-row">
                   <span className="kpi-drilldown-name">{stage.name}</span>
+                  {stage.outOfOrder && (
+                    <span className="kpi-drilldown-badge status-inactive" title="This stage is sequenced after a Closed Won/Lost stage">Out of order</span>
+                  )}
                   {stage.forecastType && <span className="kpi-drilldown-badge neutral">{stage.forecastType}</span>}
                 </div>
               ))}

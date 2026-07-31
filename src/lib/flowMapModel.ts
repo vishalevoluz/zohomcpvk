@@ -98,6 +98,10 @@ export interface PipelineStage {
   apiName: string;
   sequence: number;
   forecastType?: string;
+  // True when this stage sits after a Closed Won/Lost stage in sequence order
+  // — deals shouldn't have anywhere to go once a pipeline reaches a closed
+  // stage, so a stage past that point signals a misconfigured pipeline.
+  outOfOrder?: boolean;
 }
 
 export interface PipelineStagesState {
@@ -751,11 +755,15 @@ export function buildFlowMap(
       const howWeKnow = stage.forecastType
         ? [`This is a real pipeline stage from your Deals layout, forecast type "${stage.forecastType}".`]
         : ["This is a real pipeline stage from your Deals layout."];
+      if (stage.outOfOrder) {
+        howWeKnow.push("This stage's sequence number places it after a Closed Won/Lost stage — deals shouldn't have anywhere to go once a pipeline is closed.");
+      }
+      const status: NodeStatus = stage.outOfOrder ? "gap" : "live";
       nodes.push({
-        id, lane: "qualification", col: baseCol + i, label: stage.name, status: "live",
+        id, lane: "qualification", col: baseCol + i, label: stage.name, status,
         explanation: {
           whatIsThis: PIPELINE_STAGE_WHAT_IS_THIS,
-          statusSentence: statusSentence("live"),
+          statusSentence: stage.outOfOrder ? "Out of order — sequenced after a Closed Won/Lost stage." : statusSentence("live"),
           howWeKnow,
           honesty: "Confirmed directly from your CRM's deal layout — not a sample.",
           technical: [`API name: ${stage.apiName}`],
