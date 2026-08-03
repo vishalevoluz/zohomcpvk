@@ -19,18 +19,28 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     ],
   },
   {
+    // executeCOQLQuery and getRecordCount were removed from this list —
+    // neither exists in Zoho's real MCP tool catalogue (verified against a
+    // live server's tools/list), so they showed red forever. getRecordCount
+    // is still used opportunistically if a server ever exposes a
+    // getRecordCount-style tool (see useModuleRecordCounts.ts), it's just
+    // not something we can tell users to go enable.
     label: "Record-level data quality (strongly recommended)",
-    tools: ["ZohoCRM_executeCOQLQuery", "ZohoCRM_getRecords", "ZohoCRM_getRecordCount"],
+    tools: ["ZohoCRM_getRecords"],
   },
   {
-    // getApprovalProcess and getScheduledJobs were removed from this list —
-    // neither exists in Zoho's real MCP tool catalogue, so they showed red
+    // getApprovalProcess, getScheduledJobs, getEmailTemplates,
+    // getAssignmentRules, and getConnections were removed from this list —
+    // none exist in Zoho's real MCP tool catalogue, so they showed red
     // forever and sent users hunting for a checkbox the console never had.
-    // Approvals and schedules are treated as manual-review items instead.
+    // Approvals/schedules/assignment rules are treated as manual-review
+    // items instead (assignment-rule coverage still lights up automatically
+    // if a getAssignmentRules-style tool ever appears — see
+    // useRuleCoverage.ts). getOrganization was also corrected to the real
+    // plural name, getOrganizations.
     label: "Extended coverage (nice to have)",
     tools: [
-      "ZohoCRM_getOrganization", "ZohoCRM_getEmailTemplates", "ZohoCRM_getValidationRules",
-      "ZohoCRM_getAssignmentRules", "ZohoCRM_getLayoutRules", "ZohoCRM_getConnections",
+      "ZohoCRM_getOrganizations", "ZohoCRM_getValidationRules", "ZohoCRM_getLayoutRules",
     ],
   },
 ];
