@@ -9,7 +9,7 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
-  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isMandatoryField, hasEmailAction,
+  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, hasEmailAction,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, moduleApiName, blueprintsForModule,
 } from "@/lib/crmPredicates";
@@ -363,7 +363,14 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   // define a single "Administrator" profile and still assign it to most of
   // the team, which counting profile definitions alone would completely miss.
   const adminCount = entityData.users.items.filter(isAdminProfileUser).length;
+  // "Licensed but not active" (disabled) is what actually costs money and is
+  // what the score penalty below is based on — deleted accounts hold no
+  // license. nonActiveCount (disabled + deleted) is shown in the detail text
+  // too so a deleted account still visible in the user list doesn't read as
+  // a clean bill of health, without inflating the score-affecting number.
   const inactiveUsers = entityData.users.items.filter(isInactiveUser).length;
+  const deletedUsers = entityData.users.items.filter(isDeletedUser).length;
+  const nonActiveCount = inactiveUsers + deletedUsers;
   const profileCount = entityData.profiles.items.length;
   const userCount = entityData.users.items.length;
   return [
@@ -375,8 +382,10 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       weight: 5,
     },
     {
-      id: "access-inactive-users", label: "No inactive users still licensed", status: inactiveUsers === 0 ? "pass" : "fail",
-      detail: inactiveUsers === 0 ? "No inactive users found." : `${inactiveUsers} inactive user${inactiveUsers !== 1 ? "s" : ""} still hold a license.`,
+      id: "access-inactive-users", label: "No inactive or deleted users still visible", status: nonActiveCount === 0 ? "pass" : "fail",
+      detail: nonActiveCount === 0
+        ? "No inactive or deleted users found."
+        : `${nonActiveCount} of ${userCount} user${userCount !== 1 ? "s" : ""} aren't active — ${inactiveUsers} disabled user${inactiveUsers !== 1 ? "s" : ""} still hold a license, and ${deletedUsers} deleted user${deletedUsers !== 1 ? "s are" : " is"} still showing up in the user list (no license cost, but worth confirming they're fully removed elsewhere).`,
       weight: inactiveUsers > 0 ? Math.min(10, inactiveUsers * 3) : 10,
     },
     {
@@ -390,13 +399,15 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
 function accessSecurityReason(entityData: Record<CrmEntityType, EntityState>): string {
   const adminCount = entityData.users.items.filter(isAdminProfileUser).length;
   const inactiveUsers = entityData.users.items.filter(isInactiveUser).length;
+  const deletedUsers = entityData.users.items.filter(isDeletedUser).length;
+  const nonActiveCount = inactiveUsers + deletedUsers;
   const profileCount = entityData.profiles.items.length;
   const userCount = entityData.users.items.length;
   const issues: string[] = [];
   if (adminCount > 2) issues.push(`${adminCount} of ${userCount} users hold an admin-named profile (more than 2)`);
-  if (inactiveUsers > 0) issues.push(`${inactiveUsers} inactive user${inactiveUsers !== 1 ? "s" : ""} still licensed`);
+  if (nonActiveCount > 0) issues.push(`${nonActiveCount} user${nonActiveCount !== 1 ? "s" : ""} aren't active (${inactiveUsers} disabled still licensed, ${deletedUsers} deleted)`);
   if (profileCount === 1) issues.push("only one profile exists, so there's no role separation");
-  if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive users hold a license.";
+  if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive or deleted users are still visible.";
   return `${issues.join("; ")}.`;
 }
 
@@ -501,9 +512,20 @@ export function buildHealthAuditModel(
   ruleCoverage: RuleCoverage | null,
   outOfOrderStageCount = 0,
   pipelineCountOverride: number | null = null,
+  // Sales Process Setup's score depends on pipelineStageCount/
+  // outOfOrderStageCount, which come from a separate fetch chain
+  // (usePipelineStages.ts: getLayouts -> getPipelines) that isn't part of
+  // HEALTH_SCORE_ENTITIES and can still be mid-flight after every other
+  // entity has resolved. Without this, the score/verdict render as final the
+  // instant core CRM data loads, using a still-empty pipelineStageCount (0
+  // stages, "no defined pipeline stages") — then flips to the real number a
+  // moment later when the pipeline fetch actually completes. That's the
+  // exact "score flickers between two numbers" and "Sales Process flips
+  // between 13/20 and 20/20" bug this flag exists to prevent.
+  pipelineStagesResolved = true,
 ): HealthAuditModel {
   const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount);
-  const resolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t]));
+  const resolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t])) && pipelineStagesResolved;
 
   const dimensions: DimensionCard[] = DIMENSION_ORDER.map(key => {
     const score = scores[key];

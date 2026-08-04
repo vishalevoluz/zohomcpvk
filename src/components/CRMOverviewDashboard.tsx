@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout, isDeletedModule, isHiddenModule, isEmptyModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout, isDeletedModule, isHiddenModule, isEmptyModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -679,31 +679,16 @@ function generateRecommendations(
     });
   }
 
-  // Schedules — an org-level count (not per-module) when getSchedules is connected.
-  if (ruleCoverage && ruleCoverage.scheduleCount !== null) {
-    if (ruleCoverage.scheduleCount === 0) {
-      recs.push({
-        id: "schedules",
-        title: "No Schedules Configured for Recurring Automation",
-        description: "This org has zero schedules set up. Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence — e.g. a nightly cleanup of stale Leads or a weekly digest email — instead of relying on someone to trigger them by hand.",
-        severity: "low", category: "architecture", icon: "◷",
-      });
-    } else {
-      recs.push({
-        id: "schedules",
-        title: `${ruleCoverage.scheduleCount} Schedule${ruleCoverage.scheduleCount > 1 ? "s" : ""} Configured for Recurring Automation`,
-        description: `This org has ${ruleCoverage.scheduleCount} schedule${ruleCoverage.scheduleCount > 1 ? "s" : ""} set up to run automation on a recurring cadence. Review them periodically to make sure they're still needed and pointed at the right functions or workflows.`,
-        severity: "low", category: "architecture", icon: "◷",
-      });
-    }
-  } else {
-    recs.push({
-      id: "schedules",
-      title: "Use Schedules to Automate Recurring Tasks",
-      description: "Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence — e.g. nightly data cleanup or a weekly digest email — without needing a person to trigger them by hand.",
-      severity: "low", category: "architecture", icon: "◷",
-    });
-  }
+  // Schedules have no dedicated listing tool anywhere in Zoho's real MCP
+  // catalogue (see isScheduleTool in useRuleCoverage.ts) — this can never be
+  // confirmed one way or the other, so it's a generic suggestion rather than
+  // a number-backed claim.
+  recs.push({
+    id: "schedules",
+    title: "Use Schedules to Automate Recurring Tasks",
+    description: "Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence — e.g. nightly data cleanup or a weekly digest email — without needing a person to trigger them by hand.",
+    severity: "low", category: "architecture", icon: "◷",
+  });
 
   return recs;
 }
@@ -1400,7 +1385,10 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
   const bpStatuses = blueprints.map(blueprintStatus);
   const draftBps = bpStatuses.filter(s => s === "draft").length;
   const inactiveBps = bpStatuses.filter(s => s === "inactive").length;
-  const activeUsers = users.filter(u => !isInactiveUser(u)).length;
+  const activeUsers = users.filter(isActiveUser).length;
+  // Deleted accounts don't consume a Zoho license — excluded from the
+  // "total licensed" figure, unlike disabled-but-not-deleted users.
+  const licensedUsers = users.filter(u => !isDeletedUser(u)).length;
   const layoutGap = Math.max(0, modules.length - layouts.length);
 
   return [
@@ -1423,7 +1411,7 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
     {
       key: "users", label: "Active Users", value: activeUsers,
       severity: usersFailed ? "unknown" : activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
-      note: usersFailed ? `Couldn't verify — ${entityData.users.error}` : `${users.length} total licensed — click to see who's active/inactive`,
+      note: usersFailed ? `Couldn't verify — ${entityData.users.error}` : `${licensedUsers} total licensed — click to see who's active/inactive/deleted`,
       clickable: users.length > 0 || usersFailed,
       unknown: usersFailed,
       source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
@@ -1437,19 +1425,16 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
       source: layoutsFailed ? `Source: ${entityData.layouts.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.layouts, layouts.length),
     },
     {
-      key: "schedules", label: "Schedules", value: ruleCoverage?.scheduleCount ?? 0,
       // No MCP tool exists for listing schedules at all (not in Zoho's real
       // catalogue) — this must read the same as any other "couldn't verify"
-      // tile (a dash, not a number), never a fake "0" or a spuriously-wrapped
-      // count from a loosely-matched tool.
-      severity: ruleCoverage === null || ruleCoverage.scheduleCount === null ? "unknown" : ruleCoverage.scheduleCount === 0 ? "critical" : "good",
-      note: ruleCoverage === null ? "Loading…"
-        : ruleCoverage.scheduleCount === null ? "Couldn't check — no schedule-listing tool found"
-        : ruleCoverage.scheduleCount === 0 ? "No schedules configured"
-        : "click to see active/inactive and last run",
-      clickable: !!ruleCoverage?.scheduleCount,
-      unknown: ruleCoverage !== null && ruleCoverage.scheduleCount === null,
-      source: ruleCoverage?.scheduleCount === null ? "Source: no schedule-listing tool connected for this CRM" : `Source: schedule listing — ${ruleCoverage?.scheduleCount ?? 0} record${(ruleCoverage?.scheduleCount ?? 0) !== 1 ? "s" : ""}`,
+      // tile (a dash, not a number), never a fake "0"/"1" from a
+      // spuriously-loose tool-name match.
+      key: "schedules", label: "Schedules", value: 0,
+      severity: "unknown",
+      note: ruleCoverage === null ? "Loading…" : "Couldn't verify — No matching tool found",
+      clickable: false,
+      unknown: ruleCoverage !== null,
+      source: "Source: no matching tool found",
     },
     {
       key: "functions", label: "Functions", value: functionSummary.active,
@@ -1513,12 +1498,15 @@ interface UserBreakdownRow {
   id: string;
   name: string;
   profile: string;
-  active: boolean;
+  status: UserStatusBucket;
 }
 
-// Inactive users surface first — they're the actionable ones (a licensed seat
-// with nobody using it), same "flag the useless ones first" convention as
-// the blueprint/module breakdowns above.
+const USER_BREAKDOWN_SORT_RANK: Record<UserStatusBucket, number> = { inactive: 0, deleted: 1, active: 2 };
+
+// Disabled-but-licensed users surface first — they're the actionable ones (a
+// licensed seat with nobody using it) — then deleted (informational, no
+// license cost), then active last, same "flag the useless ones first"
+// convention as the blueprint/module breakdowns above.
 function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): UserBreakdownRow[] {
   return entityData.users.items
     .map((u, i) => {
@@ -1530,10 +1518,10 @@ function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): U
         id: String(r.id ?? i),
         name: getItemName(u, i),
         profile,
-        active: !isInactiveUser(u),
+        status: userStatusBucket(u),
       };
     })
-    .sort((a, b) => Number(a.active) - Number(b.active));
+    .sort((a, b) => USER_BREAKDOWN_SORT_RANK[a.status] - USER_BREAKDOWN_SORT_RANK[b.status]);
 }
 
 interface LayoutModuleBreakdownRow {
@@ -1648,7 +1636,7 @@ const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Sect
   { type: "tasks",     label: "Activity",  targetSection: "modules" },
 ];
 
-function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOfOrderStageCount: number, pipelineCount: number | null): ConfigRow[] {
+function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOfOrderStageCount: number, pipelineCount: number | null, pipelineStagesResolved: boolean): ConfigRow[] {
   return CONFIG_ROW_DEFS.map(def => {
     const st = entityData[def.type];
     if (!isEntityResolved(st)) {
@@ -1673,7 +1661,7 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOf
     }
 
     let status: string;
-    let severity: Severity;
+    let severity: Severity | "neutral";
     switch (def.type) {
       case "workflows": {
         const inactive = st.items.filter(i => !isActiveWorkflow(i)).length;
@@ -1687,7 +1675,15 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOf
         severity = count === 1 ? "warning" : "good";
         break;
       case "pipelines":
-        if (outOfOrderStageCount > 0) {
+        // outOfOrderStageCount comes from a separate getLayouts -> getPipelines
+        // fetch (usePipelineStages.ts) that can still be mid-flight even after
+        // this generic pipelines entity has resolved — reporting "Configured"
+        // before that settles is what caused this row to flip between
+        // "Configured" and "N stages out of order" on identical data.
+        if (!pipelineStagesResolved) {
+          status = "Checking stage order…";
+          severity = "neutral";
+        } else if (outOfOrderStageCount > 0) {
           status = `${outOfOrderStageCount} stage${outOfOrderStageCount !== 1 ? "s" : ""} out of order`;
           severity = "critical";
         } else {
@@ -1979,6 +1975,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     entityData,
     pipelineStages.items.filter(s => s.outOfOrder).length,
     pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null,
+    !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null),
   );
   const workflowBreakdown = computeWorkflowBreakdown(entityData);
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
@@ -2529,7 +2526,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "users" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Active Users — Active vs Inactive</h4>
+            <h4>Active Users — Active vs Inactive vs Deleted</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {entityData.users.error && entityData.users.items.length === 0 ? (
@@ -2537,15 +2534,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           ) : (
           <>
           <div className="kpi-drilldown-summary">
-            <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.active).length} Active</span>
-            <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => !r.active).length} Inactive</span>
+            <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.status === "active").length} Active</span>
+            <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => r.status === "inactive").length} Inactive</span>
+            <span className="kpi-drilldown-stat neutral">{userBreakdown.filter(r => r.status === "deleted").length} Deleted</span>
           </div>
           <div className="kpi-drilldown-table">
             {userBreakdown.map(row => (
               <div key={row.id} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.profile}</span>
-                <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+                <span className={`kpi-drilldown-badge status-${row.status}`}>{row.status}</span>
               </div>
             ))}
           </div>

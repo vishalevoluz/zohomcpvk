@@ -65,7 +65,7 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
   },
   "unforecastable-deals": {
     icon: "❔", headline: "Deals Are Missing Key Forecast Data",
-    body: f => `${f.count} open deal${f.count !== 1 ? "s" : ""} are missing an amount or close date${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} — you can't forecast what you can't measure.`,
+    body: f => `${f.count} open deal${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "are" : "is"} missing an amount or close date${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} — you can't forecast what you can't measure.`,
   },
   "stale-user-logins": {
     icon: "⏱", headline: "Active Seats Nobody Is Using",

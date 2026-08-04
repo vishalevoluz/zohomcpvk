@@ -161,6 +161,14 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
     setTimeout(() => setHighlightedActionId(prev => (prev === id ? null : prev)), 2000);
   }
 
+  // Same "fetch settled, not necessarily successful" gate businessFindings.ts
+  // already uses (pipelineResolved there) — the Health Score gauge must not
+  // treat itself as final while this separate getLayouts -> getPipelines
+  // fetch is still mid-flight, or it renders a premature score built on a
+  // still-empty pipelineStageCount (see buildHealthAuditModel's
+  // pipelineStagesResolved param).
+  const pipelineStagesResolved = !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null);
+
   const costCards = useMemo(
     () => evaluateCostCards(entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts, currencySymbol),
     [entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts, currencySymbol],
@@ -190,6 +198,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
         ruleCoverage={ruleCoverage}
         outOfOrderStageCount={pipelineStages.items.filter(s => s.outOfOrder).length}
         pipelineCount={pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null}
+        pipelineStagesResolved={pipelineStagesResolved}
       />
 
       {/* ── 3. What Is Costing You ── */}

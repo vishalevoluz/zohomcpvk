@@ -121,7 +121,14 @@ export function zoneForValue(score: number, max: number): HealthZone {
 function zoneForTotal(total: number): { zone: HealthZone; verdict: string; color: string } {
   const zone = zoneForValue(total, 100);
   switch (zone) {
-    case "healthy": return { zone, verdict: "Your CRM is well-configured and running efficiently.", color: "#16A34A" };
+    // Deliberately hedged rather than "well-configured and running
+    // efficiently" — the 100-point score only covers automation coverage,
+    // process setup, access security, data structure, and workflow health.
+    // It says nothing about record-level data quality (stale/duplicate
+    // records, missing forecast data, etc.), which "What Is Costing You"
+    // below checks separately — a high score here must never imply those are
+    // clean too.
+    case "healthy": return { zone, verdict: "Your CRM's core structure — automation coverage, process setup, access controls, data structure, and workflow health — is solid. Check the sections below for any remaining data-quality issues.", color: "#16A34A" };
     case "needs-attention": return { zone, verdict: "Your CRM has gaps that are likely costing you leads or time.", color: "#D97706" };
     case "at-risk": return { zone, verdict: "Significant issues detected. These are impacting your sales process.", color: "#EA580C" };
     case "critical": return { zone, verdict: "Your CRM has serious problems. Immediate action recommended.", color: "#DC2626" };

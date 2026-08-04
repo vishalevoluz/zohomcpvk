@@ -5,9 +5,9 @@ import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from
 import { RECORDS_SAMPLE_SIZE } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import {
-  hasEmailAction, isInactiveUser, isMandatoryField, isAdminProfile, isActiveWorkflow,
+  hasEmailAction, isInactiveUser, isActiveUser, isMandatoryField, isAdminProfile, isActiveWorkflow,
   workflowModuleLabel, moduleApiName, unreferencedModules,
-  isDealStale, isDealUnforecastable, dealAmount,
+  isDealStale, isDealUnforecastable, dealAmount, dealCurrencySymbol,
   hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent, userLastLoginDate,
 } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
@@ -257,10 +257,14 @@ const FINDING_DEFS: FindingDef[] = [
       const stale = items.filter(d => isDealStale(d));
       if (stale.length === 0) return null;
       const totalValue: number = stale.reduce((sum: number, d) => sum + (dealAmount(d) ?? 0), 0);
+      // Prefer the currency symbol carried on the deal records themselves
+      // (every record has one) over the org-level lookup, which depends on
+      // getOrganizations being authorized on this MCP connection at all.
+      const symbol = stale.map(dealCurrencySymbol).find(Boolean) ?? currencySymbol;
       return {
         offenders: stale.map((d, i) => getItemName(d, i)).filter(Boolean).slice(0, 5),
         count: stale.length,
-        stakeLabel: totalValue > 0 ? `${formatMoney(totalValue, currencySymbol)} of pipeline value` : undefined,
+        stakeLabel: totalValue > 0 ? `${formatMoney(totalValue, symbol)} of pipeline value` : undefined,
         sampleSize: isFullPopulation(items.length) ? undefined : items.length,
         honesty: sampleHonesty(items.length, "deal"),
       };
@@ -287,7 +291,10 @@ const FINDING_DEFS: FindingDef[] = [
     severity: "WARNING", impact: "Medium", effort: "Easy", targetSection: "crm-dashboard",
     requires: ["users"],
     build: ({ entityData }) => {
-      const activeUsers = entityData.users.items.filter(u => !isInactiveUser(u));
+      // Literally active, not just "not flagged inactive" — a deleted user
+      // is neither active nor inactive-but-licensed, and must not be counted
+      // as a "paid seat" nobody's using.
+      const activeUsers = entityData.users.items.filter(isActiveUser);
       if (!userLoginFieldPresent(activeUsers)) return null; // this MCP server/org doesn't expose login activity — don't guess
       const stale = activeUsers.filter(u => { const age = userLoginAgeDays(u); return age !== null && age > STALE_LOGIN_THRESHOLD_DAYS; });
       if (stale.length === 0) return null;

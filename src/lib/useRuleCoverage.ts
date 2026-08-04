@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isEntityResolved, extractArray } from "@/lib/useCrmEntities";
+import { isEntityResolved } from "@/lib/useCrmEntities";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/businessScore";
 
@@ -43,17 +43,16 @@ const PER_MODULE_RULE_TOOLS: { key: PerModuleKey; pattern: RegExp }[] = [
   { key: "approval", pattern: /getapprovalrules$|getapprovalprocess(es)?$/i },
 ];
 
-// Schedules (recurring scheduled functions/actions) are an org-level concept
-// in Zoho CRM, not scoped to a module — fetched once as a flat count rather
-// than per core module. Multiple patterns (not just an exact "getSchedules$"
-// match) since MCP server implementations vary the tool name — same
-// broadened-matching approach as the layouts/workflows patterns in
-// useCrmEntities.ts, which use several regexes rather than one exact one.
-const SCHEDULE_TOOL_PATTERNS = [/getschedule(?!byid)/i, /listschedule/i, /allschedule/i, /getscheduledactions?/i];
-// Exported so CRMOverviewDashboard.tsx's schedule drilldown (which needs the
-// full records, not just a count) resolves the same tool this hook does.
-export function isScheduleTool(name: string): boolean {
-  return SCHEDULE_TOOL_PATTERNS.some(p => p.test(name));
+// Schedules (recurring scheduled functions/actions) have no dedicated
+// listing tool anywhere in Zoho's real MCP catalogue — unlike
+// validation/layout/assignment rules, there's no "getSchedules"-shaped tool
+// to even loosely pattern-match for. A previous broad regex match here
+// (getschedule/listschedule/allschedule/etc.) risked colliding with some
+// unrelated tool on a given server and reporting a fake, non-zero schedule
+// count — scheduleCount is always null ("couldn't check") below instead,
+// same honesty as the Activity card's "no matching tool found".
+export function isScheduleTool(_name: string): boolean {
+  return false;
 }
 
 // Assignment/approval/validation/layout rules and schedules each need a
@@ -86,11 +85,10 @@ export function useRuleCoverage(
     const matchedTools = PER_MODULE_RULE_TOOLS
       .map(def => ({ key: def.key, tool: tools.find(t => def.pattern.test(t.name)) }))
       .filter((m): m is { key: PerModuleKey; tool: McpTool } => !!m.tool);
-    const scheduleTool = tools.find(t => isScheduleTool(t.name)) ?? null;
-    if (matchedTools.length === 0 && !scheduleTool) return;
+    if (matchedTools.length === 0) return;
 
     const coreApiNames = automationCoverageApiNames(entityData.modules.items);
-    if (coreApiNames.length === 0 && !scheduleTool) return;
+    if (coreApiNames.length === 0) return;
 
     fetchedTick.current = refreshTick;
     void (async () => {
@@ -112,19 +110,9 @@ export function useRuleCoverage(
         }
       }
 
-      let scheduleCount: number | null = null;
-      if (scheduleTool) {
-        const start = Date.now();
-        try {
-          const output = await executeTool(config, scheduleTool.name, {});
-          scheduleCount = extractArray(output).length;
-          onLog({ id: crypto.randomUUID(), tool: scheduleTool.name, input: {}, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
-        } catch (e: unknown) {
-          onLog({ id: crypto.randomUUID(), tool: scheduleTool.name, input: {}, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
-        }
-      }
-
-      setRuleCoverage({ ...buckets, scheduleCount });
+      // No dedicated schedule-listing tool exists in Zoho's real MCP
+      // catalogue to even attempt — see isScheduleTool above.
+      setRuleCoverage({ ...buckets, scheduleCount: null });
     })();
   }, [config, tools, entityData.modules, onLog, refreshTick]);
 

@@ -21,6 +21,7 @@ interface Props {
   ruleCoverage: RuleCoverage | null;
   outOfOrderStageCount?: number;
   pipelineCount?: number | null;
+  pipelineStagesResolved?: boolean;
 }
 
 const DIMENSION_ICON_COMPONENTS: Record<DimensionIconKey, LucideIcon> = {
@@ -196,13 +197,13 @@ function CategoryCard({
   );
 }
 
-export default function HealthScoreDashboard({ entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount = 0, pipelineCount = null }: Props) {
+export default function HealthScoreDashboard({ entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount = 0, pipelineCount = null, pipelineStagesResolved = true }: Props) {
   const [expandedKey, setExpandedKey] = useState<DimensionKey | null>(null);
   const [displayScore, setDisplayScore] = useState(0);
 
   const model = useMemo(
-    () => buildHealthAuditModel(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount),
-    [entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount],
+    () => buildHealthAuditModel(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved),
+    [entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved],
   );
 
   useEffect(() => {

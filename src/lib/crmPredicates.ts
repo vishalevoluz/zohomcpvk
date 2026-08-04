@@ -110,16 +110,44 @@ export function isAdminProfileUser(user: unknown): boolean {
   return /admin/i.test(userProfileName(user));
 }
 
-export function isInactiveUser(item: unknown): boolean {
-  if (!item || typeof item !== "object") return false;
+export type UserStatusBucket = "active" | "inactive" | "deleted";
+
+// Three-way classification matching what the Full User List's status badge
+// already reads correctly — "deleted" is its own bucket (a removed account
+// that doesn't consume a license) and must never collapse into "inactive"
+// (a disabled-but-still-licensed seat), since Team Security and the Active
+// Users KPI need to treat those two very differently. Anything that isn't
+// literally "active" or "deleted" (e.g. "inactive", "disabled",
+// "deactivated" — Zoho MCP servers aren't consistent on the exact word)
+// defaults to "inactive" rather than silently counting as active.
+export function userStatusBucket(item: unknown): UserStatusBucket {
+  if (!item || typeof item !== "object") return "active";
   const r = item as Record<string, unknown>;
-  if (r.active === false || r.enabled === false) return true;
-  // Case-insensitive: Zoho's Users API returns a lowercase "active"/"inactive"
-  // status string — an exact-case match against "Inactive" let every real
-  // inactive user fall through as active, which fed both the Active Users
-  // count and the Team Security "no inactive licenses" claim being wrong in
-  // exactly opposite directions from the truth.
-  return String(r.status ?? "").toLowerCase() === "inactive";
+  const s = String(r.status ?? "").toLowerCase();
+  if (s === "deleted") return "deleted";
+  if (s === "active") return r.active === false || r.enabled === false ? "inactive" : "active";
+  if (s) return "inactive";
+  return r.active === false || r.enabled === false ? "inactive" : "active";
+}
+
+export function isDeletedUser(item: unknown): boolean {
+  return userStatusBucket(item) === "deleted";
+}
+
+export function isActiveUser(item: unknown): boolean {
+  return userStatusBucket(item) === "active";
+}
+
+// Case-insensitive and deleted-aware: Zoho's Users API returns a lowercase
+// "active"/"inactive" status string on some servers and "Disabled"/"Deleted"
+// on others — an exact-case match against "Inactive" (or one that didn't
+// separate "deleted" out) let every real inactive/deleted user fall through
+// as active, which fed both the Active Users count and the Team Security
+// "no inactive licenses" claim being wrong in exactly opposite directions
+// from the truth. Deleted accounts are deliberately excluded here — they
+// don't hold a license — see isDeletedUser for that bucket.
+export function isInactiveUser(item: unknown): boolean {
+  return userStatusBucket(item) === "inactive";
 }
 
 export function isCustomModule(item: unknown): boolean {
@@ -322,6 +350,17 @@ export function dealAmount(deal: unknown): number | null {
   if (typeof raw === "number") return raw;
   if (typeof raw === "string" && raw.trim() !== "" && !Number.isNaN(Number(raw))) return Number(raw);
   return null;
+}
+
+// Every Deal record Zoho returns carries its own "$currency_symbol" system
+// field (e.g. "$", "₹") — reading it straight off the record is more
+// reliable than a separate org-details call, which depends on a tool
+// (getOrganizations) this MCP connection may not have authorized at all.
+export function dealCurrencySymbol(deal: unknown): string | null {
+  if (!deal || typeof deal !== "object") return null;
+  const r = deal as Record<string, unknown>;
+  const raw = r.$currency_symbol ?? r.currency_symbol;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 }
 
 export function isDealUnforecastable(deal: unknown): boolean {

@@ -2667,6 +2667,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .kpi-drilldown-badge.status-inactive { background: var(--color-danger-bg); color: var(--bv-critical); }
 .kpi-drilldown-badge.status-draft { background: var(--color-warning-bg); color: var(--bv-warning); }
 .kpi-drilldown-badge.status-hidden { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
+.kpi-drilldown-badge.status-deleted { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
 .kpi-drilldown-badge.status-empty { background: var(--color-warning-bg); color: var(--bv-warning); }
 .kpi-drilldown-flag {
   font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
