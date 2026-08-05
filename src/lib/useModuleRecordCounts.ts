@@ -5,7 +5,7 @@ import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool, findParamLocations, findParam, setParam } from "@/lib/zohoMcp";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
-import { moduleApiName, unreferencedModules } from "@/lib/crmPredicates";
+import { moduleApiName, unreferencedModules, isDeletedModule, isInternalModule } from "@/lib/crmPredicates";
 
 const RECORD_COUNT_TOOL_PATTERNS = [/getrecordcount$/i, /recordcount$/i];
 // Bounds how many getRecordCount calls one refresh makes — the shortlist
@@ -73,7 +73,8 @@ export function useModuleRecordCounts(
       return;
     }
 
-    const candidates = unreferencedModules(entityData.modules.items, entityData.workflows.items, entityData.blueprints.items)
+    const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+    const candidates = unreferencedModules(realModules, entityData.workflows.items, entityData.blueprints.items)
       .map(moduleApiName)
       .filter(Boolean)
       .slice(0, MAX_MODULES_TO_CHECK);

@@ -6,7 +6,7 @@ import { RECORDS_SAMPLE_SIZE } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import {
   hasEmailAction, isInactiveUser, isActiveUser, isMandatoryField, isAdminProfile, isActiveWorkflow,
-  workflowModuleLabel, moduleApiName, unreferencedModules,
+  workflowModuleLabel, moduleApiName, unreferencedModules, isDeletedModule, isInternalModule,
   isDealStale, isDealUnforecastable, dealAmount, dealCurrencySymbol,
   hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent, userLastLoginDate,
 } from "@/lib/crmPredicates";
@@ -229,7 +229,8 @@ const FINDING_DEFS: FindingDef[] = [
     severity: "REVIEW", impact: "Low", effort: "Easy", targetSection: "modules",
     requires: ["modules", "workflows", "blueprints"], requiresModuleRecordCounts: true,
     build: ({ entityData, moduleRecordCounts }) => {
-      const candidates = unreferencedModules(entityData.modules.items, entityData.workflows.items, entityData.blueprints.items);
+      const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+      const candidates = unreferencedModules(realModules, entityData.workflows.items, entityData.blueprints.items);
       if (candidates.length === 0) return null;
       if (moduleRecordCounts.toolAvailable) {
         const confirmedZero = candidates.filter(m => moduleRecordCounts.counts[moduleApiName(m)] === 0);

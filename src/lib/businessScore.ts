@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
@@ -87,11 +87,13 @@ function scoreDataArchitecture(fields: unknown[], modules: unknown[]): number {
   // have 20+ modules doing real work. It only costs points when the count is
   // actually being inflated by empty/unused ones (read-only or nobody can
   // create/edit records in them) — that's the real clutter, not the number.
-  // Deleted and hidden (user_hidden/system_hidden) modules are excluded from
-  // this count entirely — they aren't visible to anyone, so they can't be
-  // "clutter" a user actually sees in their module list.
-  const activeModules = modules.filter(m => !isDeletedModule(m) && !isHiddenModule(m));
-  const emptyModuleCount = activeModules.filter(isEmptyModule).length;
+  // Deleted and internal/system pseudo-modules are excluded entirely — they
+  // aren't real modules. Hidden (user_hidden/system_hidden) ones ARE kept in
+  // this count, matching the Modules KPI card in CRMOverviewDashboard.tsx —
+  // but excluded from the empty-count below (hidden takes precedence over
+  // empty, so a module isn't flagged both ways).
+  const activeModules = modules.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+  const emptyModuleCount = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m)).length;
   if (activeModules.length > 15 && emptyModuleCount > 0) score -= 5;
   return Math.max(0, score);
 }

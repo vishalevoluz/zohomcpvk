@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout, isDeletedModule, isHiddenModule, isEmptyModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -190,7 +190,7 @@ function generateRecommendations(
 
   const wfs      = entityData.workflows.items;
   const bps      = entityData.blueprints.items;
-  const mods     = entityData.modules.items.filter(m => !isDeletedModule(m));
+  const mods     = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
   const pipes    = entityData.pipelines.items;
   const stages   = entityData.stages.items;
   const layouts  = entityData.layouts.items;
@@ -720,7 +720,7 @@ const MODULE_CATEGORY_ORDER: Record<ModuleCategory, number> = { hidden: 0, empty
 // convention as the blueprint/workflow breakdowns elsewhere in this file.
 function computeModuleBreakdown(entityData: Record<CrmEntityType, EntityState>): ModuleBreakdownRow[] {
   return entityData.modules.items
-    .filter(m => !isDeletedModule(m))
+    .filter(m => !isDeletedModule(m) && !isInternalModule(m))
     .map((m, i) => {
       const r = (m ?? {}) as Record<string, unknown>;
       const apiName = moduleApiName(m);
@@ -1353,6 +1353,17 @@ function buildFunctionZiaSummary(
 
 interface FunctionKpiSummary { total: number; active: number; inactive: number; fetched: boolean; }
 
+// "Total CRM Items"/"total items across N sources" sums every entity's raw
+// item count — except modules, where the raw count includes Zoho's internal
+// pseudo-modules (a "module" record auto-generated per file-upload field,
+// subforms, etc. — see isInternalModule) and deleted ones. Applying the same
+// exclusion the Modules KPI card uses keeps this total from disagreeing with
+// that card over what "how many modules" even means.
+function entityItemCount(type: CrmEntityType, items: unknown[]): number {
+  if (type !== "modules") return items.length;
+  return items.filter(m => !isDeletedModule(m) && !isInternalModule(m)).length;
+}
+
 // Source attribution shown on hover — names the tool the count came from and
 // how many records it actually saw, so every number on the tile traces back
 // to a real fetch instead of being taken on faith.
@@ -1361,7 +1372,7 @@ function kpiSource(state: EntityState, count: number): string {
 }
 
 function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null, functionSummary: FunctionKpiSummary): KpiItem[] {
-  const modules = entityData.modules.items.filter(m => !isDeletedModule(m));
+  const modules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
   const blueprints = entityData.blueprints.items;
   const users = entityData.users.items;
   const layouts = entityData.layouts.items;
@@ -1761,7 +1772,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
   const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never">("all");
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
-  const layoutsByModule = useLayoutsByModule(config, tools, entityData.modules.items, selectedCard === "layouts", onLog);
+  const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+  const layoutsByModule = useLayoutsByModule(config, tools, realModules, selectedCard === "layouts", onLog);
   const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
   const [expandedFunctionDuplicate, setExpandedFunctionDuplicate] = useState<string | null>(null);
@@ -1948,7 +1960,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
 
   const recommendations = generateRecommendations(entityData, tools, ruleCoverage, functionHealth);
   const filteredRecs = recommendations.filter(r => r.category === activeTab);
-  const totalItems = CRM_ENTITIES.reduce((sum, e) => sum + entityData[e.type].items.length, 0);
+  // Modules get the same deleted/internal-pseudo-module exclusion as the
+  // Modules KPI card (see computeKpis) so this total agrees with it instead
+  // of quietly including the raw, junk-inflated module count.
+  const totalItems = CRM_ENTITIES.reduce((sum, e) => sum + entityItemCount(e.type, entityData[e.type].items), 0);
   const loadingCount = CRM_ENTITIES.filter(e => entityData[e.type].loading).length;
   const loadedCount = CRM_ENTITIES.filter(e => entityData[e.type].lastFetched !== null).length;
   const ziaTool = findZiaTool(tools);
@@ -1959,7 +1974,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   });
   const moduleBreakdown = selectedCard === "modules" ? computeModuleBreakdown(entityData) : [];
   const blueprintBreakdown = selectedCard === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
-  const layoutBreakdown = selectedCard === "layouts" ? computeLayoutBreakdown(entityData.modules.items, layoutsByModule.byModule) : [];
+  const layoutBreakdown = selectedCard === "layouts" ? computeLayoutBreakdown(realModules, layoutsByModule.byModule) : [];
   const scheduleBreakdown = selectedCard === "schedules" ? computeScheduleBreakdown(scheduleRecords.items) : [];
   const ziaScheduleInsight = selectedCard === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
@@ -2119,7 +2134,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     drawHeader();
 
     // ── KPI strip ──
-    const totalItems = CRM_ENTITIES.reduce((sum, e) => sum + entityData[e.type].items.length, 0);
+    const totalItems = CRM_ENTITIES.reduce((sum, e) => sum + entityItemCount(e.type, entityData[e.type].items), 0);
     const errorCount = CRM_ENTITIES.filter(e => !!entityData[e.type].error).length;
     const allRecs = sections.flatMap(s => s.recs);
     const highCount = allRecs.filter(r => r.severity === "high").length;

@@ -183,15 +183,35 @@ export function isDeletedModule(item: unknown): boolean {
   return String(r.status ?? "").toLowerCase() === "deleted";
 }
 
-// Real Zoho API uses "viewable", not "visible" — checked defensively across
-// both plus show_as_tab and visibility, plus the status string ("user_hidden"
-// hidden by a user's profile, "system_hidden"/"hidden" hidden by Zoho or an
-// admin) — same full check ModulesAudit.tsx verified against a live org.
+// `status` ("visible" / "user_hidden" / "system_hidden") is Zoho's own
+// authoritative visibility concept and takes priority whenever present —
+// verified against a live org where 68 modules had status "visible" but
+// viewable:false (mostly subform-linked fields) and would have been
+// wrongly excluded by treating viewable/show_as_tab as hidden signals.
+// Those booleans (plus visibility === 0) are only a fallback for servers
+// whose module records don't carry a status string at all.
 export function isHiddenModule(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
   const r = item as Record<string, unknown>;
-  return r.visible === false || r.show_as_tab === false || r.viewable === false || r.visibility === 0 ||
-    ["user_hidden", "system_hidden", "hidden"].includes(String(r.status ?? "").toLowerCase());
+  const status = String(r.status ?? "").toLowerCase();
+  if (status) return ["user_hidden", "system_hidden", "hidden"].includes(status);
+  return r.visible === false || r.show_as_tab === false || r.viewable === false || r.visibility === 0;
+}
+
+// Zoho auto-generates a standalone "module" entry for every file/image-upload
+// field, plus internal bookkeeping entities (Locking_Information__s,
+// Functions__s, Scoring_Rules__s, Entity_Scores__s, …) — all sharing an
+// api_name ending in "__s". Verified against a live org: these accounted for
+// 81 of that org's 323 raw module records, none of which appear anywhere a
+// user would recognize as a real module (Zoho's own Setup > Modules list
+// doesn't show them either). Subforms and field-tracker entries are the same
+// kind of non-independent, embedded structure. None of these should count
+// toward "how many modules does this org have."
+export function isInternalModule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  if (r.generated_type === "subform" || r.generated_type === "field_tracker") return true;
+  return /__s$/.test(String(r.api_name ?? ""));
 }
 
 function isReadOnlyModule(r: Record<string, unknown>): boolean {

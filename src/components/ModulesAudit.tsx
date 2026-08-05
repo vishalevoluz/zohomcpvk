@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
+import { isDeletedModule, isInternalModule } from "@/lib/crmPredicates";
 import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
@@ -197,7 +198,14 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
       if (allMods.length === 0) {
         setError(`No module data found in selected tool${toolsToUse.length > 1 ? "s" : ""}.`);
       } else {
-        setModules(allMods);
+        // Deleted modules and Zoho's own internal pseudo-modules (a
+        // standalone "module" record auto-generated per file/image-upload
+        // field, plus bookkeeping entries like Locking_Information__s,
+        // Functions__s, subforms — see isInternalModule) aren't modules a
+        // user would ever recognize or need to audit — verified against a
+        // live org where these inflated the raw count by 100+ entries.
+        const realMods = allMods.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+        setModules(realMods);
         setFilter("all");
         setColumnFilters({});
       }

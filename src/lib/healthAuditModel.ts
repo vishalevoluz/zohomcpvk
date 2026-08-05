@@ -11,7 +11,7 @@ import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, hasEmailAction,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
-  isEmptyModule, isHiddenModule, moduleApiName, blueprintsForModule,
+  isEmptyModule, isHiddenModule, isInternalModule, moduleApiName, blueprintsForModule,
 } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
@@ -132,7 +132,10 @@ function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, 
     }
     case "inactive-users": return entityData.users.items.some(isInactiveUser);
     case "excessive-mandatory-fields": return entityData.fields.items.filter(isMandatoryField).length > 20;
-    case "empty-modules": return unreferencedModules(entityData.modules.items, entityData.workflows.items, entityData.blueprints.items).length > 3;
+    case "empty-modules": {
+      const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+      return unreferencedModules(realModules, entityData.workflows.items, entityData.blueprints.items).length > 3;
+    }
     default: return false;
   }
 }
@@ -382,13 +385,18 @@ function emptyModuleLabel(m: unknown, workflows: unknown[], blueprints: unknown[
 
 function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
-  // Deleted and hidden (user_hidden/system_hidden) modules are excluded from
-  // this count entirely — they aren't visible to anyone, so they can't be
-  // "clutter" a user actually sees in their module list. What's left is
-  // exactly the active + inactive-but-visible modules.
-  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isHiddenModule(m));
+  // Deleted and internal/system pseudo-modules (file-upload backing entries,
+  // subforms, etc. — see isInternalModule) are excluded entirely — they
+  // aren't real modules. Hidden (user_hidden/system_hidden) ones ARE kept in
+  // this count, same as the Modules KPI card in CRMOverviewDashboard.tsx, so
+  // both surfaces report the same total — hidden just means "not counted
+  // toward empty/clutter" below, not "excluded from the module count."
+  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
   const moduleCount = activeModules.length;
-  const emptyModules = activeModules.filter(isEmptyModule);
+  // Hidden takes precedence over empty — a module already hidden from users
+  // isn't "clutter" in the same sense an unused-but-visible one is, and this
+  // keeps a module from being flagged both ways.
+  const emptyModules = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m));
   // A high module count only fails this check when it's actually inflated by
   // empty/unused modules — see scoreDataArchitecture's matching condition.
   const tooManyDueToClutter = moduleCount > 15 && emptyModules.length > 0;
@@ -412,8 +420,8 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
 
 function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>): string {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
-  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isHiddenModule(m));
-  const emptyModules = activeModules.filter(isEmptyModule);
+  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+  const emptyModules = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m));
   const issues: string[] = [];
   if (mandatoryCount > 20) issues.push(`${mandatoryCount} mandatory fields (over the 20 recommended)`);
   if (activeModules.length > 15 && emptyModules.length > 0) {
