@@ -1325,7 +1325,7 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
   return { items, listState, failureCount, codeByFnId, issuesByFnId, scanProgress, fetchCode };
 }
 
-interface FunctionIssueRow { key: string; functionName: string; category: string; issue: FunctionIssue; }
+interface FunctionIssueRow { key: string; id: string; functionName: string; category: string; issue: FunctionIssue; }
 const FUNCTION_SEVERITY_ORDER: Record<FunctionIssue["severity"], number> = { high: 0, medium: 1, low: 2 };
 
 function buildFunctionZiaSummary(
@@ -1403,15 +1403,15 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
     {
       key: "blueprints", label: "Blueprints", value: blueprints.length,
       severity: blueprintsFailed ? "unknown" : blueprints.length > 0 && inactiveBps + draftBps === blueprints.length ? "critical" : inactiveBps > 0 ? "warning" : "good",
-      note: blueprintsFailed ? `Couldn't verify — ${entityData.blueprints.error}` : blueprints.length ? `${inactiveBps} inactive${draftBps > 0 ? `, ${draftBps} draft` : ""} — click to see which` : "No blueprints found",
+      note: blueprintsFailed ? `Couldn't verify: ${entityData.blueprints.error}` : blueprints.length ? `${inactiveBps} inactive${draftBps > 0 ? `, ${draftBps} draft` : ""}, click to see which` : "No blueprints found",
       clickable: blueprints.length > 0 || blueprintsFailed,
       unknown: blueprintsFailed,
-      source: blueprintsFailed ? `Source: ${entityData.blueprints.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.blueprints, blueprints.length),
+      source: blueprintsFailed ? `Source: ${entityData.blueprints.toolUsed ?? "no matching tool found"} (fetch failed, count not confirmed)` : kpiSource(entityData.blueprints, blueprints.length),
     },
     {
       key: "users", label: "Active Users", value: activeUsers,
       severity: usersFailed ? "unknown" : activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
-      note: usersFailed ? `Couldn't verify — ${entityData.users.error}` : `${licensedUsers} total licensed — click to see who's active/inactive/deleted`,
+      note: usersFailed ? `Couldn't verify — ${entityData.users.error}` : `${licensedUsers} total licensed — click to see who's active/inactive`,
       clickable: users.length > 0 || usersFailed,
       unknown: usersFailed,
       source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
@@ -1431,7 +1431,7 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
       // spuriously-loose tool-name match.
       key: "schedules", label: "Schedules", value: 0,
       severity: "unknown",
-      note: ruleCoverage === null ? "Loading…" : "Couldn't verify — No matching tool found",
+      note: ruleCoverage === null ? "Loading…" : "Couldn't verify: no matching tool found",
       clickable: false,
       unknown: ruleCoverage !== null,
       source: "Source: no matching tool found",
@@ -1475,18 +1475,18 @@ function blueprintDisplayName(bp: unknown, i: number, moduleLabel: string): stri
   const processInfo = r.process_info as Record<string, unknown> | undefined;
   const field = r.field as Record<string, unknown> | undefined;
   const fieldLabel = (processInfo?.field_label ?? processInfo?.name ?? field?.name ?? field?.api_name) as string | undefined;
-  if (moduleLabel && fieldLabel) return `${moduleLabel} — ${fieldLabel} Process`;
+  if (moduleLabel && fieldLabel) return `${moduleLabel}: ${fieldLabel} Process`;
   if (moduleLabel) return `${moduleLabel} Blueprint`;
-  return r.id ? `Blueprint ${r.id}` : `Item ${i + 1}`;
+  return r.id ? `Blueprint ${r.id}` : `Unnamed Blueprint ${i + 1}`;
 }
 
 function computeBlueprintBreakdown(entityData: Record<CrmEntityType, EntityState>): BlueprintBreakdownRow[] {
   return entityData.blueprints.items
     .map((bp, i) => {
-      const module = workflowModuleLabel(bp) || "—";
+      const module = workflowModuleLabel(bp) || "Unknown";
       return {
         id: String((bp as Record<string, unknown> | null)?.id ?? i),
-        name: blueprintDisplayName(bp, i, module === "—" ? "" : module),
+        name: blueprintDisplayName(bp, i, module === "Unknown" ? "" : module),
         module,
         status: blueprintStatus(bp),
       };
@@ -1504,11 +1504,13 @@ interface UserBreakdownRow {
 const USER_BREAKDOWN_SORT_RANK: Record<UserStatusBucket, number> = { inactive: 0, deleted: 1, active: 2 };
 
 // Disabled-but-licensed users surface first — they're the actionable ones (a
-// licensed seat with nobody using it) — then deleted (informational, no
-// license cost), then active last, same "flag the useless ones first"
-// convention as the blueprint/module breakdowns above.
+// licensed seat with nobody using it), active last, same "flag the useless
+// ones first" convention as the blueprint/module breakdowns above. Deleted
+// accounts are excluded entirely — they're gone from the org and hold no
+// license, so there's nothing actionable to show here.
 function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): UserBreakdownRow[] {
   return entityData.users.items
+    .filter(u => !isDeletedUser(u))
     .map((u, i) => {
       const r = (u ?? {}) as Record<string, unknown>;
       const profile = typeof r.profile === "object" && r.profile
@@ -1963,7 +1965,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
 
   const functionIssueRows: FunctionIssueRow[] = selectedCard === "functions"
-    ? functionRecords.items.flatMap(fn => (functionRecords.issuesByFnId[fn.id] ?? []).map((issue, i) => ({ key: `${fn.id}-${i}`, functionName: fn.name, category: fn.category, issue })))
+    ? functionRecords.items.flatMap(fn => (functionRecords.issuesByFnId[fn.id] ?? []).map((issue, i) => ({ key: `${fn.id}-${i}`, id: fn.id, functionName: fn.name, category: fn.category, issue })))
     : [];
   const sortedFunctionIssueRows = [...functionIssueRows].sort((a, b) => FUNCTION_SEVERITY_ORDER[a.issue.severity] - FUNCTION_SEVERITY_ORDER[b.issue.severity]);
   const scannedFnIds = Object.keys(functionRecords.issuesByFnId);
@@ -1982,7 +1984,9 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const profileItems = entityData.profiles.items;
-  const userItemsForPanel = entityData.users.items;
+  // Deleted accounts are gone from the org and hold no license — excluded
+  // from this list entirely, same as computeUserBreakdown above it.
+  const userItemsForPanel = entityData.users.items.filter(u => !isDeletedUser(u));
 
   // Load persisted feedback on mount
   useEffect(() => {
@@ -2475,7 +2479,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "blueprints" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Blueprints — Active / Inactive / Draft</h4>
+            <h4>Blueprints: Active / Inactive / Draft</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {entityData.blueprints.error && entityData.blueprints.items.length === 0 ? (
@@ -2526,7 +2530,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "users" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Active Users — Active vs Inactive vs Deleted</h4>
+            <h4>Active Users — Active vs Inactive</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {entityData.users.error && entityData.users.items.length === 0 ? (
@@ -2536,7 +2540,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           <div className="kpi-drilldown-summary">
             <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.status === "active").length} Active</span>
             <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => r.status === "inactive").length} Inactive</span>
-            <span className="kpi-drilldown-stat neutral">{userBreakdown.filter(r => r.status === "deleted").length} Deleted</span>
           </div>
           <div className="kpi-drilldown-table">
             {userBreakdown.map(row => (
@@ -2604,7 +2607,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "schedules" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Schedules — Active / Inactive / Last Run</h4>
+            <h4>Schedules: Active / Inactive / Last Run</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {scheduleRecords.unavailable && (
@@ -2719,8 +2722,24 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                         <span className={`kpi-drilldown-badge status-${row.issue.severity === "high" ? "inactive" : row.issue.severity === "medium" ? "draft" : "active"}`}>
                           {ISSUE_CATEGORY_LABELS[row.issue.category]}
                         </span>
+                        <button className="btn-secondary function-preview-btn" onClick={() => toggleFunctionPreview(row.id)}>
+                          {previewFunctionId === row.id ? "Hide Code" : "Preview Code"}
+                        </button>
                       </div>
                       <p className="function-issue-message">{row.issue.message}</p>
+                      {previewFunctionId === row.id && (
+                        <div className="function-code-preview">
+                          {functionRecords.codeByFnId[row.id]?.loading && (
+                            <p className="kpi-drilldown-progress"><span className="spinner" /> Downloading code from Zoho…</p>
+                          )}
+                          {functionRecords.codeByFnId[row.id]?.unavailable && (
+                            <p className="business-view-hint">Code not available for this function.</p>
+                          )}
+                          {functionRecords.codeByFnId[row.id]?.code && (
+                            <pre className="function-code-block"><code>{functionRecords.codeByFnId[row.id]!.code}</code></pre>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {sortedFunctionIssueRows.length > 15 && (

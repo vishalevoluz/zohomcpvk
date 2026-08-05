@@ -4148,23 +4148,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   padding: 2px 8px; border-radius: 999px; flex-shrink: 0;
 }
 
-.hsd-module-breakdown h4 {
-  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-  color: var(--color-text-tertiary); margin-bottom: 10px;
-}
-.hsd-module-breakdown-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 14px;
-}
-.hsd-module-group { display: flex; flex-direction: column; gap: 4px; }
-.hsd-module-group-label { font-size: 11.5px; font-weight: 700; color: var(--color-text); margin-bottom: 2px; }
-.hsd-module-row { display: grid; grid-template-columns: 1fr 60px 22px; align-items: center; gap: 6px; }
-.hsd-module-row-label { font-size: 11.5px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hsd-module-row-track { height: 5px; border-radius: 999px; background: var(--color-border); overflow: hidden; }
-.hsd-module-row-fill { display: block; height: 100%; border-radius: 999px; background: var(--color-brand); }
-.hsd-module-row-count { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); text-align: right; font-variant-numeric: tabular-nums; }
-
 .hsd-recommendations h4 {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   color: var(--color-text-tertiary); margin-bottom: 8px;

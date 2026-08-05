@@ -138,31 +138,6 @@ function CategoryCard({
             ))}
           </ul>
 
-          {dim.moduleBreakdown && dim.moduleBreakdown.length > 0 && (
-            <div className="hsd-module-breakdown">
-              <h4>Module Breakdown</h4>
-              <div className="hsd-module-breakdown-grid">
-                {dim.moduleBreakdown.map(group => {
-                  const total = group.rows.reduce((sum, r) => sum + r.count, 0);
-                  return (
-                    <div key={group.label} className="hsd-module-group">
-                      <span className="hsd-module-group-label">{group.label}</span>
-                      {group.rows.map(row => (
-                        <div key={row.label} className="hsd-module-row">
-                          <span className="hsd-module-row-label">{row.label}</span>
-                          <span className="hsd-module-row-track">
-                            <span className="hsd-module-row-fill" style={{ width: total > 0 ? `${(row.count / total) * 100}%` : "0%" }} />
-                          </span>
-                          <span className="hsd-module-row-count">{row.count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           <div className="hsd-recommendations">
             <h4>How to Maximize Your Score</h4>
             {dim.allSet ? (

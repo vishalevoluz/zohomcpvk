@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
@@ -62,13 +62,18 @@ function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], p
 
 function scoreAccessSecurity(profiles: unknown[], users: unknown[]): number {
   let score = 20;
+  // Deleted accounts are gone from the org and cost nothing — excluded up
+  // front so a deleted user with a leftover admin-named profile or "disabled"
+  // status can't affect this score, matching accessSecurityChecklist in
+  // healthAuditModel.ts (which must describe the same counts this scores).
+  const activeUsers = users.filter(u => !isDeletedUser(u));
   // How many USERS actually hold elevated access, not how many admin-named
   // profile definitions exist — an org can have a single "Administrator"
   // profile assigned to every user, which the profile-catalog count alone
   // would completely miss.
-  const adminCount = users.filter(isAdminProfileUser).length;
+  const adminCount = activeUsers.filter(isAdminProfileUser).length;
   if (adminCount > 2) score -= 5;
-  const inactiveUsers = users.filter(isInactiveUser).length;
+  const inactiveUsers = activeUsers.filter(isInactiveUser).length;
   score -= Math.min(10, inactiveUsers * 3);
   if (profiles.length === 1) score -= 10;
   return Math.max(0, score);

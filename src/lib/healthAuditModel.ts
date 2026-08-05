@@ -155,49 +155,6 @@ const SEVERITY_LABEL: Record<HealthZone, "Critical" | "At Risk" | "Needs Attenti
   healthy: "Healthy",
 };
 
-export interface ModuleBreakdownRow {
-  label: string;
-  count: number;
-}
-
-export interface ModuleBreakdownGroup {
-  label: string;
-  rows: ModuleBreakdownRow[];
-}
-
-// Raw attribute names straight off Zoho's getModules() response — verified
-// against a live org's payload (see the conversation this was built from).
-// Boolean fields are bucketed into "Yes"/"No"; everything else groups by its
-// raw string value (e.g. generated_type's "default"/"custom"/"subform"/...).
-const MODULE_BREAKDOWN_FIELDS: { key: string; label: string; boolean?: boolean }[] = [
-  { key: "generated_type", label: "Generated Type" },
-  { key: "status", label: "Status" },
-  { key: "viewable", label: "Viewable", boolean: true },
-  { key: "show_as_tab", label: "Show as Tab", boolean: true },
-  { key: "creatable", label: "Creatable", boolean: true },
-  { key: "editable", label: "Editable", boolean: true },
-  { key: "deletable", label: "Deletable", boolean: true },
-  { key: "api_supported", label: "API Supported", boolean: true },
-  { key: "isBlueprintSupported", label: "Blueprint Support", boolean: true },
-  { key: "quick_create", label: "Quick Create", boolean: true },
-];
-
-function buildModuleBreakdown(modules: unknown[]): ModuleBreakdownGroup[] {
-  if (modules.length === 0) return [];
-  return MODULE_BREAKDOWN_FIELDS.map(({ key, label, boolean }) => {
-    const counts = new Map<string, number>();
-    for (const m of modules) {
-      const r = (m ?? {}) as Record<string, unknown>;
-      const bucket = boolean ? (r[key] === true ? "Yes" : "No") : String(r[key] ?? "unknown");
-      counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
-    }
-    const rows = Array.from(counts.entries())
-      .map(([rowLabel, count]) => ({ label: rowLabel, count }))
-      .sort((a, b) => b.count - a.count);
-    return { label, rows };
-  });
-}
-
 export interface ChecklistItem {
   id: string;
   label: string;
@@ -232,8 +189,6 @@ export interface DimensionCard {
   reason: string;
   /** Only ever non-null for automationHealth, and only when its score is below 10. */
   criticalAlert: string | null;
-  /** Only ever non-null for dataArchitecture — a full module-attribute breakdown from the raw getModules() data. */
-  moduleBreakdown: ModuleBreakdownGroup[] | null;
 }
 
 export interface RoadmapEntry {
@@ -359,20 +314,19 @@ function processCompletenessReason(entityData: Record<CrmEntityType, EntityState
 }
 
 function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
+  // Deleted accounts are gone from the org and cost nothing — they're
+  // excluded up front so this whole check (and its user count) reflects only
+  // users that still actually exist.
+  const activeUsers = entityData.users.items.filter(u => !isDeletedUser(u));
   // Admin-profile USERS, not admin-named profile catalog entries — an org can
   // define a single "Administrator" profile and still assign it to most of
   // the team, which counting profile definitions alone would completely miss.
-  const adminCount = entityData.users.items.filter(isAdminProfileUser).length;
-  // "Licensed but not active" (disabled) is what actually costs money and is
-  // what the score penalty below is based on — deleted accounts hold no
-  // license. nonActiveCount (disabled + deleted) is shown in the detail text
-  // too so a deleted account still visible in the user list doesn't read as
-  // a clean bill of health, without inflating the score-affecting number.
-  const inactiveUsers = entityData.users.items.filter(isInactiveUser).length;
-  const deletedUsers = entityData.users.items.filter(isDeletedUser).length;
-  const nonActiveCount = inactiveUsers + deletedUsers;
+  const adminCount = activeUsers.filter(isAdminProfileUser).length;
+  // "Licensed but not active" (disabled) is what actually costs money — the
+  // score penalty is based on this count alone.
+  const inactiveUsers = activeUsers.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
-  const userCount = entityData.users.items.length;
+  const userCount = activeUsers.length;
   return [
     {
       id: "access-admin-count", label: "Admin access is limited", status: adminCount <= 2 ? "pass" : "fail",
@@ -382,10 +336,10 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       weight: 5,
     },
     {
-      id: "access-inactive-users", label: "No inactive or deleted users still visible", status: nonActiveCount === 0 ? "pass" : "fail",
-      detail: nonActiveCount === 0
-        ? "No inactive or deleted users found."
-        : `${nonActiveCount} of ${userCount} user${userCount !== 1 ? "s" : ""} aren't active — ${inactiveUsers} disabled user${inactiveUsers !== 1 ? "s" : ""} still hold a license, and ${deletedUsers} deleted user${deletedUsers !== 1 ? "s are" : " is"} still showing up in the user list (no license cost, but worth confirming they're fully removed elsewhere).`,
+      id: "access-inactive-users", label: "No inactive users still visible", status: inactiveUsers === 0 ? "pass" : "fail",
+      detail: inactiveUsers === 0
+        ? "No inactive users found."
+        : `${inactiveUsers} of ${userCount} user${userCount !== 1 ? "s" : ""} ${inactiveUsers !== 1 ? "are" : "is"} disabled but still hold a license.`,
       weight: inactiveUsers > 0 ? Math.min(10, inactiveUsers * 3) : 10,
     },
     {
@@ -397,17 +351,16 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
 }
 
 function accessSecurityReason(entityData: Record<CrmEntityType, EntityState>): string {
-  const adminCount = entityData.users.items.filter(isAdminProfileUser).length;
-  const inactiveUsers = entityData.users.items.filter(isInactiveUser).length;
-  const deletedUsers = entityData.users.items.filter(isDeletedUser).length;
-  const nonActiveCount = inactiveUsers + deletedUsers;
+  const activeUsers = entityData.users.items.filter(u => !isDeletedUser(u));
+  const adminCount = activeUsers.filter(isAdminProfileUser).length;
+  const inactiveUsers = activeUsers.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
-  const userCount = entityData.users.items.length;
+  const userCount = activeUsers.length;
   const issues: string[] = [];
   if (adminCount > 2) issues.push(`${adminCount} of ${userCount} users hold an admin-named profile (more than 2)`);
-  if (nonActiveCount > 0) issues.push(`${nonActiveCount} user${nonActiveCount !== 1 ? "s" : ""} aren't active (${inactiveUsers} disabled still licensed, ${deletedUsers} deleted)`);
+  if (inactiveUsers > 0) issues.push(`${inactiveUsers} user${inactiveUsers !== 1 ? "s" : ""} disabled but still licensed`);
   if (profileCount === 1) issues.push("only one profile exists, so there's no role separation");
-  if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive or deleted users are still visible.";
+  if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive users are still visible.";
   return `${issues.join("; ")}.`;
 }
 
@@ -533,7 +486,6 @@ export function buildHealthAuditModel(
     let checklist: ChecklistItem[];
     let reason: string;
     let criticalAlert: string | null = null;
-    let moduleBreakdown: ModuleBreakdownGroup[] | null = null;
     switch (key) {
       case "automationCoverage":
         checklist = automationCoverageChecklist(entityData, ruleCoverage);
@@ -550,7 +502,6 @@ export function buildHealthAuditModel(
       case "dataArchitecture":
         checklist = dataArchitectureChecklist(entityData);
         reason = dataArchitectureReason(entityData);
-        moduleBreakdown = buildModuleBreakdown(entityData.modules.items);
         break;
       case "automationHealth":
         checklist = automationHealthChecklist(entityData, score);
@@ -573,7 +524,6 @@ export function buildHealthAuditModel(
       recommendations,
       allSet: recommendations.length === 0 && checklist.every(item => item.status === "pass"),
       criticalAlert,
-      moduleBreakdown,
     };
   });
 

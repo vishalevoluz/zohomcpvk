@@ -36,7 +36,17 @@ export const CRM_ENTITIES: { type: CrmEntityType; label: string; icon: string; p
 export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns: RegExp[] }> = {
   blueprints: {
     preferred: ["getBlueprints", "getAllBlueprints", "listBlueprints", "getBlueprintList", "getBlueprintProcesses"],
-    patterns: [/getallblueprint/i, /getblueprint(?!byid|id|record|stage)/i, /listblueprint/i],
+    // Anchored to end-of-name — same fix as the workflows patterns below.
+    // The old unanchored "getblueprint(?!byid|id|record|stage)" negative
+    // lookahead only excludes those words when they sit immediately after
+    // "getblueprint", so it still matched getBlueprintStateById (followed by
+    // "state", not "byid") and getBlueprintProcessConfigurationMeta. Both
+    // sort ahead of the real getBlueprint list tool in some servers' tool
+    // order and get picked by .find() first — calling getBlueprintStateById
+    // with no blueprintId/stateId returns a plain-text "missing parameter"
+    // error, which the generic array-extraction fallback then wraps into a
+    // single fake blueprint with no name field, showing as "Item 1".
+    patterns: [/getallblueprint/i, /getblueprint$/i, /listblueprint/i],
   },
   modules: {
     preferred: ["getModules", "getAllModules", "listModules", "getCRMModules", "getAvailableModules"],
