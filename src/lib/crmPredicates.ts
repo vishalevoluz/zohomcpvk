@@ -184,11 +184,14 @@ export function isDeletedModule(item: unknown): boolean {
 }
 
 // Real Zoho API uses "viewable", not "visible" — checked defensively across
-// both plus show_as_tab, matching ModulesAudit.tsx's own hidden-module check.
+// both plus show_as_tab and visibility, plus the status string ("user_hidden"
+// hidden by a user's profile, "system_hidden"/"hidden" hidden by Zoho or an
+// admin) — same full check ModulesAudit.tsx verified against a live org.
 export function isHiddenModule(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
   const r = item as Record<string, unknown>;
-  return r.visible === false || r.show_as_tab === false || r.viewable === false;
+  return r.visible === false || r.show_as_tab === false || r.viewable === false || r.visibility === 0 ||
+    ["user_hidden", "system_hidden", "hidden"].includes(String(r.status ?? "").toLowerCase());
 }
 
 function isReadOnlyModule(r: Record<string, unknown>): boolean {

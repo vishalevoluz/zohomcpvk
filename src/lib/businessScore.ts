@@ -87,11 +87,11 @@ function scoreDataArchitecture(fields: unknown[], modules: unknown[]): number {
   // have 20+ modules doing real work. It only costs points when the count is
   // actually being inflated by empty/unused ones (read-only or nobody can
   // create/edit records in them) — that's the real clutter, not the number.
-  const activeModules = modules.filter(m => !isDeletedModule(m));
-  // Hidden takes precedence over empty — same rule the Modules panel's own
-  // Active/Hidden/Empty breakdown uses, so a module counted as "hidden" there
-  // can't also inflate a separate "empty" count shown elsewhere.
-  const emptyModuleCount = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m)).length;
+  // Deleted and hidden (user_hidden/system_hidden) modules are excluded from
+  // this count entirely — they aren't visible to anyone, so they can't be
+  // "clutter" a user actually sees in their module list.
+  const activeModules = modules.filter(m => !isDeletedModule(m) && !isHiddenModule(m));
+  const emptyModuleCount = activeModules.filter(isEmptyModule).length;
   if (activeModules.length > 15 && emptyModuleCount > 0) score -= 5;
   return Math.max(0, score);
 }

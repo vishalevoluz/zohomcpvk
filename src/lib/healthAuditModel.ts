@@ -382,12 +382,13 @@ function emptyModuleLabel(m: unknown, workflows: unknown[], blueprints: unknown[
 
 function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
-  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m));
+  // Deleted and hidden (user_hidden/system_hidden) modules are excluded from
+  // this count entirely — they aren't visible to anyone, so they can't be
+  // "clutter" a user actually sees in their module list. What's left is
+  // exactly the active + inactive-but-visible modules.
+  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isHiddenModule(m));
   const moduleCount = activeModules.length;
-  // Hidden takes precedence over empty — same rule the Modules panel's own
-  // Active/Hidden/Empty breakdown uses (see CRMOverviewDashboard.tsx), so this
-  // dimension's "N empty" figure can't disagree with that panel's count.
-  const emptyModules = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m));
+  const emptyModules = activeModules.filter(isEmptyModule);
   // A high module count only fails this check when it's actually inflated by
   // empty/unused modules — see scoreDataArchitecture's matching condition.
   const tooManyDueToClutter = moduleCount > 15 && emptyModules.length > 0;
@@ -411,8 +412,8 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
 
 function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>): string {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
-  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m));
-  const emptyModules = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m));
+  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isHiddenModule(m));
+  const emptyModules = activeModules.filter(isEmptyModule);
   const issues: string[] = [];
   if (mandatoryCount > 20) issues.push(`${mandatoryCount} mandatory fields (over the 20 recommended)`);
   if (activeModules.length > 15 && emptyModules.length > 0) {
