@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
@@ -60,7 +60,46 @@ export default function DashboardPage() {
   }
 
   const resolvedEntityCount = CRM_ENTITIES.filter(e => isEntityResolved(crm.entityData[e.type])).length;
-  const isPrefetching = !!config && resolvedEntityCount < CRM_ENTITIES.length;
+  const coreResolved = resolvedEntityCount === CRM_ENTITIES.length;
+
+  // Once the core CRM entities resolve, the secondary hooks that feed
+  // BusinessView/CRMOverviewDashboard (record samples, pipeline stages, rule
+  // coverage, org currency) are still fetching in the background and swap
+  // their skeleton placeholders for real, differently-sized content shortly
+  // after reveal — visibly shifting the page right after the user sees it.
+  // They ride the same MCP round-trip as the core entities and typically
+  // settle within a second or two of them, so holding the loader up a bit
+  // longer past coreResolved lets that settle before reveal instead of the
+  // user watching it happen. Resets whenever coreResolved goes false again
+  // (a manual refresh re-triggers the full loader, same as before).
+  const [loaderHoldElapsed, setLoaderHoldElapsed] = useState(false);
+  useEffect(() => {
+    if (!config || !coreResolved) {
+      setLoaderHoldElapsed(false);
+      return;
+    }
+    const timer = setTimeout(() => setLoaderHoldElapsed(true), 1200);
+    return () => clearTimeout(timer);
+  }, [config, coreResolved]);
+
+  const isPrefetching = !!config && (!coreResolved || !loaderHoldElapsed);
+
+  // The connect wizard can be scrolled well down its own (much taller) page;
+  // swapping it out for the dashboard doesn't reset that scroll position on
+  // its own, so without this the dashboard can render already scrolled past
+  // its own top and land wherever that pixel offset happens to fall — e.g.
+  // partway down the CRM Overview section. Fires once per connect, right as
+  // the full-page loader hands off to the real dashboard, not on every
+  // render and not on a later manual refresh (isPrefetching flipping back
+  // to true doesn't reset wasConnected).
+  const wasConnected = useRef(false);
+  useLayoutEffect(() => {
+    if (config && !isPrefetching && !wasConnected.current) {
+      window.scrollTo({ top: 0 });
+      wasConnected.current = true;
+    }
+    if (!config) wasConnected.current = false;
+  }, [config, isPrefetching]);
 
   function onConnected(cfg: McpConfig, t: McpTool[]) {
     setConfig(cfg);

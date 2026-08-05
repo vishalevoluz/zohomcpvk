@@ -1,16 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import { extractArray } from "@/lib/useCrmEntities";
 
 const ORG_TOOL_PATTERNS = [/getorganization/i, /^getorg$/i, /orgdetails/i];
 
-function extractCurrencySymbol(items: unknown[]): string | null {
-  for (const item of items) {
-    if (!item || typeof item !== "object") continue;
-    const r = item as Record<string, unknown>;
+function extractCurrencySymbol(orgRecords: unknown[]): string | null {
+  for (const orgRecord of orgRecords) {
+    if (!orgRecord || typeof orgRecord !== "object") continue;
+    const r = orgRecord as Record<string, unknown>;
     const symbol = r.currency_symbol ?? r.currencySymbol ?? r.iso_code ?? r.currency;
     if (typeof symbol === "string" && symbol.trim()) return symbol.trim();
   }
@@ -26,11 +26,16 @@ function extractCurrencySymbol(items: unknown[]): string | null {
 export function useOrgCurrency(config: McpConfig | null, tools: McpTool[], onLog: (log: ExecutionLog) => void) {
   const [symbol, setSymbol] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  const fetchedKey = useRef<string | null>(null);
 
   useEffect(() => {
     if (!config || tools.length === 0) return;
     const tool = tools.find(t => ORG_TOOL_PATTERNS.some(p => p.test(t.name)));
     if (!tool) return;
+
+    const key = `${tool.name}::${refreshTick}`;
+    if (fetchedKey.current === key) return;
+    fetchedKey.current = key;
 
     (async () => {
       const start = Date.now();
