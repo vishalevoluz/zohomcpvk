@@ -28,7 +28,10 @@ function stripMarkdown(text: string): string {
 export async function POST(req: NextRequest) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({ error: "ANTHROPIC_API_KEY is not configured on the server" }, { status: 500 });
+    // User-facing text stays in the "Zia" framing this card presents
+    // everywhere else — the underlying model provider is an implementation
+    // detail, not something a client-facing error should surface.
+    return NextResponse.json({ error: "Zia remediation isn't set up on this server yet. Contact your administrator." }, { status: 500 });
   }
 
   const { title, description, context } = await req.json() as {
@@ -79,7 +82,10 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Claude request failed";
-    return NextResponse.json({ error: message }, { status: 502 });
+    // The SDK's raw error text can mention the underlying provider by name —
+    // logged for debugging, but kept out of the client-facing message so
+    // this stays in the "Zia" framing the rest of the card uses.
+    console.error("Zia remediation request failed:", err);
+    return NextResponse.json({ error: "Zia couldn't generate remediation steps right now. Try again in a moment." }, { status: 502 });
   }
 }
