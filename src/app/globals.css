@@ -2624,6 +2624,18 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .kpi-drilldown-close:hover { color: var(--color-text); }
 .kpi-drilldown-note { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 0 0 12px; }
+.kpi-drilldown-search {
+  width: 100%;
+  font-size: 12.5px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  border: 0.5px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+.kpi-drilldown-search::placeholder { color: var(--color-text-tertiary); }
+.kpi-drilldown-search:focus { outline: none; border-color: var(--color-brand); }
 .kpi-drilldown-summary { display: flex; gap: 8px; margin-bottom: 12px; }
 .kpi-drilldown-stat { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
 .kpi-drilldown-stat.good { background: var(--color-success-bg); color: var(--color-success); }

@@ -1781,6 +1781,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [functionsListExpanded, setFunctionsListExpanded] = useState(false);
   type FunctionsSubTab = "issues" | "duplicates" | "all";
   const [functionsSubTab, setFunctionsSubTab] = useState<FunctionsSubTab>("issues");
+  // One search box per drill-down panel — cleared whenever a different card
+  // (or function sub-tab) is opened so a stale query from "Modules" doesn't
+  // silently hide everything the next time "Blueprints" is opened.
+  const [drilldownSearch, setDrilldownSearch] = useState("");
+  useEffect(() => { setDrilldownSearch(""); }, [selectedCard, functionsSubTab]);
+  const drilldownQuery = drilldownSearch.trim().toLowerCase();
+  function matchesSearch(...values: (string | null | undefined)[]): boolean {
+    if (!drilldownQuery) return true;
+    return values.some(v => (v ?? "").toLowerCase().includes(drilldownQuery));
+  }
   function toggleFunctionPreview(fnId: string) {
     setPreviewFunctionId(prev => {
       const next = prev === fnId ? null : fnId;
@@ -2456,6 +2466,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.modules} label="modules" onRetry={() => fetchEntity("modules")} />
           ) : (
           <>
+          <input
+            type="text"
+            className="kpi-drilldown-search"
+            placeholder="Search modules…"
+            value={drilldownSearch}
+            onChange={e => setDrilldownSearch(e.target.value)}
+          />
           <div className="kpi-drilldown-summary">
             {(["active", "hidden", "empty"] as ModuleCategory[]).map(cat => {
               const count = moduleBreakdown.filter(r => r.category === cat).length;
@@ -2477,7 +2494,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             )}
           </div>
           <div className="kpi-drilldown-table kpi-drilldown-table-single">
-            {moduleBreakdown.filter(row => moduleFilter === "all" || row.category === moduleFilter).map(row => (
+            {moduleBreakdown
+              .filter(row => moduleFilter === "all" || row.category === moduleFilter)
+              .filter(row => matchesSearch(row.name, row.apiName))
+              .map(row => (
               <div key={row.apiName} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.apiName}</span>
@@ -2501,6 +2521,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.blueprints} label="blueprints" onRetry={() => fetchEntity("blueprints")} />
           ) : (
           <>
+          <input
+            type="text"
+            className="kpi-drilldown-search"
+            placeholder="Search blueprints…"
+            value={drilldownSearch}
+            onChange={e => setDrilldownSearch(e.target.value)}
+          />
           <div className="kpi-drilldown-summary">
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${blueprintFilter === "active" ? "selected" : ""}`}
@@ -2529,7 +2556,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             )}
           </div>
           <div className="kpi-drilldown-table kpi-drilldown-table-single">
-            {blueprintBreakdown.filter(row => blueprintFilter === "all" || row.status === blueprintFilter).map(row => (
+            {blueprintBreakdown
+              .filter(row => blueprintFilter === "all" || row.status === blueprintFilter)
+              .filter(row => matchesSearch(row.name, row.module))
+              .map(row => (
               <div key={row.id} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.module}</span>
@@ -2552,12 +2582,19 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.users} label="users" onRetry={() => fetchEntity("users")} />
           ) : (
           <>
+          <input
+            type="text"
+            className="kpi-drilldown-search"
+            placeholder="Search users…"
+            value={drilldownSearch}
+            onChange={e => setDrilldownSearch(e.target.value)}
+          />
           <div className="kpi-drilldown-summary">
             <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.status === "active").length} Active</span>
             <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => r.status === "inactive").length} Inactive</span>
           </div>
           <div className="kpi-drilldown-table">
-            {userBreakdown.map(row => (
+            {userBreakdown.filter(row => matchesSearch(row.name, row.profile)).map(row => (
               <div key={row.id} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.profile}</span>
@@ -2580,6 +2617,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.layouts} label="layouts" onRetry={() => fetchEntity("layouts")} />
           ) : (
           <>
+          <input
+            type="text"
+            className="kpi-drilldown-search"
+            placeholder="Search modules…"
+            value={drilldownSearch}
+            onChange={e => setDrilldownSearch(e.target.value)}
+          />
           <p className="kpi-drilldown-note">
             More than one layout on a module usually isn&apos;t clutter — Zoho lets each profile use a different layout on the same module, so Sales and Support can see different required fields on the same Leads module. It&apos;s only worth a closer look when a module is stacking several custom layouts with no clear reason.
           </p>
@@ -2598,7 +2642,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <p className="business-view-hint">No layouts found on any checked module.</p>
           )}
           <div className="kpi-drilldown-table">
-            {layoutBreakdown.map(row => (
+            {layoutBreakdown.filter(row => matchesSearch(row.moduleLabel)).map(row => (
               <div key={row.apiName} className="kpi-drilldown-row kpi-drilldown-row-layouts">
                 <div className="kpi-drilldown-row-top">
                   <span className="kpi-drilldown-name">{row.moduleLabel}</span>
@@ -2633,13 +2677,20 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           )}
           {!scheduleRecords.unavailable && !scheduleRecords.loading && scheduleRecords.fetched && (
             <>
+              <input
+                type="text"
+                className="kpi-drilldown-search"
+                placeholder="Search schedules…"
+                value={drilldownSearch}
+                onChange={e => setDrilldownSearch(e.target.value)}
+              />
               <div className="kpi-drilldown-summary">
                 <span className="kpi-drilldown-stat good">{scheduleBreakdown.filter(r => r.active).length} Active</span>
                 <span className="kpi-drilldown-stat bad">{scheduleBreakdown.filter(r => !r.active).length} Inactive</span>
                 <span className="kpi-drilldown-stat neutral">{scheduleBreakdown.filter(r => !r.lastRun).length} Never Run</span>
               </div>
               <div className="kpi-drilldown-table">
-                {scheduleBreakdown.map(row => (
+                {scheduleBreakdown.filter(row => matchesSearch(row.name)).map(row => (
                   <div key={row.id} className="kpi-drilldown-row">
                     <span className="kpi-drilldown-name">{row.name}</span>
                     <span className={`kpi-drilldown-date ${!row.lastRun ? "never" : ""}`}>{formatLastTriggered(row.lastRun)}</span>
@@ -2710,6 +2761,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             </button>
           </div>
 
+          <input
+            type="text"
+            className="kpi-drilldown-search"
+            placeholder="Search functions…"
+            value={drilldownSearch}
+            onChange={e => setDrilldownSearch(e.target.value)}
+          />
+
           {functionsSubTab === "issues" && (
             <>
               {functionRecords.scanProgress.loading && (
@@ -2727,9 +2786,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               {!functionRecords.scanProgress.loading && sortedFunctionIssueRows.length === 0 && scannedFnCount > 0 && (
                 <p className="business-view-hint">No issues flagged in the functions scanned.</p>
               )}
-              {sortedFunctionIssueRows.length > 0 && (
+              {sortedFunctionIssueRows.length > 0 && (() => {
+                const filteredIssueRows = sortedFunctionIssueRows.filter(row => matchesSearch(row.functionName, row.category));
+                return (
                 <div className="kpi-drilldown-table kpi-drilldown-table-single">
-                  {sortedFunctionIssueRows.slice(0, 15).map(row => (
+                  {filteredIssueRows.slice(0, 15).map(row => (
                     <div key={row.key} className="kpi-drilldown-row kpi-drilldown-row-layouts">
                       <div className="kpi-drilldown-row-top">
                         <span className="kpi-drilldown-name">{row.functionName}</span>
@@ -2751,17 +2812,27 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                             <p className="business-view-hint">Code not available for this function.</p>
                           )}
                           {functionRecords.codeByFnId[row.id]?.code && (
-                            <pre className="function-code-block"><code>{functionRecords.codeByFnId[row.id]!.code}</code></pre>
+                            <>
+                              <pre className="function-code-block"><code>{functionRecords.codeByFnId[row.id]!.code}</code></pre>
+                              <div className="zia-rec zia-rec-low activity-zia-rec">
+                                <div className="zia-rec-header">
+                                  <span className="zia-rec-icon">✦</span>
+                                  <span className="zia-rec-title">Zia Recommendation — Formatting &amp; Comments</span>
+                                </div>
+                                <p className="zia-rec-desc">{reviewCodeQuality(functionRecords.codeByFnId[row.id]!.code!).summary}</p>
+                              </div>
+                            </>
                           )}
                         </div>
                       )}
                     </div>
                   ))}
-                  {sortedFunctionIssueRows.length > 15 && (
-                    <p className="business-view-hint">+{sortedFunctionIssueRows.length - 15} more issues found</p>
+                  {filteredIssueRows.length > 15 && (
+                    <p className="business-view-hint">+{filteredIssueRows.length - 15} more issues found</p>
                   )}
                 </div>
-              )}
+                );
+              })()}
             </>
           )}
 
@@ -2770,7 +2841,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <p className="business-view-hint">No duplicate function names found.</p>
             ) : (
               <div className="kpi-drilldown-table kpi-drilldown-table-single">
-                {functionDuplicates.map(group => (
+                {functionDuplicates.filter(group => matchesSearch(group.name)).map(group => (
                   <div key={group.name} className="kpi-drilldown-row kpi-drilldown-row-layouts">
                     <button
                       className="function-dup-toggle"
@@ -2793,10 +2864,12 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             )
           )}
 
-          {functionsSubTab === "all" && (
+          {functionsSubTab === "all" && (() => {
+            const filteredFunctions = functionRecords.items.filter(fn => matchesSearch(fn.name, fn.category));
+            return (
             <>
               <div className="kpi-drilldown-table kpi-drilldown-table-single">
-                {(functionsListExpanded ? functionRecords.items : functionRecords.items.slice(0, 8)).map(fn => (
+                {(functionsListExpanded ? filteredFunctions : filteredFunctions.slice(0, 8)).map(fn => (
                   <div key={fn.id} className="kpi-drilldown-row kpi-drilldown-row-layouts">
                     <div className="kpi-drilldown-row-top">
                       <span className="kpi-drilldown-name">{fn.name}</span>
@@ -2847,13 +2920,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   </div>
                 ))}
               </div>
-              {functionRecords.items.length > 8 && !functionsListExpanded && (
+              {filteredFunctions.length > 8 && !functionsListExpanded && (
                 <button className="cost-cards-more" onClick={() => setFunctionsListExpanded(true)}>
-                  + {functionRecords.items.length - 8} more functions
+                  + {filteredFunctions.length - 8} more functions
                 </button>
               )}
             </>
-          )}
+            );
+          })()}
         </div>
       )}
 
@@ -2873,8 +2947,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <p className="business-view-hint">No pipeline stages were found on your Deals layout.</p>
           )}
           {!pipelineStages.loading && pipelineStages.items.length > 0 && (
+            <>
+            <input
+              type="text"
+              className="kpi-drilldown-search"
+              placeholder="Search stages…"
+              value={drilldownSearch}
+              onChange={e => setDrilldownSearch(e.target.value)}
+            />
             <div className="kpi-drilldown-table">
-              {pipelineStages.items.map(stage => (
+              {pipelineStages.items.filter(stage => matchesSearch(stage.name)).map(stage => (
                 <div key={stage.apiName} className="kpi-drilldown-row">
                   <span className="kpi-drilldown-name">{stage.name}</span>
                   {stage.outOfOrder && (
@@ -2884,6 +2966,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 </div>
               ))}
             </div>
+            </>
           )}
         </div>
       )}
@@ -2894,6 +2977,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <h4>Workflows — Active / Inactive / Last Triggered</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
+          <input
+            type="text"
+            className="kpi-drilldown-search"
+            placeholder="Search workflows…"
+            value={drilldownSearch}
+            onChange={e => setDrilldownSearch(e.target.value)}
+          />
           <div className="kpi-drilldown-summary">
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${workflowFilter === "active" ? "selected" : ""}`}
@@ -2920,7 +3010,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             )}
           </div>
           <div className="kpi-drilldown-table kpi-drilldown-table-single">
-            {workflowBreakdown.filter(row => matchesWorkflowFilter(row, workflowFilter)).map(row => (
+            {workflowBreakdown
+              .filter(row => matchesWorkflowFilter(row, workflowFilter))
+              .filter(row => matchesSearch(row.name, row.module))
+              .map(row => (
               <div key={row.id} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.module}</span>
@@ -2991,9 +3084,19 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           {profileItems.length === 0 ? (
             <PanelEmptyState state={entityData.profiles} label="Profiles" onRetry={() => fetchEntity("profiles")} />
           ) : (
+            <>
+            <input
+              type="text"
+              className="kpi-drilldown-search"
+              placeholder="Search profiles…"
+              value={drilldownSearch}
+              onChange={e => setDrilldownSearch(e.target.value)}
+            />
             <ul className="panel-item-list">
-              {profileItems.map((item, idx) => {
-                const name = getItemName(item, idx);
+              {profileItems
+                .map((item, idx) => ({ item, name: getItemName(item, idx) }))
+                .filter(({ name }) => matchesSearch(name))
+                .map(({ item, name }, idx) => {
                 const admin = isAdminProfile(item);
                 return (
                   <li key={idx} className="panel-item-row">
@@ -3006,6 +3109,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 );
               })}
             </ul>
+            </>
           )}
         </div>
       )}
@@ -3017,12 +3121,17 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.users} label="Users" onRetry={() => fetchEntity("users")} />
           ) : (
             <ul className="panel-item-list">
-              {userItemsForPanel.map((item, idx) => {
-                const name = getItemName(item, idx);
-                const r = (item ?? {}) as Record<string, unknown>;
-                const profileName = typeof r.profile === "object" && r.profile
-                  ? String((r.profile as Record<string, unknown>).name ?? "—")
-                  : String(r.role ?? "—");
+              {userItemsForPanel
+                .map((item, idx) => {
+                  const name = getItemName(item, idx);
+                  const r = (item ?? {}) as Record<string, unknown>;
+                  const profileName = typeof r.profile === "object" && r.profile
+                    ? String((r.profile as Record<string, unknown>).name ?? "—")
+                    : String(r.role ?? "—");
+                  return { item, idx, name, profileName };
+                })
+                .filter(({ name, profileName }) => matchesSearch(name, profileName))
+                .map(({ item, idx, name, profileName }) => {
                 const status = getItemStatus(item);
                 return (
                   <li key={idx} className="panel-item-row">
