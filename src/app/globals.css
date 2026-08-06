@@ -3816,6 +3816,20 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   flex-direction: column;
   gap: 16px;
 }
+.crm-feedback-side {
+  display: flex;
+  flex-direction: column;
+}
+.crm-feedback-about {
+  padding: 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+.crm-fb-about-desc {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  margin-top: 8px;
+}
 .crm-feedback-list {
   padding: 20px;
   display: flex;

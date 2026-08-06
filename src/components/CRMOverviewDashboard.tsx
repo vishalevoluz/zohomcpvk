@@ -3422,42 +3422,56 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             </button>
           </div>
 
-          {/* Entries list */}
-          {feedbackEntries.length > 0 && (
-            <div className="crm-feedback-list">
-              <h3 className="crm-fb-form-title">
-                Submitted Feedback
-                <span className="crm-fb-count">{feedbackEntries.length}</span>
-              </h3>
-              <div className="crm-fb-entries">
-                {feedbackEntries.map(entry => {
-                  const cat = FB_CATEGORIES.find(c => c.value === entry.category);
-                  return (
-                    <div key={entry.id} className="crm-fb-entry">
-                      <div className="crm-fb-entry-header">
-                        <span className="crm-fb-entry-cat">{cat?.icon} {cat?.label}</span>
-                        {entry.rating > 0 && (
-                          <span className="crm-fb-entry-stars">
-                            {"★".repeat(entry.rating)}{"☆".repeat(5 - entry.rating)}
-                          </span>
-                        )}
-                        <span className="crm-fb-entry-author">{entry.name}</span>
-                        <span className="crm-fb-entry-date">
-                          {new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                        </span>
-                        <button
-                          className="crm-fb-entry-del"
-                          title="Remove"
-                          onClick={() => deleteFeedback(entry.id)}
-                        >✕</button>
-                      </div>
-                      <p className="crm-fb-entry-msg">{entry.message}</p>
-                    </div>
-                  );
-                })}
-              </div>
+          {/* Right column: what this app is, plus any submitted feedback below it.
+              Kept as a single grid child (alongside the form) so the entries
+              list — which only renders once feedback exists — doesn't wrap
+              onto its own row instead of staying in the right column. */}
+          <div className="crm-feedback-side">
+            <div className="crm-feedback-about">
+              <h3 className="crm-fb-form-title">About This App</h3>
+              <p className="crm-fb-about-desc">
+                EvoAudit audits your connected Zoho CRM — modules, workflows, blueprints, fields, functions, and users —
+                against best practices, and surfaces what&rsquo;s costing you leads, licenses, or clean data.
+              </p>
             </div>
-          )}
+
+            {/* Entries list */}
+            {feedbackEntries.length > 0 && (
+              <div className="crm-feedback-list">
+                <h3 className="crm-fb-form-title">
+                  Submitted Feedback
+                  <span className="crm-fb-count">{feedbackEntries.length}</span>
+                </h3>
+                <div className="crm-fb-entries">
+                  {feedbackEntries.map(entry => {
+                    const cat = FB_CATEGORIES.find(c => c.value === entry.category);
+                    return (
+                      <div key={entry.id} className="crm-fb-entry">
+                        <div className="crm-fb-entry-header">
+                          <span className="crm-fb-entry-cat">{cat?.icon} {cat?.label}</span>
+                          {entry.rating > 0 && (
+                            <span className="crm-fb-entry-stars">
+                              {"★".repeat(entry.rating)}{"☆".repeat(5 - entry.rating)}
+                            </span>
+                          )}
+                          <span className="crm-fb-entry-author">{entry.name}</span>
+                          <span className="crm-fb-entry-date">
+                            {new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                          </span>
+                          <button
+                            className="crm-fb-entry-del"
+                            title="Remove"
+                            onClick={() => deleteFeedback(entry.id)}
+                          >✕</button>
+                        </div>
+                        <p className="crm-fb-entry-msg">{entry.message}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
