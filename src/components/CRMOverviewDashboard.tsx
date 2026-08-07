@@ -2751,14 +2751,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <span>Duplicate Function Names</span>
               <span className="function-tab-count">{functionDuplicates.length}</span>
             </button>
-            <button
-              type="button"
-              className={`function-tab ${functionsSubTab === "all" ? "active" : ""}`}
-              onClick={() => setFunctionsSubTab("all")}
-            >
-              <span>All Functions</span>
-              <span className="function-tab-count">{functionRecords.items.length}</span>
-            </button>
           </div>
 
           <input
