@@ -87,11 +87,13 @@ function scoreDataArchitecture(fields: unknown[], modules: unknown[]): number {
   // have 20+ modules doing real work. It only costs points when the count is
   // actually being inflated by empty/unused ones (read-only or nobody can
   // create/edit records in them) — that's the real clutter, not the number.
-  // Deleted and internal/system pseudo-modules are excluded entirely — they
-  // aren't real modules. Hidden (user_hidden/system_hidden) ones ARE kept in
-  // this count, matching the Modules KPI card in CRMOverviewDashboard.tsx —
-  // but excluded from the empty-count below (hidden takes precedence over
-  // empty, so a module isn't flagged both ways).
+  // Deleted, internal/system pseudo-modules, and system-hidden ones (Zoho's
+  // own hidden status, not an admin's deliberate hide — see
+  // isSystemHiddenModule) are excluded entirely — none of these are real
+  // modules. User-hidden ones ARE kept in this count, matching the Modules
+  // KPI card in CRMOverviewDashboard.tsx — but excluded from the empty-count
+  // below (hidden takes precedence over empty, so a module isn't flagged
+  // both ways).
   const activeModules = modules.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
   const emptyModuleCount = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m)).length;
   if (activeModules.length > 15 && emptyModuleCount > 0) score -= 5;

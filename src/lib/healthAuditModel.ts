@@ -9,7 +9,7 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
-  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, isMandatoryField, hasEmailAction,
+  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, isMandatoryField,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
 } from "@/lib/crmPredicates";
@@ -62,22 +62,24 @@ export const DIMENSION_TOOLTIPS: Record<DimensionKey, string> = {
 // same predicates, so it can never disagree with the real dimension score,
 // and doesn't need the full record-sample/module-record-count context the
 // main panels use for their fuller evidence.
+// "no-email-workflow" is deliberately absent here even though it's a real
+// finding (see businessFindings.ts) — neither scoreAutomationCoverage nor
+// scoreAutomationHealth in businessScore.ts factors in whether any workflow
+// sends email, so it can never move either dimension's score. Listing it as
+// a score-maximizing recommendation produced a real bug: a perfect 20/20
+// automationCoverage dimension (every core module covered) still showed this
+// card with Impact/Effort badges right above a "+0" potential gain.
 const DIMENSION_TO_ACTION_IDS: Record<DimensionKey, string[]> = {
-  automationCoverage: ["no-email-workflow", "workflows-inactive"],
+  automationCoverage: ["workflows-inactive"],
   processCompleteness: ["no-pipeline", "no-blueprint"],
   accessSecurity: ["access-risk", "inactive-users"],
   dataArchitecture: ["excessive-mandatory-fields", "empty-modules"],
-  automationHealth: ["workflows-inactive", "no-email-workflow"],
+  automationHealth: ["workflows-inactive"],
 };
 
 interface ActionInfo { title: string; why: string; impact: ActionImpact; effort: ActionEffort; targetSection: Section }
 
 const ACTION_INFO: Record<string, ActionInfo> = {
-  "no-email-workflow": {
-    title: "Activate Email Follow-Up Workflows",
-    why: "Unanswered leads go cold. Automated follow-up keeps prospects engaged without relying on reps to remember.",
-    impact: "High", effort: "Medium", targetSection: "workflows",
-  },
   "workflows-inactive": {
     title: "Consolidate Inactive Workflows",
     why: "Inactive workflows create confusion and may silently fail when re-enabled. Clean them up or delete them.",
@@ -117,7 +119,6 @@ const ACTION_INFO: Record<string, ActionInfo> = {
 
 function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): boolean {
   switch (id) {
-    case "no-email-workflow": return !entityData.workflows.items.some(hasEmailAction);
     case "workflows-inactive": {
       const total = entityData.workflows.items.length;
       if (total === 0) return false;
@@ -133,7 +134,7 @@ function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, 
     case "inactive-users": return entityData.users.items.some(isInactiveUser);
     case "excessive-mandatory-fields": return entityData.fields.items.filter(isMandatoryField).length > 20;
     case "empty-modules": {
-      const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+      const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
       return unreferencedModules(realModules, entityData.workflows.items, entityData.blueprints.items).length > 3;
     }
     default: return false;
@@ -141,7 +142,6 @@ function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, 
 }
 
 const ACTION_REQUIRES: Record<string, CrmEntityType[]> = {
-  "no-email-workflow": ["workflows"],
   "workflows-inactive": ["workflows"],
   "no-pipeline": [],
   "no-blueprint": ["blueprints"],

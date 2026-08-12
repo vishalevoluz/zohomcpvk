@@ -111,6 +111,18 @@ export interface PipelineStage {
   outOfOrder?: boolean;
 }
 
+// A single pipeline with its own full, sequence-ordered stage list — for
+// orgs running more than one Deals pipeline (e.g. separate "Standard" and
+// "Enterprise" processes), each has its own stage set, distinct from
+// PipelineStagesState.items which only ever holds the picked/default
+// pipeline's stages (see that field's own comment).
+export interface PipelineWithStages {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  stages: PipelineStage[];
+}
+
 export interface PipelineStagesState {
   items: PipelineStage[];
   // The real count of pipeline configs found via the getLayouts -> getPipelines
@@ -121,6 +133,10 @@ export interface PipelineStagesState {
   // by and Zoho pipelines only ever exist on the Deals module anyway — this is
   // the authoritative number for "how many pipelines does this org have."
   pipelineCount: number;
+  // Every pipeline found (not just the picked/default one), each with its own
+  // stages — for display surfaces that need to show the whole org's pipeline
+  // setup rather than the single "the sales process" used for scoring.
+  pipelines: PipelineWithStages[];
   loading: boolean;
   error: string | null;
   lastFetched: number | null;

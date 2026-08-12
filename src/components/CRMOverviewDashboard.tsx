@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isCustomLayout, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -190,7 +190,7 @@ function generateRecommendations(
 
   const wfs      = entityData.workflows.items;
   const bps      = entityData.blueprints.items;
-  const mods     = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+  const mods     = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
   const pipes    = entityData.pipelines.items;
   const stages   = entityData.stages.items;
   const layouts  = entityData.layouts.items;
@@ -720,7 +720,7 @@ const MODULE_CATEGORY_ORDER: Record<ModuleCategory, number> = { hidden: 0, empty
 // convention as the blueprint/workflow breakdowns elsewhere in this file.
 function computeModuleBreakdown(entityData: Record<CrmEntityType, EntityState>): ModuleBreakdownRow[] {
   return entityData.modules.items
-    .filter(m => !isDeletedModule(m) && !isInternalModule(m))
+    .filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m))
     .map((m, i) => {
       const r = (m ?? {}) as Record<string, unknown>;
       const apiName = moduleApiName(m);
@@ -790,9 +790,8 @@ function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): { summary: strin
 // ─── Activity (Email / Task / Call) drill-down ─────────────────────────────────
 // Tasks already ride along in entityData (the "tasks" entity), but Calls and
 // Emails aren't fetched anywhere else in this app — pulled in lazily here,
-// only once the Activity tile is opened, the same on-demand pattern as
-// useLayoutsByModule above, so a dashboard load that never opens this panel
-// never pays for two extra API calls' worth of pagination.
+// only once the Activity tile is opened, so a dashboard load that never
+// opens this panel never pays for two extra API calls' worth of pagination.
 interface ActivityFetchState {
   items: unknown[];
   loading: boolean;
@@ -995,7 +994,7 @@ function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState
 // useRuleCoverage.ts already fetches a flat schedule *count* for the KPI's
 // collapsed state, but discards the actual items — active/inactive and last-run
 // need the real records, fetched lazily here only once the tile is clicked, same
-// on-demand pattern as useLayoutsByModule/useActivityRecords above.
+// on-demand pattern as useActivityRecords above.
 function scheduleStatusText(item: unknown): string {
   if (!item || typeof item !== "object") return "";
   const r = item as Record<string, unknown>;
@@ -1361,7 +1360,7 @@ interface FunctionKpiSummary { total: number; active: number; inactive: number; 
 // that card over what "how many modules" even means.
 function entityItemCount(type: CrmEntityType, items: unknown[]): number {
   if (type !== "modules") return items.length;
-  return items.filter(m => !isDeletedModule(m) && !isInternalModule(m)).length;
+  return items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m)).length;
 }
 
 // Source attribution shown on hover — names the tool the count came from and
@@ -1372,10 +1371,9 @@ function kpiSource(state: EntityState, count: number): string {
 }
 
 function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null, functionSummary: FunctionKpiSummary): KpiItem[] {
-  const modules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+  const modules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
   const blueprints = entityData.blueprints.items;
   const users = entityData.users.items;
-  const layouts = entityData.layouts.items;
 
   // A fetch that failed before returning any pages leaves items at [] — the
   // same shape as a genuinely empty org. Treating both alike would render a
@@ -1384,7 +1382,6 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
   const modulesFailed = entityData.modules.error !== null && modules.length === 0;
   const blueprintsFailed = entityData.blueprints.error !== null && blueprints.length === 0;
   const usersFailed = entityData.users.error !== null && users.length === 0;
-  const layoutsFailed = entityData.layouts.error !== null && layouts.length === 0;
 
   const hiddenCount = modules.filter(isHiddenModule).length;
   const hiddenPct = modules.length ? Math.round((hiddenCount / modules.length) * 100) : 0;
@@ -1400,7 +1397,6 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
   // Deleted accounts don't consume a Zoho license — excluded from the
   // "total licensed" figure, unlike disabled-but-not-deleted users.
   const licensedUsers = users.filter(u => !isDeletedUser(u)).length;
-  const layoutGap = Math.max(0, modules.length - layouts.length);
 
   return [
     {
@@ -1426,14 +1422,6 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
       clickable: users.length > 0 || usersFailed,
       unknown: usersFailed,
       source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
-    },
-    {
-      key: "layouts", label: "Layouts", value: layouts.length,
-      severity: layoutsFailed ? "unknown" : layouts.length === 0 && modules.length > 0 ? "critical" : layoutGap > 0 ? "warning" : "good",
-      note: layoutsFailed ? `Couldn't verify — ${entityData.layouts.error}` : layoutGap > 0 ? `${layoutGap} module${layoutGap === 1 ? "" : "s"} missing a layout — click for breakdown` : "Covers all modules — click for breakdown",
-      clickable: layouts.length > 0 || layoutsFailed,
-      unknown: layoutsFailed,
-      source: layoutsFailed ? `Source: ${entityData.layouts.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.layouts, layouts.length),
     },
     {
       // No MCP tool exists for listing schedules at all (not in Zoho's real
@@ -1535,101 +1523,6 @@ function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): U
       };
     })
     .sort((a, b) => USER_BREAKDOWN_SORT_RANK[a.status] - USER_BREAKDOWN_SORT_RANK[b.status]);
-}
-
-interface LayoutModuleBreakdownRow {
-  apiName: string;
-  moduleLabel: string;
-  total: number;
-  standard: number;
-  custom: number;
-  layouts: { name: string; custom: boolean }[];
-}
-
-// Modules stacking unusually many custom layouts are worth a second look —
-// not because multiple layouts is inherently wrong (see the explanatory copy
-// rendered alongside this), but because past that many it's more likely to be
-// abandoned one-off layouts than genuine per-profile designs.
-const LAYOUT_REVIEW_THRESHOLD = 3;
-
-// getLayouts is module-scoped on Zoho's real API (same as getValidationRules/
-// getAssignmentRules etc. — see useRuleCoverage.ts), so the flat, unscoped
-// fetch useCrmEntities.ts does for the "layouts" entity only ever returns one
-// module's layouts. This builds the per-module breakdown from a real
-// per-module fetch (see useLayoutsByModule below) instead of that flat list —
-// grouping the flat list by module can never surface custom modules that
-// weren't the one module the unscoped call happened to default to.
-function computeLayoutBreakdown(
-  modules: unknown[],
-  layoutsByModule: Record<string, unknown[]>,
-): LayoutModuleBreakdownRow[] {
-  return Object.entries(layoutsByModule)
-    .filter(([, ls]) => ls.length > 0)
-    .map(([apiName, ls]) => {
-      const mod = modules.find(m => moduleApiName(m) === apiName) as Record<string, unknown> | undefined;
-      const moduleLabel = mod ? String(mod.plural_label ?? mod.singular_label ?? apiName) : apiName;
-      const layoutRows = ls.map((l, i) => ({ name: getItemName(l, i), custom: isCustomLayout(l) }));
-      const custom = layoutRows.filter(l => l.custom).length;
-      return { apiName, moduleLabel, total: ls.length, standard: ls.length - custom, custom, layouts: layoutRows };
-    })
-    .sort((a, b) => b.total - a.total);
-}
-
-// Fetches getLayouts per module (module-scoped, like the rule-coverage hook)
-// instead of relying on the flat "layouts" entity, which only ever covers one
-// module. Lazy — only starts once the Layouts KPI drill-down is opened — and
-// capped so a 300+ module org doesn't fire hundreds of sequential calls; the
-// panel tells the user how many modules were actually covered.
-const LAYOUT_MODULE_FETCH_CAP = 60;
-
-function useLayoutsByModule(
-  config: McpConfig | null,
-  tools: McpTool[],
-  modules: unknown[],
-  active: boolean,
-  onLog: (log: ExecutionLog) => void,
-) {
-  const [byModule, setByModule] = useState<Record<string, unknown[]>>({});
-  const [progress, setProgress] = useState<{ done: number; total: number; loading: boolean }>({ done: 0, total: 0, loading: false });
-  const fetchedRef = useRef(false);
-
-  useEffect(() => {
-    if (!active || fetchedRef.current) return;
-    if (!config || tools.length === 0 || modules.length === 0) return;
-    const layoutsTool = findToolForEntity(tools, "layouts");
-    if (!layoutsTool) return;
-
-    fetchedRef.current = true;
-    const targets = modules
-      .filter(m => !isHiddenModule(m))
-      .map(m => moduleApiName(m))
-      .filter(Boolean)
-      .slice(0, LAYOUT_MODULE_FETCH_CAP);
-
-    setProgress({ done: 0, total: targets.length, loading: true });
-
-    void (async () => {
-      const moduleLoc = findParam(findParamLocations(layoutsTool), /^module$/i) ?? { group: null, key: "module" };
-      const result: Record<string, unknown[]> = {};
-      for (const apiName of targets) {
-        const start = Date.now();
-        const input: Record<string, unknown> = {};
-        setParam(input, moduleLoc, apiName);
-        try {
-          const output = await executeTool(config, layoutsTool.name, input);
-          result[apiName] = extractArray(output);
-          onLog({ id: crypto.randomUUID(), tool: layoutsTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
-        } catch (e: unknown) {
-          onLog({ id: crypto.randomUUID(), tool: layoutsTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
-        }
-        setProgress(prev => ({ ...prev, done: prev.done + 1 }));
-      }
-      setByModule(result);
-      setProgress(prev => ({ ...prev, loading: false }));
-    })();
-  }, [active, config, tools, modules, onLog]);
-
-  return { byModule, progress, targetCount: Math.min(modules.filter(m => !isHiddenModule(m)).length, LAYOUT_MODULE_FETCH_CAP) };
 }
 
 interface ConfigRow {
@@ -1754,7 +1647,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // Replaces the old expandedKpi + pipelinesOpen pair — those two used to
   // gate two visually-separate "expand below" sections; now there's only one
   // selection driving one detail slot.
-  type CardKey = "modules" | "blueprints" | "users" | "layouts" | "schedules" | "functions"
+  type CardKey = "modules" | "blueprints" | "users" | "schedules" | "functions"
                | "pipelines" | "workflows" | "profiles" | "activity";
   const [selectedCard, setSelectedCard] = useState<CardKey | null>("modules");
   const detailPanelRef = useRef<HTMLDivElement>(null);
@@ -1772,8 +1665,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
   const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never">("all");
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
-  const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
-  const layoutsByModule = useLayoutsByModule(config, tools, realModules, selectedCard === "layouts", onLog);
   const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
   const [expandedFunctionDuplicate, setExpandedFunctionDuplicate] = useState<string | null>(null);
@@ -1984,7 +1875,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   });
   const moduleBreakdown = selectedCard === "modules" ? computeModuleBreakdown(entityData) : [];
   const blueprintBreakdown = selectedCard === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
-  const layoutBreakdown = selectedCard === "layouts" ? computeLayoutBreakdown(realModules, layoutsByModule.byModule) : [];
   const scheduleBreakdown = selectedCard === "schedules" ? computeScheduleBreakdown(scheduleRecords.items) : [];
   const ziaScheduleInsight = selectedCard === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
@@ -2607,62 +2497,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         </div>
       )}
 
-      {selectedCard === "layouts" && (
-        <div className="kpi-drilldown">
-          <div className="kpi-drilldown-header">
-            <h4>Layouts — Standard vs Custom, Per Module</h4>
-            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
-          </div>
-          {entityData.layouts.error && entityData.layouts.items.length === 0 ? (
-            <PanelEmptyState state={entityData.layouts} label="layouts" onRetry={() => fetchEntity("layouts")} />
-          ) : (
-          <>
-          <input
-            type="text"
-            className="kpi-drilldown-search"
-            placeholder="Search modules…"
-            value={drilldownSearch}
-            onChange={e => setDrilldownSearch(e.target.value)}
-          />
-          <p className="kpi-drilldown-note">
-            More than one layout on a module usually isn&apos;t clutter — Zoho lets each profile use a different layout on the same module, so Sales and Support can see different required fields on the same Leads module. It&apos;s only worth a closer look when a module is stacking several custom layouts with no clear reason.
-          </p>
-          {layoutsByModule.progress.loading && (
-            <p className="kpi-drilldown-progress">
-              <span className="spinner" /> Fetching layouts per module… {layoutsByModule.progress.done} of {layoutsByModule.progress.total}
-            </p>
-          )}
-          {!layoutsByModule.progress.loading && layoutsByModule.progress.total > 0 && (
-            <p className="kpi-drilldown-note">
-              Checked {layoutsByModule.targetCount} visible module{layoutsByModule.targetCount !== 1 ? "s" : ""}
-              {layoutsByModule.targetCount >= LAYOUT_MODULE_FETCH_CAP ? " (capped — this org has more visible modules than were checked)" : ""}.
-            </p>
-          )}
-          {!layoutsByModule.progress.loading && layoutsByModule.progress.total > 0 && layoutBreakdown.length === 0 && (
-            <p className="business-view-hint">No layouts found on any checked module.</p>
-          )}
-          <div className="kpi-drilldown-table">
-            {layoutBreakdown.filter(row => matchesSearch(row.moduleLabel)).map(row => (
-              <div key={row.apiName} className="kpi-drilldown-row kpi-drilldown-row-layouts">
-                <div className="kpi-drilldown-row-top">
-                  <span className="kpi-drilldown-name">{row.moduleLabel}</span>
-                  <span className="kpi-drilldown-module">{row.total} layout{row.total !== 1 ? "s" : ""}</span>
-                  <span className="kpi-drilldown-badge neutral">{row.standard} standard · {row.custom} custom</span>
-                  {row.custom > LAYOUT_REVIEW_THRESHOLD && <span className="kpi-drilldown-flag">Review</span>}
-                </div>
-                <div className="kpi-drilldown-layout-names">
-                  {row.layouts.map((l, i) => (
-                    <span key={i} className={`kpi-drilldown-layout-chip ${l.custom ? "custom" : "standard"}`}>{l.name}</span>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          </>
-          )}
-        </div>
-      )}
-
       {selectedCard === "schedules" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
@@ -2935,10 +2769,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           {!pipelineStages.loading && pipelineStages.error && (
             <p className="business-view-hint">⚠ {pipelineStages.error}</p>
           )}
-          {!pipelineStages.loading && !pipelineStages.error && pipelineStages.items.length === 0 && (
+          {!pipelineStages.loading && !pipelineStages.error && pipelineStages.pipelines.length === 0 && (
             <p className="business-view-hint">No pipeline stages were found on your Deals layout.</p>
           )}
-          {!pipelineStages.loading && pipelineStages.items.length > 0 && (
+          {!pipelineStages.loading && pipelineStages.pipelines.length > 0 && (
             <>
             <input
               type="text"
@@ -2947,17 +2781,30 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               value={drilldownSearch}
               onChange={e => setDrilldownSearch(e.target.value)}
             />
-            <div className="kpi-drilldown-table">
-              {pipelineStages.items.filter(stage => matchesSearch(stage.name)).map(stage => (
-                <div key={stage.apiName} className="kpi-drilldown-row">
-                  <span className="kpi-drilldown-name">{stage.name}</span>
-                  {stage.outOfOrder && (
-                    <span className="kpi-drilldown-badge status-inactive" title="This stage is sequenced after a Closed Won/Lost stage">Out of order</span>
-                  )}
-                  {stage.forecastType && <span className="kpi-drilldown-badge neutral">{stage.forecastType}</span>}
+            {pipelineStages.pipelines.map(pipeline => {
+              const stages = pipeline.stages.filter(stage => matchesSearch(stage.name));
+              if (stages.length === 0) return null;
+              return (
+                <div key={pipeline.id} className="kpi-drilldown-pipeline-group">
+                  <div className="kpi-drilldown-pipeline-name">
+                    {pipeline.name}
+                    {pipeline.isDefault && <span className="kpi-drilldown-badge neutral">Default</span>}
+                  </div>
+                  <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                    {stages.map((stage, i) => (
+                      <div key={stage.apiName} className="kpi-drilldown-row">
+                        <span className="kpi-drilldown-stage-seq">{i + 1}</span>
+                        <span className="kpi-drilldown-name">{stage.name}</span>
+                        {stage.outOfOrder && (
+                          <span className="kpi-drilldown-badge status-inactive" title="This stage is sequenced after a Closed Won/Lost stage">Out of order</span>
+                        )}
+                        {stage.forecastType && <span className="kpi-drilldown-badge neutral">{stage.forecastType}</span>}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
             </>
           )}
         </div>

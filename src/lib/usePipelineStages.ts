@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool, findParamLocations, findParam, setParam } from "@/lib/zohoMcp";
-import { extractArray, findToolForEntity } from "@/lib/useCrmEntities";
-import type { PipelineStage, PipelineStagesState } from "@/lib/flowMapModel";
+import { extractArray, findToolForEntity, getItemId } from "@/lib/useCrmEntities";
+import type { PipelineStage, PipelineStagesState, PipelineWithStages } from "@/lib/flowMapModel";
 
-const INIT_STATE: PipelineStagesState = { items: [], pipelineCount: 0, loading: false, error: null, lastFetched: null };
+const INIT_STATE: PipelineStagesState = { items: [], pipelineCount: 0, pipelines: [], loading: false, error: null, lastFetched: null };
 
 // This MCP server has no dedicated "list stages" tool — real stage names live in
 // a module's active layout's pipeline config, reached via getLayouts (module ->
@@ -34,6 +34,29 @@ function pickPipeline(pipelines: unknown[]): Record<string, unknown> | null {
 // on an MCP server that doesn't return forecast_type.
 function isClosedStage(s: { name: string; forecastType?: string }): boolean {
   return /won|lost/i.test(s.forecastType ?? "") || /won|lost/i.test(s.name);
+}
+
+// Zoho pipeline references use the same display_value/actual_value picklist
+// convention as the stage maps below (see postBlueprint's "pipeline" schema:
+// { id, api_name, name, display_value }) — not the generic record-name
+// fields (r.name/display_name/label/...) getItemName in useCrmEntities.ts
+// checks first, which is tuned for CRM records/workflows/blueprints and left
+// every pipeline reading as "Item N" here.
+function pipelineName(pipeline: Record<string, unknown>, idx: number): string {
+  const name = String(pipeline.display_value ?? pipeline.name ?? pipeline.actual_value ?? pipeline.api_name ?? "").trim();
+  return name || `Pipeline ${idx + 1}`;
+}
+
+function toAllPipelines(pipelines: unknown[], defaultPipeline: Record<string, unknown> | null): PipelineWithStages[] {
+  return pipelines.map((p, i) => {
+    const r = (p ?? {}) as Record<string, unknown>;
+    return {
+      id: getItemId(r) || String(i),
+      name: pipelineName(r, i),
+      isDefault: r === defaultPipeline,
+      stages: toPipelineStages(r),
+    };
+  });
 }
 
 function toPipelineStages(pipeline: Record<string, unknown> | null): PipelineStage[] {
@@ -120,7 +143,7 @@ export function usePipelineStages(
       }
 
       if (!layout) {
-        setData({ items: [], pipelineCount: 0, loading: false, error: null, lastFetched: Date.now() });
+        setData({ items: [], pipelineCount: 0, pipelines: [], loading: false, error: null, lastFetched: Date.now() });
         return;
       }
 
@@ -138,8 +161,10 @@ export function usePipelineStages(
           tool: pipelinesTool.name, input: pipelinesInput, output, status: "success",
           durationMs: Date.now() - pipelinesStart, timestamp: new Date(),
         });
-        const items = toPipelineStages(pickPipeline(pipelines));
-        setData({ items, pipelineCount: pipelines.length, loading: false, error: null, lastFetched: Date.now() });
+        const defaultPipeline = pickPipeline(pipelines);
+        const items = toPipelineStages(defaultPipeline);
+        const allPipelines = toAllPipelines(pipelines, defaultPipeline);
+        setData({ items, pipelineCount: pipelines.length, pipelines: allPipelines, loading: false, error: null, lastFetched: Date.now() });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Failed to fetch pipelines";
         onLog({
