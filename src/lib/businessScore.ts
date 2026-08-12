@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
@@ -29,7 +29,7 @@ export interface HealthScoreResult {
 
 function scoreAutomationCoverage(modules: unknown[], workflows: unknown[], ruleCoverage: RuleCoverage | null): number {
   // Measured against the lead-to-deal lifecycle modules the flow map's own
-  // "automation layer" checks (Leads, Campaigns, Contacts, Deals) rather than
+  // "automation layer" checks (Leads, Contacts, Deals, Accounts) rather than
   // every module in the org. Orgs can have hundreds of custom/junction modules
   // that were never candidates for a workflow rule in the first place — dividing
   // by all of them makes real coverage round down to 0 no matter how many of the
@@ -92,7 +92,7 @@ function scoreDataArchitecture(fields: unknown[], modules: unknown[]): number {
   // this count, matching the Modules KPI card in CRMOverviewDashboard.tsx —
   // but excluded from the empty-count below (hidden takes precedence over
   // empty, so a module isn't flagged both ways).
-  const activeModules = modules.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+  const activeModules = modules.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
   const emptyModuleCount = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m)).length;
   if (activeModules.length > 15 && emptyModuleCount > 0) score -= 5;
   return Math.max(0, score);

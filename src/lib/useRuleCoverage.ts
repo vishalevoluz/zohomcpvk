@@ -59,7 +59,7 @@ export function isScheduleTool(_name: string): boolean {
 // `module` query param (or nothing, for schedules) and so can't ride along
 // with the flat entity fetches in useCrmEntities.ts — pulled in separately
 // for the same core lifecycle modules the flow map and Automation Coverage
-// dimension already check (Leads, Campaigns, Contacts, Deals). Shared by
+// dimension already check (Leads, Contacts, Deals, Accounts). Shared by
 // BusinessView and CRMOverviewDashboard so both reflect the same broadened
 // definition of "automation" without fetching twice.
 //

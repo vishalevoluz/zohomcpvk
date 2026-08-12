@@ -128,10 +128,10 @@ export interface PipelineStagesState {
 
 const STAGE_DEFINITIONS: StageDef[] = [
   { id: "leads",     lane: "entry",         col: 0, label: "Leads",     matchers: [/lead/i],               targetSection: "modules", wantsAutomation: true },
-  { id: "campaigns", lane: "entry",         col: 1, label: "Campaigns", matchers: [/campaign/i],            targetSection: "modules", wantsAutomation: true },
+  { id: "campaigns", lane: "entry",         col: 1, label: "Campaigns", matchers: [/campaign/i],            targetSection: "modules" },
   { id: "contacts",  lane: "qualification", col: 0, label: "Contacts",  matchers: [/contact/i],             targetSection: "modules", wantsAutomation: true },
   { id: "deals",     lane: "qualification", col: 1, label: "Deals",     matchers: [/deal|opportunit/i],      targetSection: "modules", wantsAutomation: true },
-  { id: "accounts",  lane: "outcome",       col: 0, label: "Accounts",  matchers: [/account/i],             targetSection: "modules" },
+  { id: "accounts",  lane: "outcome",       col: 0, label: "Accounts",  matchers: [/account/i],             targetSection: "modules", wantsAutomation: true },
   { id: "invoices",  lane: "outcome",       col: 1, label: "Invoices",  matchers: [/invoice/i],             targetSection: "modules" },
 ];
 
@@ -198,8 +198,8 @@ export function findDealsApiName(entityData: Record<CrmEntityType, EntityState>)
   return mod ? moduleApiName(mod) : null;
 }
 
-// The modules the flow map's own "automation layer" checks (Leads, Campaigns,
-// Contacts, Deals — see STAGE_DEFINITIONS' wantsAutomation flag). Reused by
+// The modules the flow map's own "automation layer" checks (Leads, Contacts,
+// Deals, Accounts — see STAGE_DEFINITIONS' wantsAutomation flag). Reused by
 // businessScore.ts so the dashboard's Automation Coverage dimension measures
 // coverage of the same lead-to-deal lifecycle modules the flow map already
 // visualizes, instead of every module the org happens to have (which for orgs
@@ -656,7 +656,7 @@ export function buildFlowMap(
   }
 
   // ── Automation lane companion nodes ──────────────────────────────────────
-  // One per lead-to-deal lifecycle stage (Leads/Campaigns/Contacts/Deals),
+  // One per lead-to-deal lifecycle stage (Leads/Contacts/Deals/Accounts),
   // showing automation health specifically — independent of the stage node's
   // own color above, which also factors in record evidence.
   const automationStages = STAGE_DEFINITIONS.filter(s => s.wantsAutomation);

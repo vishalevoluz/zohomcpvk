@@ -160,7 +160,7 @@ const FINDING_DEFS: FindingDef[] = [
       const offenders = [...byModule.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([label, n]) => `${label} (${n})`);
       return {
         offenders, count: mandatory.length,
-        honesty: `Confirmed from all ${entityData.fields.items.length} fields in your CRM's configuration.`,
+        honesty: `Confirmed from ${entityData.fields.items.length} fields across your core Leads, Contacts, Deals, and Accounts modules.`,
       };
     },
   },

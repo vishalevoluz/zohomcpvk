@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool, findParamLocations, findParam, setParam } from "@/lib/zohoMcp";
+import { moduleApiName, isDeletedModule } from "@/lib/crmPredicates";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,26 @@ export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns
     patterns: [/getfield(?!byid)/i, /listfield/i, /allfield/i, /getfields/i],
   },
 };
+
+// Zoho's fields endpoint is scoped to one module per call, with no "all
+// modules" mode — unlike every other entity here. Calling it with no module
+// param (what the generic single-call path below does for every other type)
+// just fails or returns nothing, and firing one call per module in the org
+// isn't practical either (a real CRM can have hundreds). So "fields" is
+// special-cased to the same core lead-to-deal lifecycle modules the flow map
+// and Automation Coverage already treat as the CRM's backbone (see
+// STAGE_DEFINITIONS in flowMapModel.ts) — a small, honest, representative
+// sample instead of either an always-empty result or an unbounded fan-out.
+const CORE_LIFECYCLE_MODULE_MATCHERS: RegExp[] = [/lead/i, /contact/i, /deal|opportunit/i, /account/i];
+
+function resolveCoreModuleApiNames(modules: unknown[]): string[] {
+  const usableModules = modules.filter(m => !isDeletedModule(m));
+  return CORE_LIFECYCLE_MODULE_MATCHERS
+    .map(pattern => usableModules.find(m => pattern.test(moduleApiName(m))))
+    .filter((m): m is unknown => !!m)
+    .map(m => moduleApiName(m))
+    .filter(Boolean);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -254,9 +275,65 @@ export function useCrmEntities(
   const hasFetched = useRef(false);
   const configKey = config ? `${config.url}::${config.crmBaseUrl ?? ""}::${config.authToken ?? ""}::${config.apiKey ?? ""}` : null;
   const lastConfigKey = useRef<string | null>(null);
+  // fetchEntity("fields") needs the current module list to know which modules
+  // to scope its per-module calls to, but reading entityData.modules.items
+  // directly would close over a stale value from whenever the callback was
+  // created — this ref always has the latest, for callers that don't pass
+  // moduleItemsOverride explicitly (e.g. a future per-entity retry button).
+  const entityDataRef = useRef(entityData);
+  entityDataRef.current = entityData;
 
-  const fetchEntity = useCallback(async (type: CrmEntityType) => {
-    if (!config) return;
+  // Fetches a module-scoped entity (currently just "fields") by calling the
+  // tool once per resolved core module and concatenating the results — Zoho's
+  // fields endpoint has no "all modules" mode, unlike every other entity here.
+  const fetchScopedFields = useCallback(async (tool: McpTool, moduleItems: unknown[]) => {
+    const coreApiNames = resolveCoreModuleApiNames(moduleItems);
+    if (coreApiNames.length === 0) {
+      setEntityData(prev => ({
+        ...prev,
+        fields: { ...prev.fields, loading: false, items: [], error: "Could not find Leads/Contacts/Deals/Accounts modules to fetch fields for", toolUsed: tool.name, lastFetched: Date.now() },
+      }));
+      return [];
+    }
+
+    const moduleLoc = findParam(findParamLocations(tool), /^module$/i) ?? { group: null, key: "module" };
+    let items: unknown[] = [];
+    let lastError: string | null = null;
+    for (const apiName of coreApiNames) {
+      const input: Record<string, unknown> = {};
+      setParam(input, moduleLoc, apiName);
+      const start = Date.now();
+      try {
+        const output = await executeTool(config!, tool.name, input);
+        const moduleFields = extractArray(output);
+        items = items.concat(moduleFields);
+        onLog({
+          id: Math.random().toString(36).slice(2),
+          tool: tool.name, input, output, status: "success",
+          durationMs: Date.now() - start, timestamp: new Date(),
+        });
+      } catch (e: unknown) {
+        lastError = e instanceof Error ? e.message : "Failed to fetch fields";
+        onLog({
+          id: Math.random().toString(36).slice(2),
+          tool: tool.name, input, output: null, status: "error",
+          errorMessage: lastError, durationMs: Date.now() - start, timestamp: new Date(),
+        });
+      }
+    }
+
+    setEntityData(prev => ({
+      ...prev,
+      // Partial results (some core modules succeeded, one failed) still count
+      // as resolved data, not an error state — same "keep what worked" stance
+      // as the generic path's mid-pagination failure handling below.
+      fields: { ...prev.fields, loading: false, items, error: items.length === 0 ? lastError : null, toolUsed: tool.name, lastFetched: Date.now() },
+    }));
+    return items;
+  }, [config, onLog]);
+
+  const fetchEntity = useCallback(async (type: CrmEntityType, moduleItemsOverride?: unknown[]): Promise<unknown[]> => {
+    if (!config) return [];
     const tool = findToolForEntity(tools, type);
 
     setEntityData(prev => ({
@@ -269,7 +346,11 @@ export function useCrmEntities(
         ...prev,
         [type]: { ...prev[type], loading: false, error: "No matching tool found", toolUsed: null },
       }));
-      return;
+      return [];
+    }
+
+    if (type === "fields") {
+      return fetchScopedFields(tool, moduleItemsOverride ?? entityDataRef.current.modules.items);
     }
 
     const MAX_PAGES = 10; // safety cap — 10 * 200 = up to 2000 records
@@ -310,6 +391,7 @@ export function useCrmEntities(
         ...prev,
         [type]: { ...prev[type], loading: false, items, error: null, toolUsed: tool.name, lastFetched: Date.now() },
       }));
+      return items;
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Failed to fetch";
       onLog({
@@ -329,14 +411,24 @@ export function useCrmEntities(
         // like the flow map's automation-coverage check.
         [type]: { ...prev[type], loading: false, items, error: msg, toolUsed: tool.name, lastFetched: items.length > 0 ? Date.now() : prev[type].lastFetched },
       }));
+      return items;
     }
-  }, [config, tools, onLog]);
+  }, [config, tools, onLog, fetchScopedFields]);
 
   const fetchAll = useCallback(() => {
     if (!config) return;
     hasFetched.current = true;
     setLastRefresh(new Date());
-    CRM_ENTITIES.forEach(e => fetchEntity(e.type));
+    // "fields" needs the resolved module list to know which modules to scope
+    // its per-module calls to — chained after modules resolves instead of
+    // firing in the same immediate parallel batch as everything else, since
+    // it'd otherwise always see an empty module list on this first fetch.
+    const modulesPromise = fetchEntity("modules");
+    CRM_ENTITIES.forEach(e => {
+      if (e.type === "modules") return;
+      if (e.type === "fields") { modulesPromise.then(moduleItems => fetchEntity("fields", moduleItems)); return; }
+      fetchEntity(e.type);
+    });
   }, [config, fetchEntity]);
 
   // A new/different MCP connection (org switch, reconnect) must not keep

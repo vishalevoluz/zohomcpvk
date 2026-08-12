@@ -198,6 +198,19 @@ export function isHiddenModule(item: unknown): boolean {
   return r.visible === false || r.show_as_tab === false || r.viewable === false || r.visibility === 0;
 }
 
+// Narrower than isHiddenModule: only Zoho's own "system_hidden" status, not an
+// admin's deliberate "user_hidden" customization. A system-hidden module is
+// hidden by Zoho itself (not a real module a business owner ever chose to
+// use), so — unlike a merely user-hidden one — it shouldn't count toward "how
+// many modules does this org have" any more than an internal pseudo-module
+// does. See isInternalModule for the same reasoning applied to a different
+// class of not-really-a-module entries.
+export function isSystemHiddenModule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  return String(r.status ?? "").toLowerCase() === "system_hidden";
+}
+
 // Zoho auto-generates a standalone "module" entry for every file/image-upload
 // field, plus internal bookkeeping entities (Locking_Information__s,
 // Functions__s, Scoring_Rules__s, Entity_Scores__s, …) — all sharing an

@@ -94,7 +94,7 @@ interface Props {
   tools: McpTool[];
   onLog: (log: ExecutionLog) => void;
   entityData: Record<CrmEntityType, EntityState>;
-  fetchEntity: (type: CrmEntityType) => Promise<void>;
+  fetchEntity: (type: CrmEntityType) => Promise<unknown[]>;
   fetchAll: () => void;
   lastRefresh: Date | null;
   onSelectSection: (s: Section) => void;

@@ -9,9 +9,9 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
-  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, hasEmailAction,
+  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, isMandatoryField, hasEmailAction,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
-  isEmptyModule, isHiddenModule, isInternalModule, moduleApiName, blueprintsForModule,
+  isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
 } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
@@ -47,7 +47,7 @@ export const DIMENSION_ICONS: Record<DimensionKey, DimensionIconKey> = {
 };
 
 export const DIMENSION_TOOLTIPS: Record<DimensionKey, string> = {
-  automationCoverage: "Of your core lead-to-deal modules — Leads, Campaigns, Contacts, Deals — how many have at least one active workflow, assignment rule, approval process, validation rule, or layout rule watching them. The ones with none drag this score down.",
+  automationCoverage: "Of your core lead-to-deal modules — Leads, Contacts, Deals, Accounts — how many have at least one active workflow, assignment rule, approval process, validation rule, or layout rule watching them. The ones with none drag this score down.",
   processCompleteness: "Whether a sales pipeline, blueprint, and defined stages actually exist. Missing pieces mean reps have no set path to follow.",
   accessSecurity: "Whether access is split into real roles instead of everyone sharing one login level, and whether inactive users still hold licenses.",
   dataArchitecture: "Whether your fields and module count are kept reasonable, not bloated with excess required fields or clutter.",
@@ -228,7 +228,7 @@ function automationCoverageChecklist(entityData: Record<CrmEntityType, EntitySta
       id: "automation-coverage-none",
       label: "No core lead-to-deal modules found",
       status: "pass",
-      detail: "Leads, Campaigns, Contacts, and Deals were not found in this org, so this dimension defaults to full marks.",
+      detail: "Leads, Contacts, Deals, and Accounts were not found in this org, so this dimension defaults to full marks.",
       weight: 20,
     }];
   }
@@ -257,7 +257,7 @@ function automationCoverageChecklist(entityData: Record<CrmEntityType, EntitySta
 function automationCoverageReason(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null): string {
   const coreApiNames = automationCoverageApiNames(entityData.modules.items);
   if (coreApiNames.length === 0) {
-    return "Leads, Campaigns, Contacts, and Deals weren't found in this org, so this dimension defaults to full marks.";
+    return "Leads, Contacts, Deals, and Accounts weren't found in this org, so this dimension defaults to full marks.";
   }
   const activeWorkflows = entityData.workflows.items.filter(isActiveWorkflow);
   const failing = coreApiNames.filter(apiName => {
@@ -282,6 +282,8 @@ function processCompletenessChecklist(
   // getPipelines chain) is the authoritative number once it's resolved.
   const pipelineCount = pipelineCountOverride ?? entityData.pipelines.items.length;
   const blueprintCount = entityData.blueprints.items.length;
+  const activeBlueprintCount = entityData.blueprints.items.filter(bp => blueprintStatus(bp) === "active").length;
+  const inactiveBlueprintCount = blueprintCount - activeBlueprintCount;
   const stagesOk = pipelineStageCount > 0 && outOfOrderStageCount === 0;
   return [
     {
@@ -291,7 +293,9 @@ function processCompletenessChecklist(
     },
     {
       id: "process-blueprint", label: "A blueprint process exists", status: blueprintCount > 0 ? "pass" : "fail",
-      detail: blueprintCount > 0 ? `${blueprintCount} blueprint${blueprintCount !== 1 ? "s" : ""} configured.` : "No blueprint process is configured.",
+      detail: blueprintCount > 0
+        ? `${blueprintCount} blueprint${blueprintCount !== 1 ? "s" : ""} configured.\n${activeBlueprintCount} active, ${inactiveBlueprintCount} inactive.`
+        : "No blueprint process is configured.",
       weight: 7,
     },
     {
@@ -324,26 +328,19 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   // Admin-profile USERS, not admin-named profile catalog entries — an org can
   // define a single "Administrator" profile and still assign it to most of
   // the team, which counting profile definitions alone would completely miss.
-  const adminCount = activeUsers.filter(isAdminProfileUser).length;
-  // "Licensed but not active" (disabled) is what actually costs money — the
-  // score penalty is based on this count alone.
-  const inactiveUsers = activeUsers.filter(isInactiveUser).length;
+  // Scoped to truly active users (excludes disabled-but-licensed seats) — a
+  // disabled admin account isn't a live access risk.
+  const trueActiveUsers = activeUsers.filter(isActiveUser);
+  const activeAdminCount = trueActiveUsers.filter(isAdminProfileUser).length;
+  const activeUserCount = trueActiveUsers.length;
   const profileCount = entityData.profiles.items.length;
-  const userCount = activeUsers.length;
   return [
     {
-      id: "access-admin-count", label: "Admin access is limited", status: adminCount <= 2 ? "pass" : "fail",
-      detail: userCount > 0
-        ? `${adminCount} of ${userCount} user${userCount !== 1 ? "s" : ""} hold an admin-named profile${adminCount > 2 ? " (more than 2 increases risk)" : ""}.`
-        : "No users found.",
+      id: "access-admin-count", label: "Admin access is limited", status: activeAdminCount <= 2 ? "pass" : "fail",
+      detail: activeUserCount > 0
+        ? `${activeAdminCount} of ${activeUserCount} active user${activeUserCount !== 1 ? "s" : ""} hold an admin-named profile${activeAdminCount > 2 ? " (more than 2 increases risk)" : ""}.`
+        : "No active users found.",
       weight: 5,
-    },
-    {
-      id: "access-inactive-users", label: "No inactive users still visible", status: inactiveUsers === 0 ? "pass" : "fail",
-      detail: inactiveUsers === 0
-        ? "No inactive users found."
-        : `${inactiveUsers} of ${userCount} user${userCount !== 1 ? "s" : ""} ${inactiveUsers !== 1 ? "are" : "is"} disabled but still hold a license.`,
-      weight: inactiveUsers > 0 ? Math.min(10, inactiveUsers * 3) : 10,
     },
     {
       id: "access-role-segmentation", label: "Access is split into multiple profiles", status: profileCount > 1 ? "pass" : "fail",
@@ -355,12 +352,14 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
 
 function accessSecurityReason(entityData: Record<CrmEntityType, EntityState>): string {
   const activeUsers = entityData.users.items.filter(u => !isDeletedUser(u));
-  const adminCount = activeUsers.filter(isAdminProfileUser).length;
+  const trueActiveUsers = activeUsers.filter(isActiveUser);
+  const activeAdminCount = trueActiveUsers.filter(isAdminProfileUser).length;
+  const activeUserCount = trueActiveUsers.length;
   const inactiveUsers = activeUsers.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
   const userCount = activeUsers.length;
   const issues: string[] = [];
-  if (adminCount > 2) issues.push(`${adminCount} of ${userCount} users hold an admin-named profile (more than 2)`);
+  if (activeAdminCount > 2) issues.push(`${activeAdminCount} of ${activeUserCount} active users hold an admin-named profile (more than 2)`);
   if (inactiveUsers > 0) issues.push(`${inactiveUsers} user${inactiveUsers !== 1 ? "s" : ""} disabled but still licensed`);
   if (profileCount === 1) issues.push("only one profile exists, so there's no role separation");
   if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive users are still visible.";
@@ -385,13 +384,18 @@ function emptyModuleLabel(m: unknown, workflows: unknown[], blueprints: unknown[
 
 function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
-  // Deleted and internal/system pseudo-modules (file-upload backing entries,
-  // subforms, etc. — see isInternalModule) are excluded entirely — they
-  // aren't real modules. Hidden (user_hidden/system_hidden) ones ARE kept in
-  // this count, same as the Modules KPI card in CRMOverviewDashboard.tsx, so
-  // both surfaces report the same total — hidden just means "not counted
-  // toward empty/clutter" below, not "excluded from the module count."
-  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+  // Deleted, internal/system pseudo-modules (file-upload backing entries,
+  // subforms, etc. — see isInternalModule), and system-hidden ones (Zoho's
+  // own hidden status, not an admin's deliberate user_hidden choice — see
+  // isSystemHiddenModule) are excluded entirely — none of these are a real
+  // module a business owner would recognize as part of their CRM. This
+  // deliberately diverges from the raw Modules KPI card in
+  // CRMOverviewDashboard.tsx, which still counts every non-deleted,
+  // non-internal module (hidden or not) since that card's job is showing the
+  // literal org inventory, not a curated "modules that matter" total.
+  // User-hidden modules ARE still kept here — an admin's deliberate hide is a
+  // real customization choice, unlike a Zoho-computed system_hidden one.
+  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
   const moduleCount = activeModules.length;
   // Hidden takes precedence over empty — a module already hidden from users
   // isn't "clutter" in the same sense an unused-but-visible one is, and this
@@ -403,7 +407,7 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
   return [
     {
       id: "data-mandatory-fields", label: "Mandatory field count is reasonable", status: mandatoryCount <= 20 ? "pass" : "fail",
-      detail: `${mandatoryCount} mandatory field${mandatoryCount !== 1 ? "s" : ""} found${mandatoryCount > 20 ? " (over the 20 recommended)." : "."}`,
+      detail: `${mandatoryCount} mandatory field${mandatoryCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryCount > 20 ? " (over the 20 recommended)." : "."}`,
       weight: mandatoryCount > 20 ? Math.min(15, mandatoryCount - 20) : 15,
     },
     {
@@ -420,7 +424,7 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
 
 function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>): string {
   const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
-  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+  const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
   const emptyModules = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m));
   const issues: string[] = [];
   if (mandatoryCount > 20) issues.push(`${mandatoryCount} mandatory fields (over the 20 recommended)`);
