@@ -48,6 +48,79 @@ export function workflowModuleLabel(item: unknown): string {
   return String(mod);
 }
 
+function workflowName(item: unknown): string {
+  if (!item || typeof item !== "object") return "Unknown";
+  const r = item as Record<string, unknown>;
+  return String(r.name ?? r.workflow_name ?? r.id ?? "Unknown");
+}
+
+// module::trigger-event signature a workflow fires on — same shape
+// WorkflowAudit.tsx's "Conflicting Workflows" finding already groups by, kept
+// here so the Health Score's Workflow Health checklist can report the same
+// count instead of drifting from the audit table. "—" is the not-found
+// fallback for both halves, matching workflowModuleLabel's own default.
+function workflowTriggerKey(item: unknown): string {
+  if (!item || typeof item !== "object") return "—::—";
+  const r = item as Record<string, unknown>;
+  const executeWhen = r.execute_when as Record<string, unknown> | undefined;
+  let trigger: string;
+  if (executeWhen?.type) {
+    trigger = String(executeWhen.type).replace(/_/g, " ");
+  } else {
+    const t = r.trigger_on ?? r.trigger ?? r.triggers;
+    trigger = !t ? "—" : Array.isArray(t) ? t.join(", ") : String(t);
+  }
+  return `${workflowModuleLabel(r) || "—"}::${trigger}`;
+}
+
+// Active workflows that share the exact same module + trigger event as at
+// least one other active workflow — multiple rules racing to fire on the same
+// event, in an undefined order, every time a matching record is touched.
+// Inactive workflows can't race with anything, so they're excluded up front.
+export function overlappingWorkflows(workflows: unknown[]): unknown[] {
+  const active = workflows.filter(isActiveWorkflow);
+  const triggerCounts = new Map<string, number>();
+  active.forEach(w => { const k = workflowTriggerKey(w); if (k !== "—::—") triggerCounts.set(k, (triggerCounts.get(k) ?? 0) + 1); });
+  return active.filter(w => { const k = workflowTriggerKey(w); return k !== "—::—" && (triggerCounts.get(k) ?? 0) > 1; });
+}
+
+// Workflows that are near-certain duplicates: same name AND the same
+// module + trigger signature. Name alone can be coincidence (two unrelated
+// rules on different modules happening to share a label) — name plus a
+// matching functional signature means one was very likely cloned from the
+// other and never renamed, merged, or removed.
+export function identicalWorkflows(workflows: unknown[]): unknown[] {
+  const keyOf = (w: unknown) => `${workflowName(w).trim().toLowerCase()}::${workflowTriggerKey(w)}`;
+  const counts = new Map<string, number>();
+  workflows.forEach(w => { const k = keyOf(w); counts.set(k, (counts.get(k) ?? 0) + 1); });
+  return workflows.filter(w => (counts.get(keyOf(w)) ?? 0) > 1);
+}
+
+// "Consolidate the overlapping/duplicate group into one rule" projected —
+// used by businessScore.ts's estimateScoreGain to simulate the real fix
+// (merge, don't just disable) rather than guessing a flat point value.
+export function withoutOverlappingWorkflows(workflows: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  return workflows.filter(w => {
+    if (!isActiveWorkflow(w)) return true;
+    const k = workflowTriggerKey(w);
+    if (k === "—::—") return true;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+export function withoutIdenticalWorkflows(workflows: unknown[]): unknown[] {
+  const seen = new Set<string>();
+  return workflows.filter(w => {
+    const k = `${workflowName(w).trim().toLowerCase()}::${workflowTriggerKey(w)}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export type BlueprintStatus = "active" | "inactive" | "draft";
 
 // Blueprint status is its own flat "Active" | "Inactive" | "Draft" string (or

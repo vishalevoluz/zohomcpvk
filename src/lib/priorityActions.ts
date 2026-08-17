@@ -37,11 +37,6 @@ const ACTION_COPY: Record<string, { title: string; why: (f: Finding) => string; 
     why: () => "Unanswered leads go cold. Automated follow-up keeps prospects engaged without relying on reps to remember.",
     owner: "Your Zoho consultant", timeToValue: "~1 hour",
   },
-  "inactive-users": {
-    title: "Remove Inactive User Licenses",
-    why: () => "Every inactive user with a paid license is a direct monthly cost with zero return.",
-    owner: "You", timeToValue: "~15 mins",
-  },
   "excessive-mandatory-fields": {
     title: "Reduce Mandatory Field Count",
     why: () => "Too many required fields push reps to enter dummy data. Fewer, smarter fields improve data quality.",

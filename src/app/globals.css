@@ -4678,6 +4678,21 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   cursor: pointer;
 }
 .cost-card-fix-link:hover { text-decoration: underline; }
+.issue-fix-row {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 0.5px dashed var(--color-border);
+}
+.issue-fix-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.issue-fix-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
+}
+.issue-fix-title { font-size: 13px; font-weight: 700; color: var(--color-text); }
+.cost-card .issue-detail { margin-top: 10px; }
 .cost-card-skeleton {
   height: 110px;
   border-radius: var(--radius-lg);
@@ -4705,40 +4720,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .cost-cards-more:hover { text-decoration: underline; }
 
-/* Top Priority Actions */
-.priority-actions-skeleton {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  padding: 12px 0;
-}
-.priority-actions-list { display: flex; flex-direction: column; gap: 10px; }
-/* Each action is a row: the summary card, plus — only while its own "View
-   Details" is toggled on — a detail pane to its right. Only one row can be
-   expanded at a time (single expandedActionId in BusinessView), so at most
-   one detail pane ever shows. */
-.priority-action-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-  align-items: start;
-}
-.priority-action-row.expanded { grid-template-columns: minmax(0, 1fr) minmax(220px, 320px); }
-@media (max-width: 720px) {
-  .priority-action-row.expanded { grid-template-columns: 1fr; }
-}
-.priority-action-card {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  background: var(--color-bg);
-  border: 0.5px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  padding: 14px 18px;
-  transition: border-color 0.3s, box-shadow 0.3s;
-}
+/* Issue cards (What's Costing You, merged with the actionable-fix framing) */
 .priority-action-detail {
   background: var(--color-bg-tertiary);
   border: 0.5px solid var(--color-border);
@@ -4768,18 +4750,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .priority-action-detail-owner { font-size: 12.5px; color: var(--color-text-secondary); margin-top: 10px; }
 .priority-action-detail-owner strong { color: var(--color-text); }
-/* Briefly flashed when a cost card's "Fix this ↓" link scrolls here. */
-.priority-action-card.highlighted { border-color: var(--color-brand); box-shadow: 0 0 0 3px var(--color-brand-bg); }
-.priority-action-rank {
-  font-size: 26px;
-  font-weight: 800;
-  color: var(--color-brand);
-  min-width: 32px;
-  text-align: center;
-}
-.priority-action-body { flex: 1; min-width: 0; }
-.priority-action-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.priority-action-title { font-size: 14px; font-weight: 700; color: var(--color-text); }
 .quick-win-badge {
   font-size: 10px;
   font-weight: 700;
@@ -4791,7 +4761,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   color: var(--bv-healthy);
   cursor: help;
 }
-.priority-action-why { font-size: 13px; color: var(--color-text-secondary); margin-top: 4px; line-height: 1.5; }
 .priority-action-badges { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .impact-badge, .effort-badge, .owner-badge, .time-badge {
   font-size: 11px;
@@ -4810,10 +4779,8 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .priority-action-projected { font-size: 12.5px; font-weight: 600; color: var(--color-brand); margin-top: 8px; }
 .priority-action-honesty { font-size: 11px; color: var(--color-text-tertiary); margin-top: 6px; }
 .priority-actions-low-impact-note { margin-bottom: 10px; }
-.priority-action-btn { flex-shrink: 0; }
 
 @media (max-width: 720px) {
-  .priority-action-card { flex-wrap: wrap; }
   .business-view { padding: 1rem; }
 }
 

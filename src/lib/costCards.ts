@@ -28,10 +28,6 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
     icon: "✉", headline: "Leads Are Being Followed Up Manually",
     body: () => "Your team is chasing every prospect by hand. You are losing deals to faster competitors.",
   },
-  "inactive-users": {
-    icon: "◎", headline: "You Are Paying for Unused Seats",
-    body: f => `${f.count} inactive license${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} may still be billed monthly — free them up or reassign them.`,
-  },
   "excessive-mandatory-fields": {
     icon: "▤", headline: "Your Sales Team Is Avoiding the CRM",
     body: f => `${f.count} mandatory fields${f.offenders.length ? ` — concentrated in ${f.offenders.join(", ")}` : ""} push reps to skip records or enter junk data just to save.`,
@@ -91,6 +87,10 @@ export interface CostCardsResult {
 }
 
 const SEVERITY_ORDER: Record<CostCardSeverity, number> = { CRITICAL: 0, WARNING: 1, REVIEW: 2 };
+// Covers every finding CARD_COPY currently defines, so nothing needs the
+// "+N more" click by default — it only kicks in once more findings are added
+// than currently exist.
+const INITIAL_SHOWN_COUNT = 12;
 
 export function evaluateCostCards(
   entityData: Record<CrmEntityType, EntityState>,
@@ -115,8 +115,13 @@ export function evaluateCostCards(
     });
 
   triggered.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
-  const shown = triggered.slice(0, 5);
-  const overflowCount = Math.max(0, triggered.length - 5);
+  // This list now stands in for both the old "What Is Costing You" (5 shown)
+  // and "Top Priority Actions" (a separate 5 shown) panels merged into one —
+  // capping at the old single-panel number would show fewer distinct issues
+  // than before the merge, so the visible count is raised to cover roughly
+  // what both used to show combined.
+  const shown = triggered.slice(0, INITIAL_SHOWN_COUNT);
+  const overflowCount = Math.max(0, triggered.length - INITIAL_SHOWN_COUNT);
 
   return { shown, loadingIds, uncertain, overflowCount, allTriggered: triggered };
 }

@@ -5,7 +5,7 @@ import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from
 import { RECORDS_SAMPLE_SIZE } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import {
-  hasEmailAction, isInactiveUser, isActiveUser, isMandatoryField, isAdminProfile, isActiveWorkflow,
+  hasEmailAction, isActiveUser, isMandatoryField, isAdminProfile, isActiveWorkflow,
   workflowModuleLabel, moduleApiName, unreferencedModules, isDeletedModule, isInternalModule, isSystemHiddenModule,
   isDealStale, isDealUnforecastable, dealAmount, dealCurrencySymbol,
   hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent, userLastLoginDate,
@@ -130,22 +130,6 @@ const FINDING_DEFS: FindingDef[] = [
     },
   },
   {
-    id: "inactive-users",
-    severity: "WARNING", impact: "High", effort: "Easy", targetSection: "crm-dashboard",
-    requires: ["users"],
-    build: ({ entityData }) => {
-      const users = entityData.users.items;
-      const inactive = users.filter(isInactiveUser);
-      if (inactive.length === 0) return null;
-      return {
-        offenders: inactive.map((u, i) => getItemName(u, i)).filter(Boolean).slice(0, 5),
-        count: inactive.length,
-        stakeLabel: `${inactive.length} seat${inactive.length !== 1 ? "s" : ""}`,
-        honesty: `Confirmed from all ${users.length} licensed user${users.length !== 1 ? "s" : ""} in your CRM.`,
-      };
-    },
-  },
-  {
     id: "excessive-mandatory-fields",
     severity: "WARNING", impact: "Medium", effort: "Medium", targetSection: "fields",
     requires: ["fields"],
@@ -262,8 +246,19 @@ const FINDING_DEFS: FindingDef[] = [
       // (every record has one) over the org-level lookup, which depends on
       // getOrganizations being authorized on this MCP connection at all.
       const symbol = stale.map(dealCurrencySymbol).find(Boolean) ?? currencySymbol;
+      // Per-deal amount alongside each name — the total above is a sum a
+      // reader can't otherwise verify, so "Where this shows up" needs to
+      // show the actual numbers being added, not just which deals they came from.
       return {
-        offenders: stale.map((d, i) => getItemName(d, i)).filter(Boolean).slice(0, 5),
+        offenders: stale
+          .map((d, i) => {
+            const name = getItemName(d, i);
+            if (!name) return "";
+            const amt = dealAmount(d);
+            return amt !== null ? `${name} (${formatMoney(amt, dealCurrencySymbol(d) ?? symbol)})` : name;
+          })
+          .filter(Boolean)
+          .slice(0, 5),
         count: stale.length,
         stakeLabel: totalValue > 0 ? `${formatMoney(totalValue, symbol)} of pipeline value` : undefined,
         sampleSize: isFullPopulation(items.length) ? undefined : items.length,

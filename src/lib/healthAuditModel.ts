@@ -12,6 +12,7 @@ import {
   isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, isMandatoryField,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
+  overlappingWorkflows, identicalWorkflows,
 } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
@@ -51,7 +52,7 @@ export const DIMENSION_TOOLTIPS: Record<DimensionKey, string> = {
   processCompleteness: "Whether a sales pipeline, blueprint, and defined stages actually exist. Missing pieces mean reps have no set path to follow.",
   accessSecurity: "Whether access is split into real roles instead of everyone sharing one login level, and whether inactive users still hold licenses.",
   dataArchitecture: "Whether your fields and module count are kept reasonable, not bloated with excess required fields or clutter.",
-  automationHealth: "What share of your existing workflows are actually turned on right now.",
+  automationHealth: "What share of your existing workflows are actually turned on right now, plus whether any are racing on the same trigger or are near-certain duplicate clones of each other.",
 };
 
 // Same finding ids as businessFindings.ts (the "What Is Costing You" / "Top
@@ -74,7 +75,7 @@ const DIMENSION_TO_ACTION_IDS: Record<DimensionKey, string[]> = {
   processCompleteness: ["no-pipeline", "no-blueprint"],
   accessSecurity: ["access-risk", "inactive-users"],
   dataArchitecture: ["excessive-mandatory-fields", "empty-modules"],
-  automationHealth: ["workflows-inactive"],
+  automationHealth: ["workflows-inactive", "workflows-overlapping", "workflows-duplicate"],
 };
 
 interface ActionInfo { title: string; why: string; impact: ActionImpact; effort: ActionEffort; targetSection: Section }
@@ -115,6 +116,16 @@ const ACTION_INFO: Record<string, ActionInfo> = {
     why: "Unused modules clutter the interface and confuse new team members. Hide them from each profile's module settings instead of deleting.",
     impact: "Low", effort: "Easy", targetSection: "modules",
   },
+  "workflows-overlapping": {
+    title: "Consolidate Overlapping Workflows",
+    why: "Multiple active rules firing on the same module and trigger race in an undefined order. Merge them into one rule so the outcome is predictable.",
+    impact: "Medium", effort: "Medium", targetSection: "workflows",
+  },
+  "workflows-duplicate": {
+    title: "Remove Duplicate Workflows",
+    why: "Workflows sharing the same name and the same module/trigger are near-certain clones. Merge or delete the extras before they drift out of sync.",
+    impact: "Low", effort: "Easy", targetSection: "workflows",
+  },
 };
 
 function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): boolean {
@@ -137,6 +148,8 @@ function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, 
       const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
       return unreferencedModules(realModules, entityData.workflows.items, entityData.blueprints.items).length > 3;
     }
+    case "workflows-overlapping": return overlappingWorkflows(entityData.workflows.items).length > 0;
+    case "workflows-duplicate": return identicalWorkflows(entityData.workflows.items).length > 0;
     default: return false;
   }
 }
@@ -149,6 +162,8 @@ const ACTION_REQUIRES: Record<string, CrmEntityType[]> = {
   "inactive-users": ["users"],
   "excessive-mandatory-fields": ["fields"],
   "empty-modules": ["modules", "workflows", "blueprints"],
+  "workflows-overlapping": ["workflows"],
+  "workflows-duplicate": ["workflows"],
 };
 
 const SEVERITY_LABEL: Record<HealthZone, "Critical" | "At Risk" | "Needs Attention" | "Healthy"> = {
@@ -357,12 +372,11 @@ function accessSecurityReason(entityData: Record<CrmEntityType, EntityState>): s
   const activeUserCount = trueActiveUsers.length;
   const inactiveUsers = activeUsers.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
-  const userCount = activeUsers.length;
   const issues: string[] = [];
   if (activeAdminCount > 2) issues.push(`${activeAdminCount} of ${activeUserCount} active users hold an admin-named profile (more than 2)`);
   if (inactiveUsers > 0) issues.push(`${inactiveUsers} user${inactiveUsers !== 1 ? "s" : ""} disabled but still licensed`);
   if (profileCount === 1) issues.push("only one profile exists, so there's no role separation");
-  if (issues.length === 0) return "Access is split across multiple profiles, admin access is limited, and no inactive users are still visible.";
+  if (issues.length === 0) return "Access is split across multiple profiles and admin access is limited.";
   return `${issues.join("; ")}.`;
 }
 
@@ -441,24 +455,60 @@ function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>):
 // say, 90% active could show a green "Healthy" pill right next to a red
 // checklist row for the same number, which would read as a contradiction.
 function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState>, score: number): ChecklistItem[] {
-  const total = entityData.workflows.items.length;
-  const active = entityData.workflows.items.filter(isActiveWorkflow).length;
-  const pass = zoneForValue(score, 20) === "healthy";
-  return [{
-    id: "automation-health-ratio",
-    label: "Active workflow ratio",
-    status: pass ? "pass" : "fail",
-    detail: total === 0 ? "No workflows configured yet — nothing to break." : `${active} of ${total} workflow${total !== 1 ? "s" : ""} are active.`,
-    weight: 20,
-  }];
+  const workflows = entityData.workflows.items;
+  const total = workflows.length;
+  const active = workflows.filter(isActiveWorkflow).length;
+  const overlapping = overlappingWorkflows(workflows);
+  const duplicate = identicalWorkflows(workflows);
+  // The ratio's own pass/fail still comes from the real dimension zone (it's
+  // proportional, not a flat threshold) — the two new checks below are flat
+  // count > 0 conditions, matching the flat deductions scoreAutomationHealth
+  // applies for them in businessScore.ts.
+  const ratioPass = zoneForValue(score, 20) === "healthy";
+  return [
+    {
+      id: "automation-health-ratio",
+      label: "Active workflow ratio",
+      status: ratioPass ? "pass" : "fail",
+      detail: total === 0 ? "No workflows configured yet — nothing to break." : `${active} of ${total} workflow${total !== 1 ? "s" : ""} are active.`,
+      weight: 14,
+    },
+    {
+      id: "automation-health-overlap",
+      label: "No workflows racing on the same trigger",
+      status: overlapping.length === 0 ? "pass" : "fail",
+      detail: overlapping.length === 0
+        ? "No active workflows share the same module and trigger event."
+        : `${overlapping.length} active workflow${overlapping.length !== 1 ? "s" : ""} overlap with at least one other on the same module and trigger event.`,
+      weight: 3,
+    },
+    {
+      id: "automation-health-duplicate",
+      label: "No identical duplicate workflows",
+      status: duplicate.length === 0 ? "pass" : "fail",
+      detail: duplicate.length === 0
+        ? "No workflows share the same name and functional signature."
+        : `${duplicate.length} workflow${duplicate.length !== 1 ? "s" : ""} ${duplicate.length !== 1 ? "are" : "is"} a near-certain clone of another (same name, same module/trigger).`,
+      weight: 3,
+    },
+  ];
 }
 
 function automationHealthReason(entityData: Record<CrmEntityType, EntityState>, score: number): string {
-  const total = entityData.workflows.items.length;
-  const active = entityData.workflows.items.filter(isActiveWorkflow).length;
+  const workflows = entityData.workflows.items;
+  const total = workflows.length;
+  const active = workflows.filter(isActiveWorkflow).length;
+  const overlapping = overlappingWorkflows(workflows);
+  const duplicate = identicalWorkflows(workflows);
   if (total === 0) return "No workflows configured yet — nothing to break.";
-  if (zoneForValue(score, 20) === "healthy") return `${active} of ${total} workflow${total !== 1 ? "s" : ""} are active — a healthy ratio.`;
-  return `${total - active} of ${total} workflow${total !== 1 ? "s" : ""} ${total - active !== 1 ? "are" : "is"} inactive.`;
+  const issues: string[] = [];
+  if (zoneForValue(score, 20) !== "healthy") {
+    issues.push(`${total - active} of ${total} workflow${total !== 1 ? "s" : ""} ${total - active !== 1 ? "are" : "is"} inactive`);
+  }
+  if (overlapping.length > 0) issues.push(`${overlapping.length} overlap on the same trigger`);
+  if (duplicate.length > 0) issues.push(`${duplicate.length} ${duplicate.length !== 1 ? "are" : "is"} a duplicate clone`);
+  if (issues.length === 0) return `${active} of ${total} workflow${total !== 1 ? "s" : ""} are active — a healthy ratio, with no overlaps or duplicates.`;
+  return `${issues.join("; ")}.`;
 }
 
 function automationHealthCriticalAlert(entityData: Record<CrmEntityType, EntityState>, score: number): string | null {

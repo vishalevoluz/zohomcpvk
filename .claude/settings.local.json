@@ -64,7 +64,18 @@
       "Bash(awk -F: '$1>4899')",
       "Bash(head -n 4741 src/app/globals.css)",
       "Bash(mv /tmp/globals_trimmed.css src/app/globals.css)",
-      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\\\"Name='node.exe'\\\\\" | Where-Object { \\\\$_.CommandLine -like '*next*' } | Select-Object ProcessId,CommandLine\")"
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter \\\\\"Name='node.exe'\\\\\" | Where-Object { \\\\$_.CommandLine -like '*next*' } | Select-Object ProcessId,CommandLine\")",
+      "Bash(cp \"C:\\\\Users\\\\ABC\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-ABC-Downloads-zoho-mcp-app-zoho-mcp-app\\\\714cd3f6-f48f-4fe9-aad0-1d5560f47016\\\\scratchpad\\\\shot3.js\" \"C:\\\\Users\\\\ABC\\\\Downloads\\\\zoho-mcp-app\\\\zoho-mcp-app\\\\.scratch-shot3.js\")",
+      "Bash(rm .scratch-shot3.js)",
+      "Bash(cp \"C:\\\\Users\\\\ABC\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-ABC-Downloads-zoho-mcp-app-zoho-mcp-app\\\\714cd3f6-f48f-4fe9-aad0-1d5560f47016\\\\scratchpad\\\\shot4.js\" \"C:\\\\Users\\\\ABC\\\\Downloads\\\\zoho-mcp-app\\\\zoho-mcp-app\\\\.scratch-shot4.js\")",
+      "Bash(rm .scratch-shot4.js)",
+      "WebSearch",
+      "PowerShell(Invoke-WebRequest -Uri http://localhost:3001 -UseBasicParsing -TimeoutSec 60 | Select-Object StatusCode, @{n='Len';e={$_.Content.Length}})",
+      "mcp__ide__getDiagnostics",
+      "Bash(export NODE_PATH=\"C:\\\\Users\\\\ABC\\\\AppData\\\\Local/npm-cache/_npx/6f4879659183bc49/node_modules\")",
+      "Bash(powershell -NoProfile -Command \"Get-CimInstance Win32_Process -Filter 'ProcessId=13348' | Select-Object ProcessId,ParentProcessId,CommandLine,Path | Format-List\")",
+      "Bash(powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Select-Object Id,ProcessName,StartTime\")",
+      "Bash(echo \"exit:$?\")"
     ]
   }
 }

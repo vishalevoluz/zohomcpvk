@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, identicalWorkflows, withoutOverlappingWorkflows, withoutIdenticalWorkflows } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
@@ -113,7 +113,16 @@ function scoreAutomationHealth(workflows: unknown[]): number {
   // active ratio (e.g. 1 of 64) rounds down to the same 0/20 as having zero
   // active workflows at all, hiding that some automation genuinely exists.
   if (active === 0) return 0;
-  return Math.max(1, Math.round(20 * (active / workflows.length)));
+  let score = Math.max(1, Math.round(20 * (active / workflows.length)));
+  // Active-ratio alone scores multiple rules racing on the same trigger, or
+  // near-duplicate clones nobody ever merged, as perfectly healthy — they're
+  // "on", just not well. Flat deductions (not scaled by count) so one org
+  // with a handful of stray overlaps isn't punished the same as an org with
+  // a systemic overlap problem, matching the flat penalties elsewhere in this
+  // scoring model (e.g. the single-profile deduction below).
+  if (overlappingWorkflows(workflows).length > 0) score -= 3;
+  if (identicalWorkflows(workflows).length > 0) score -= 3;
+  return Math.max(0, score);
 }
 
 // Same healthy/needs-attention/at-risk/critical banding used for the overall
@@ -240,6 +249,16 @@ export function estimateScoreGain(
     }
     case "no-blueprint": {
       mutated = withEntity(entityData, "blueprints", [{ id: "projected", status: "Active" }]);
+      break;
+    }
+    case "workflows-overlapping": {
+      if (overlappingWorkflows(entityData.workflows.items).length === 0) return null;
+      mutated = withEntity(entityData, "workflows", withoutOverlappingWorkflows(entityData.workflows.items));
+      break;
+    }
+    case "workflows-duplicate": {
+      if (identicalWorkflows(entityData.workflows.items).length === 0) return null;
+      mutated = withEntity(entityData, "workflows", withoutIdenticalWorkflows(entityData.workflows.items));
       break;
     }
     case "access-risk": {

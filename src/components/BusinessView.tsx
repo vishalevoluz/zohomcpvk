@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useMemo, useState } from "react";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from "@/lib/flowMapModel";
@@ -48,7 +48,21 @@ function SectionTitle({ text, tooltip }: { text: string; tooltip: string }) {
   );
 }
 
-function CostCard({ card, hasMatchingAction, onFixThis }: { card: CostCardResult; hasMatchingAction: boolean; onFixThis: (id: string) => void }) {
+// One card per finding — "what this is costing you" (from costCards.ts) and,
+// wherever the same finding id has an actionable-fix framing (priorityActions.ts),
+// "how to fix it" inline in the same card, instead of two separate lists a
+// reader has to cross-reference by hand. Both framings already come from the
+// exact same Finding (see businessFindings.ts's header comment), so nothing
+// here can disagree between the diagnosis and the fix.
+function IssueCard({
+  card, action, isExpanded, onToggleExpand, currentScore,
+}: {
+  card: CostCardResult;
+  action: PriorityAction | null;
+  isExpanded: boolean;
+  onToggleExpand: (id: string) => void;
+  currentScore: number;
+}) {
   return (
     <div className={`cost-card sev-${card.severity.toLowerCase()}`}>
       <span className="cost-card-icon">{card.icon}</span>
@@ -61,36 +75,13 @@ function CostCard({ card, hasMatchingAction, onFixThis }: { card: CostCardResult
       <h4 className="cost-card-headline">{card.headline}</h4>
       <p className="cost-card-body">{card.body}</p>
       {card.stakeLabel && <p className="cost-card-stake">{card.stakeLabel}</p>}
-      <p className="cost-card-honesty">{card.honesty}{card.sampleSize !== undefined ? ` (sample of ${card.sampleSize})` : ""}</p>
-      {hasMatchingAction && (
-        <button type="button" className="cost-card-fix-link" onClick={() => onFixThis(card.id)}>
-          Fix this ↓
-        </button>
-      )}
-    </div>
-  );
-}
-
-function PriorityActionCard({
-  action, isHighlighted, isExpanded, onToggleExpand, currentScore, cardRef,
-}: {
-  action: PriorityAction;
-  isHighlighted: boolean;
-  isExpanded: boolean;
-  onToggleExpand: (id: string) => void;
-  currentScore: number;
-  cardRef?: (el: HTMLDivElement | null) => void;
-}) {
-  return (
-    <div ref={cardRef} className={`priority-action-row ${isExpanded ? "expanded" : ""}`}>
-      <div className={`priority-action-card ${isHighlighted ? "highlighted" : ""}`}>
-        <span className="priority-action-rank">{action.rank}</span>
-        <div className="priority-action-body">
-          <div className="priority-action-title-row">
-            <h4 className="priority-action-title">{action.title}</h4>
+      {action && (
+        <div className="issue-fix-row">
+          <div className="issue-fix-title-row">
+            <span className="issue-fix-label">Fix</span>
+            <span className="issue-fix-title">{action.title}</span>
             {action.quickWin && <span className="quick-win-badge" data-tooltip="High impact, easy to do — the best return for the least effort.">Quick Win</span>}
           </div>
-          <p className="priority-action-why">{action.why}</p>
           <div className="priority-action-badges">
             <span className={`impact-badge ${action.impact.toLowerCase()}`} data-tooltip={IMPACT_TOOLTIPS[action.impact]}>
               Impact: {action.impact}
@@ -102,33 +93,34 @@ function PriorityActionCard({
             <span className="time-badge">{action.timeToValue}</span>
           </div>
         </div>
-        <button type="button" className="priority-action-btn btn-secondary" onClick={() => onToggleExpand(action.id)}>
-          {isExpanded ? "Hide Details" : "View Details"}
-        </button>
-      </div>
+      )}
+      <button type="button" className="cost-card-fix-link" onClick={() => onToggleExpand(card.id)}>
+        {isExpanded ? "Hide Details" : "View Details"}
+      </button>
       {isExpanded && (
-        <div className="priority-action-detail">
-          {action.stakeLabel && <p className="priority-action-detail-stake">{action.stakeLabel}</p>}
-          {action.offenders.length > 0 && (
+        <div className="priority-action-detail issue-detail">
+          {card.offenders.length > 0 && (
             <div className="priority-action-detail-block">
               <span className="priority-action-detail-label">Where this shows up</span>
               <ul className="priority-action-detail-list">
-                {action.offenders.map((offender, i) => <li key={i}>{offender}</li>)}
+                {card.offenders.map((offender, i) => <li key={i}>{offender}</li>)}
               </ul>
             </div>
           )}
-          {action.projectedGain !== null && action.projectedGain > 0 && (
+          {action?.projectedGain !== null && action?.projectedGain !== undefined && action.projectedGain > 0 && (
             <p className="priority-action-projected">
               Fixing this moves your CRM Health Score from {currentScore} to ~{Math.min(100, currentScore + action.projectedGain)} points — a {action.projectedGain}-point gain.
             </p>
           )}
           <div className="priority-action-detail-block">
             <span className="priority-action-detail-label">How we know this</span>
-            <p className="priority-action-honesty">{action.honesty}</p>
+            <p className="priority-action-honesty">{card.honesty}{card.sampleSize !== undefined ? ` (sample of ${card.sampleSize})` : ""}</p>
           </div>
-          <p className="priority-action-detail-owner">
-            Best handled by <strong>{action.owner}</strong> — usually takes about {action.timeToValue}.
-          </p>
+          {action && (
+            <p className="priority-action-detail-owner">
+              Best handled by <strong>{action.owner}</strong> — usually takes about {action.timeToValue}.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -138,27 +130,13 @@ function PriorityActionCard({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BusinessView({ entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol, fetchAll }: Props) {
-  const [costCardsExpanded, setCostCardsExpanded] = useState(false);
-  const [actionsExpanded, setActionsExpanded] = useState(false);
-  const [highlightedActionId, setHighlightedActionId] = useState<string | null>(null);
-  const [expandedActionId, setExpandedActionId] = useState<string | null>(null);
-  const actionRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [issuesExpanded, setIssuesExpanded] = useState(false);
+  const [expandedIssueId, setExpandedIssueId] = useState<string | null>(null);
 
-  // Only one action's detail is ever open at a time — clicking "View Details"
+  // Only one card's detail is ever open at a time — clicking "View Details"
   // on another card closes whichever was previously expanded.
-  function toggleActionDetail(id: string) {
-    setExpandedActionId(prev => (prev === id ? null : id));
-  }
-
-  // "Fix this ↓" on a cost card scrolls to (and briefly highlights) the
-  // matching priority action sharing the same finding id — both panels
-  // derive from the same businessFindings.ts list, so the id always agrees.
-  function scrollToAction(id: string) {
-    const el = actionRefs.current.get(id);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    setHighlightedActionId(id);
-    setTimeout(() => setHighlightedActionId(prev => (prev === id ? null : prev)), 2000);
+  function toggleIssueDetail(id: string) {
+    setExpandedIssueId(prev => (prev === id ? null : id));
   }
 
   // Same "fetch settled, not necessarily successful" gate businessFindings.ts
@@ -177,7 +155,11 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
     () => computeTopActions(entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts),
     [entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts],
   );
-  const visibleActionIds = new Set(priorityResult.actions.map(a => a.id));
+  // Both panels evaluate the exact same Finding[] (see businessFindings.ts's
+  // header comment), so every actionable id here is guaranteed to also be a
+  // cost card — this map only ever enriches a card, never orphans an action.
+  const actionById = new Map(priorityResult.allActions.map(a => [a.id, a]));
+  const allLowSeverity = costCards.allTriggered.length > 0 && costCards.allTriggered.every(c => c.severity === "REVIEW");
 
   return (
     <div className="business-view">
@@ -201,12 +183,22 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
         pipelineStagesResolved={pipelineStagesResolved}
       />
 
-      {/* ── 3. What Is Costing You ── */}
+      {/* ── 3. What's Costing You ── */}
       <div className="business-view-section">
-        <SectionTitle text="What Is Costing You" tooltip="What am I losing money on right now? A diagnosis of the gaps in your setup, in plain business terms." />
+        <SectionTitle
+          text="What's Costing You"
+          tooltip="What's actually costing you money or risk right now, ranked by severity — with the fix, who owns it, and how long it takes, wherever a clear fix exists."
+        />
         <div className="cost-cards-grid">
           {costCards.shown.map(card => (
-            <CostCard key={card.id} card={card} hasMatchingAction={visibleActionIds.has(card.id)} onFixThis={scrollToAction} />
+            <IssueCard
+              key={card.id}
+              card={card}
+              action={actionById.get(card.id) ?? null}
+              isExpanded={expandedIssueId === card.id}
+              onToggleExpand={toggleIssueDetail}
+              currentScore={priorityResult.currentScore}
+            />
           ))}
           {costCards.loadingIds.map(id => (
             <div key={id} className="cost-card-skeleton" />
@@ -218,71 +210,29 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
               Couldn&apos;t verify {costCards.uncertain.length} check{costCards.uncertain.length !== 1 ? "s" : ""} — {costCards.uncertain.map(u => u.reason).join("; ")}. No issues were found in what we <em>could</em> check, but this isn&apos;t a confirmed all-clear.
             </p>
           ) : (
-            <p className="business-view-hint">No urgent cost issues detected right now — nice work.</p>
+            <p className="business-view-hint">No urgent issues detected right now — nice work.</p>
           )
         )}
-        {costCards.overflowCount > 0 && !costCardsExpanded && (
-          <button className="cost-cards-more" onClick={() => setCostCardsExpanded(true)}>
+        {allLowSeverity && costCards.shown.length > 0 && (
+          <p className="business-view-hint priority-actions-low-impact-note">
+            No urgent issues found — here are some optimizations worth a look when you have time.
+          </p>
+        )}
+        {costCards.overflowCount > 0 && !issuesExpanded && (
+          <button className="cost-cards-more" onClick={() => setIssuesExpanded(true)}>
             + {costCards.overflowCount} more issue{costCards.overflowCount !== 1 ? "s" : ""} found
           </button>
         )}
-        {costCardsExpanded && costCards.allTriggered.slice(5).map(card => (
-          <CostCard key={card.id} card={card} hasMatchingAction={visibleActionIds.has(card.id)} onFixThis={scrollToAction} />
+        {issuesExpanded && costCards.allTriggered.slice(5).map(card => (
+          <IssueCard
+            key={card.id}
+            card={card}
+            action={actionById.get(card.id) ?? null}
+            isExpanded={expandedIssueId === card.id}
+            onToggleExpand={toggleIssueDetail}
+            currentScore={priorityResult.currentScore}
+          />
         ))}
-      </div>
-
-      {/* ── 4. Top Priority Actions ── */}
-      <div className="business-view-section">
-        <SectionTitle text="Top Priority Actions" tooltip="What do I fix first, and why does it matter? Ranked by business impact first, then by how easy each fix is." />
-        {!priorityResult.allResolved ? (
-          <div className="priority-actions-skeleton">
-            <span className="spinner" /> Working out what to fix first…
-          </div>
-        ) : priorityResult.actions.length === 0 ? (
-          priorityResult.uncertain.length > 0 ? (
-            <p className="business-view-hint business-view-hint-warn">
-              Couldn&apos;t verify {priorityResult.uncertain.length} check{priorityResult.uncertain.length !== 1 ? "s" : ""} — {priorityResult.uncertain.map(u => u.reason).join("; ")}. Nothing urgent turned up in what we <em>could</em> check, but this isn&apos;t a confirmed all-clear.
-            </p>
-          ) : (
-            <p className="business-view-hint">Nothing urgent right now — your CRM setup looks solid.</p>
-          )
-        ) : (
-          <>
-            {priorityResult.allLowImpact && (
-              <p className="business-view-hint priority-actions-low-impact-note">
-                No urgent issues found — here are some optimizations worth a look when you have time.
-              </p>
-            )}
-            <div className="priority-actions-list">
-              {priorityResult.actions.map(action => (
-                <PriorityActionCard
-                  key={action.id}
-                  action={action}
-                  isHighlighted={highlightedActionId === action.id}
-                  isExpanded={expandedActionId === action.id}
-                  onToggleExpand={toggleActionDetail}
-                  currentScore={priorityResult.currentScore}
-                  cardRef={el => { if (el) actionRefs.current.set(action.id, el); else actionRefs.current.delete(action.id); }}
-                />
-              ))}
-            </div>
-            {priorityResult.overflowCount > 0 && !actionsExpanded && (
-              <button className="cost-cards-more" onClick={() => setActionsExpanded(true)}>
-                + {priorityResult.overflowCount} more action{priorityResult.overflowCount !== 1 ? "s" : ""}
-              </button>
-            )}
-            {actionsExpanded && priorityResult.allActions.slice(5).map(action => (
-              <PriorityActionCard
-                key={action.id}
-                action={action}
-                isHighlighted={false}
-                isExpanded={expandedActionId === action.id}
-                onToggleExpand={toggleActionDetail}
-                currentScore={priorityResult.currentScore}
-              />
-            ))}
-          </>
-        )}
       </div>
     </div>
   );
