@@ -3,6 +3,7 @@ import type { PipelineStagesState, RecordSampleStageId, RecordSampleState } from
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
 import { evaluateFindings, type Finding, type UncertainFinding } from "@/lib/businessFindings";
+import type { MandatoryFieldsState } from "@/lib/useMandatoryFields";
 
 export type CostCardSeverity = "CRITICAL" | "WARNING" | "REVIEW";
 
@@ -99,9 +100,10 @@ export function evaluateCostCards(
   ruleCoverage: RuleCoverage | null = null,
   moduleRecordCounts: ModuleRecordCountsState = { counts: {}, toolAvailable: false, resolved: false },
   currencySymbol: string | null = null,
+  mandatoryFields: MandatoryFieldsState = { count: 0, fieldLabels: [], perModule: [], loading: false, error: null, lastFetched: null },
 ): CostCardsResult {
   const { findings, loadingIds, uncertain } = evaluateFindings({
-    entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol,
+    entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol, mandatoryFields,
   });
 
   const triggered: CostCardResult[] = findings

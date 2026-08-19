@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
-import { executeTool } from "@/lib/zohoMcp";
+import { executeTool, findParamLocations, findParam, setParam } from "@/lib/zohoMcp";
 import { categorizeTools } from "@/lib/sections";
+import { extractArray, findToolForEntity } from "@/lib/useCrmEntities";
 
 // ─── Module list extraction ────────────────────────────────────────────────────
 
@@ -167,8 +168,46 @@ function extractFieldsFromModuleDetail(result: unknown): ZohoField[] {
 function getFieldLabel(f: ZohoField): string { return String(f.field_label ?? f.display_label ?? f.api_name ?? "Unknown"); }
 function getFieldApiName(f: ZohoField): string { return String(f.api_name ?? "—"); }
 function getFieldDataType(f: ZohoField): string { return String(f.data_type ?? "—"); }
-function isFieldMandatory(f: ZohoField): boolean { return f.mandatory === true || f.system_mandatory === true; }
+// getModuleById's field entries carry no reliable "is this required in the
+// UI" signal — "mandatory" here (like the flat Fields API) is at best a
+// system-required marker, not what an admin configured on the module's
+// layout. Real requiredness only lives on the layout itself (sections[].
+// fields[].mandatory), fetched lazily per module below — this flat check is
+// now only the fallback for when that layout fetch hasn't resolved yet.
+function isFieldMandatoryFallback(f: ZohoField): boolean { return f.mandatory === true || f.system_mandatory === true; }
 function isFieldReadOnly(f: ZohoField): boolean { return f.read_only === true || f.field_read_only === true; }
+
+// Same active-layout-or-first pick usePipelineStages.ts/useMandatoryFields.ts use.
+function pickLayout(layouts: unknown[]): Record<string, unknown> | null {
+  if (layouts.length === 0) return null;
+  const active = layouts.find(l => {
+    const r = l as Record<string, unknown>;
+    return r.visible !== false && (r.status === undefined || r.status === "active");
+  });
+  return (active ?? layouts[0]) as Record<string, unknown>;
+}
+
+function mandatoryApiNamesFromLayout(layout: Record<string, unknown> | null): Set<string> {
+  const names = new Set<string>();
+  if (!layout) return names;
+  const sections = Array.isArray(layout.sections) ? (layout.sections as unknown[]) : [];
+  for (const s of sections) {
+    const fields = Array.isArray((s as Record<string, unknown>).fields) ? ((s as Record<string, unknown>).fields as unknown[]) : [];
+    for (const f of fields) {
+      const r = f as Record<string, unknown>;
+      if (r.mandatory === true) {
+        const apiName = String(r.api_name ?? "").trim();
+        if (apiName) names.add(apiName);
+      }
+    }
+  }
+  return names;
+}
+
+interface LayoutMandatoryState {
+  status: "loading" | "loaded" | "error";
+  names: Set<string>;
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -187,12 +226,18 @@ interface Props {
 export default function FieldsExplorer({ config, allTools, onLog }: Props) {
   const moduleTools = useMemo(() => categorizeTools(allTools).modules, [allTools]);
   const moduleByIdTool = useMemo(() => findModuleByIdTool(allTools), [allTools]);
+  const layoutsTool = useMemo(() => findToolForEntity(allTools, "layouts"), [allTools]);
 
   const [modules, setModules] = useState<ZohoModule[]>([]);
   const [modulesLoading, setModulesLoading] = useState(false);
   const [modulesError, setModulesError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [moduleFields, setModuleFields] = useState<Record<string, ModuleFieldsState>>({});
+  // Real mandatory-field names per module, fetched from that module's layout
+  // (not the module-detail response) the first time its row is expanded —
+  // lazy, so exploring one module doesn't fire a layout call for every
+  // module the sequential preload above already touched.
+  const [layoutMandatory, setLayoutMandatory] = useState<Record<string, LayoutMandatoryState>>({});
   const [loadedThrough, setLoadedThrough] = useState(0); // sequential preload cursor — one module at a time
   const hasFetchedModules = useRef(false);
   const inFlightIndex = useRef(-1);
@@ -278,6 +323,33 @@ export default function FieldsExplorer({ config, allTools, onLog }: Props) {
       if (next.has(apiName)) next.delete(apiName); else next.add(apiName);
       return next;
     });
+    if (!layoutMandatory[apiName]) void loadLayoutMandatory(apiName);
+  }
+
+  async function loadLayoutMandatory(apiName: string) {
+    if (!layoutsTool) return;
+    setLayoutMandatory(prev => ({ ...prev, [apiName]: { status: "loading", names: new Set() } }));
+    const moduleLoc = findParam(findParamLocations(layoutsTool), /^module$/i) ?? { group: null, key: "module" };
+    const input: Record<string, unknown> = {};
+    setParam(input, moduleLoc, apiName);
+    const start = Date.now();
+    try {
+      const output = await executeTool(config, layoutsTool.name, input);
+      const layouts = extractArray(output);
+      const names = mandatoryApiNamesFromLayout(pickLayout(layouts));
+      setLayoutMandatory(prev => ({ ...prev, [apiName]: { status: "loaded", names } }));
+      onLog({
+        id: crypto.randomUUID(), tool: layoutsTool.name, input, output, status: "success",
+        durationMs: Date.now() - start, timestamp: new Date(),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to fetch layout";
+      setLayoutMandatory(prev => ({ ...prev, [apiName]: { status: "error", names: new Set() } }));
+      onLog({
+        id: crypto.randomUUID(), tool: layoutsTool.name, input, output: null, status: "error",
+        errorMessage: msg, durationMs: Date.now() - start, timestamp: new Date(),
+      });
+    }
   }
 
   const loadedEntries = Object.values(moduleFields).filter(s => s.status === "loaded");
@@ -350,6 +422,12 @@ export default function FieldsExplorer({ config, allTools, onLog }: Props) {
                   <div className="bp-state-detail">
                     {!moduleByIdTool && <p className="audit-empty-sub">No getModuleById-style tool available.</p>}
                     {state?.status === "error" && <p className="form-error">⚠ {state.error}</p>}
+                    {!layoutsTool && (
+                      <p className="audit-empty-sub">No getLayouts-style tool found — Mandatory falls back to the (unreliable) module-detail flag.</p>
+                    )}
+                    {layoutMandatory[apiName]?.status === "error" && (
+                      <p className="audit-empty-sub">Couldn&apos;t fetch this module&apos;s layout — Mandatory falls back to the (unreliable) module-detail flag.</p>
+                    )}
                     {state?.status === "loaded" && state.fields.length === 0 && (
                       <p className="audit-empty-sub">No fields found in the module detail response.</p>
                     )}
@@ -361,20 +439,26 @@ export default function FieldsExplorer({ config, allTools, onLog }: Props) {
                               <th>Field Label</th>
                               <th>API Name</th>
                               <th>Data Type</th>
-                              <th>Mandatory</th>
+                              <th><span className="th-tip" data-tooltip-below="From this module's layout — the real, admin-configured required-field flag, not the module metadata's own (unreliable) mandatory marker">Mandatory<span className="th-info">i</span></span></th>
                               <th>Read Only</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {state.fields.map((f, fi) => (
-                              <tr key={String(f.id ?? f.api_name ?? fi)}>
-                                <td className="cell-name">{getFieldLabel(f)}</td>
-                                <td className="cell-mono">{getFieldApiName(f)}</td>
-                                <td><span className="arg-badge">{getFieldDataType(f)}</span></td>
-                                <td><span className={`bool-badge ${isFieldMandatory(f) ? "yes" : "no"}`}>{isFieldMandatory(f) ? "Yes" : "No"}</span></td>
-                                <td><span className={`bool-badge ${isFieldReadOnly(f) ? "yes" : "no"}`}>{isFieldReadOnly(f) ? "Yes" : "No"}</span></td>
-                              </tr>
-                            ))}
+                            {state.fields.map((f, fi) => {
+                              const layoutState = layoutMandatory[apiName];
+                              const mandatory = layoutState?.status === "loaded"
+                                ? layoutState.names.has(getFieldApiName(f))
+                                : isFieldMandatoryFallback(f);
+                              return (
+                                <tr key={String(f.id ?? f.api_name ?? fi)}>
+                                  <td className="cell-name">{getFieldLabel(f)}</td>
+                                  <td className="cell-mono">{getFieldApiName(f)}</td>
+                                  <td><span className="arg-badge">{getFieldDataType(f)}</span></td>
+                                  <td><span className={`bool-badge ${mandatory ? "yes" : "no"}`}>{mandatory ? "Yes" : "No"}</span></td>
+                                  <td><span className={`bool-badge ${isFieldReadOnly(f) ? "yes" : "no"}`}>{isFieldReadOnly(f) ? "Yes" : "No"}</span></td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

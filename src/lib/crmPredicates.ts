@@ -229,12 +229,6 @@ export function isCustomModule(item: unknown): boolean {
   return r.custom_module === true || r.generic_type === "custom" || r.customModule === true;
 }
 
-export function isMandatoryField(item: unknown): boolean {
-  if (!item || typeof item !== "object") return false;
-  const r = item as Record<string, unknown>;
-  return r.required === true || r.mandatory === true || r.system_mandatory === true;
-}
-
 export function hasEmailAction(workflow: unknown): boolean {
   return JSON.stringify(workflow ?? {}).toLowerCase().includes("email");
 }

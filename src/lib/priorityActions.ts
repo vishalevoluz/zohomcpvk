@@ -2,6 +2,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import type { PipelineStagesState, RecordSampleStageId, RecordSampleState } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
+import type { MandatoryFieldsState } from "@/lib/useMandatoryFields";
 import { evaluateFindings, type Finding, type FindingImpact, type FindingEffort, type UncertainFinding } from "@/lib/businessFindings";
 import { computeHealthScore, estimateScoreGain } from "@/lib/businessScore";
 import type { Section } from "@/lib/sections";
@@ -107,10 +108,12 @@ export function computeTopActions(
   moduleRecordCounts: ModuleRecordCountsState = { counts: {}, toolAvailable: false, resolved: false },
   pipelineStageCount: number = pipelineStages.items.length,
   outOfOrderStageCount: number = pipelineStages.items.filter(s => s.outOfOrder).length,
+  mandatoryFields: MandatoryFieldsState = { count: 0, fieldLabels: [], perModule: [], loading: false, error: null, lastFetched: null },
 ): { actions: PriorityAction[]; allActions: PriorityAction[]; allResolved: boolean; overflowCount: number; allLowImpact: boolean; currentScore: number; uncertain: UncertainFinding[] } {
-  const currentScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount).total;
+  const mandatoryFieldCount = mandatoryFields.lastFetched !== null ? mandatoryFields.count : null;
+  const currentScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount).total;
   const { findings, loadingIds, uncertain } = evaluateFindings({
-    entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol: null,
+    entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol: null, mandatoryFields,
   });
   const allResolved = loadingIds.length === 0;
   if (!allResolved) return { actions: [], allActions: [], allResolved: false, overflowCount: 0, allLowImpact: false, currentScore, uncertain: [] };
@@ -134,7 +137,7 @@ export function computeTopActions(
       id: f.id, title: copy.title, why: copy.why(f), owner: copy.owner, timeToValue: copy.timeToValue,
       impact: f.impact, effort: f.effort, quickWin: f.impact === "High" && f.effort === "Easy",
       targetSection: f.targetSection, offenders: f.offenders, stakeLabel: f.stakeLabel, honesty: f.honesty,
-      projectedGain: estimateScoreGain(f.id, entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount),
+      projectedGain: estimateScoreGain(f.id, entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount),
       rank: i + 1,
     };
   });

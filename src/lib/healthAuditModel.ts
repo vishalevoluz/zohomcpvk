@@ -9,7 +9,7 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
-  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, isMandatoryField,
+  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser,
   workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
   overlappingWorkflows, identicalWorkflows,
@@ -128,7 +128,7 @@ const ACTION_INFO: Record<string, ActionInfo> = {
   },
 };
 
-function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): boolean {
+function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number, mandatoryFieldCount: number | null): boolean {
   switch (id) {
     case "workflows-inactive": {
       const total = entityData.workflows.items.length;
@@ -143,7 +143,10 @@ function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, 
       return profiles.length === 1 || profiles.every(isAdminProfile) || profiles.filter(isAdminProfile).length > 2;
     }
     case "inactive-users": return entityData.users.items.some(isInactiveUser);
-    case "excessive-mandatory-fields": return entityData.fields.items.filter(isMandatoryField).length > 20;
+    // null means the real (layout-based) count hasn't resolved yet — no
+    // recommendation until it's known, rather than guessing off the flat
+    // Fields API's unusable mandatory/system_mandatory flags.
+    case "excessive-mandatory-fields": return mandatoryFieldCount !== null && mandatoryFieldCount > 20;
     case "empty-modules": {
       const realModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
       return unreferencedModules(realModules, entityData.workflows.items, entityData.blueprints.items).length > 3;
@@ -160,7 +163,9 @@ const ACTION_REQUIRES: Record<string, CrmEntityType[]> = {
   "no-blueprint": ["blueprints"],
   "access-risk": ["profiles"],
   "inactive-users": ["users"],
-  "excessive-mandatory-fields": ["fields"],
+  // Not entityData.fields — the real count comes from mandatoryFieldCount
+  // (useMandatoryFields.ts), gated in actionConditionTriggered instead.
+  "excessive-mandatory-fields": [],
   "empty-modules": ["modules", "workflows", "blueprints"],
   "workflows-overlapping": ["workflows"],
   "workflows-duplicate": ["workflows"],
@@ -230,9 +235,9 @@ export interface HealthAuditModel {
   roadmap: RoadmapEntry[];
 }
 
-function recommendationsFor(key: DimensionKey, entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number): DimensionRecommendation[] {
+function recommendationsFor(key: DimensionKey, entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number, mandatoryFieldCount: number | null): DimensionRecommendation[] {
   return DIMENSION_TO_ACTION_IDS[key]
-    .filter(id => ACTION_REQUIRES[id].every(t => isEntityResolved(entityData[t])) && actionConditionTriggered(id, entityData, pipelineStageCount))
+    .filter(id => ACTION_REQUIRES[id].every(t => isEntityResolved(entityData[t])) && actionConditionTriggered(id, entityData, pipelineStageCount, mandatoryFieldCount))
     .map(id => ({ id, ...ACTION_INFO[id] }));
 }
 
@@ -396,8 +401,13 @@ function emptyModuleLabel(m: unknown, workflows: unknown[], blueprints: unknown[
   return `${apiName} (empty, but referenced by ${refs.join(" and ")} — don't delete blindly)`;
 }
 
-function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
-  const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
+function dataArchitectureChecklist(
+  entityData: Record<CrmEntityType, EntityState>,
+  mandatoryFieldCount: number | null,
+  mandatoryFieldsError: string | null,
+): ChecklistItem[] {
+  // null means useMandatoryFields.ts's per-module layout fetch hasn't
+  // resolved (or failed) yet — this must never render as a confirmed 0.
   // Deleted, internal/system pseudo-modules (file-upload backing entries,
   // subforms, etc. — see isInternalModule), and system-hidden ones (Zoho's
   // own hidden status, not an admin's deliberate user_hidden choice — see
@@ -420,9 +430,12 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
   const tooManyDueToClutter = moduleCount > 15 && emptyModules.length > 0;
   return [
     {
-      id: "data-mandatory-fields", label: "Mandatory field count is reasonable", status: mandatoryCount <= 20 ? "pass" : "fail",
-      detail: `${mandatoryCount} mandatory field${mandatoryCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryCount > 20 ? " (over the 20 recommended)." : "."}`,
-      weight: mandatoryCount > 20 ? Math.min(15, mandatoryCount - 20) : 15,
+      id: "data-mandatory-fields", label: "Mandatory field count is reasonable",
+      status: mandatoryFieldCount !== null && mandatoryFieldCount > 20 ? "fail" : "pass",
+      detail: mandatoryFieldCount === null
+        ? `Couldn't fetch layouts for your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldsError ? ` (${mandatoryFieldsError})` : ""} — this isn't a confirmed 0, the count is unknown.`
+        : `${mandatoryFieldCount} mandatory field${mandatoryFieldCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldCount > 20 ? " (over the 20 recommended)." : "."}`,
+      weight: mandatoryFieldCount !== null && mandatoryFieldCount > 20 ? Math.min(15, mandatoryFieldCount - 20) : 15,
     },
     {
       id: "data-module-count", label: "Module count is reasonable", status: tooManyDueToClutter ? "fail" : "pass",
@@ -436,12 +449,12 @@ function dataArchitectureChecklist(entityData: Record<CrmEntityType, EntityState
   ];
 }
 
-function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>): string {
-  const mandatoryCount = entityData.fields.items.filter(isMandatoryField).length;
+function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>, mandatoryFieldCount: number | null, mandatoryFieldsError: string | null): string {
   const activeModules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
   const emptyModules = activeModules.filter(m => isEmptyModule(m) && !isHiddenModule(m));
   const issues: string[] = [];
-  if (mandatoryCount > 20) issues.push(`${mandatoryCount} mandatory fields (over the 20 recommended)`);
+  if (mandatoryFieldCount === null) issues.push(`couldn't fetch layouts for your core modules${mandatoryFieldsError ? ` (${mandatoryFieldsError})` : ""}, so the mandatory-field count is unverified`);
+  else if (mandatoryFieldCount > 20) issues.push(`${mandatoryFieldCount} mandatory fields (over the 20 recommended)`);
   if (activeModules.length > 15 && emptyModules.length > 0) {
     const names = emptyModules.slice(0, 3).map(m => emptyModuleLabel(m, entityData.workflows.items, entityData.blueprints.items)).join(", ");
     issues.push(`${activeModules.length} modules, including ${emptyModules.length} empty one${emptyModules.length !== 1 ? "s" : ""} (${names}${emptyModules.length > 3 ? ", +more" : ""})`);
@@ -539,9 +552,16 @@ export function buildHealthAuditModel(
   // exact "score flickers between two numbers" and "Sales Process flips
   // between 13/20 and 20/20" bug this flag exists to prevent.
   pipelineStagesResolved = true,
+  // Real layout-based mandatory-field count (useMandatoryFields.ts) and its
+  // fetch state — same "separate fetch chain, must gate resolved" reasoning
+  // as pipelineStagesResolved above, since this isn't part of
+  // HEALTH_SCORE_ENTITIES either.
+  mandatoryFieldCount: number | null = null,
+  mandatoryFieldsError: string | null = null,
+  mandatoryFieldsResolved = true,
 ): HealthAuditModel {
-  const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount);
-  const resolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t])) && pipelineStagesResolved;
+  const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount);
+  const resolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t])) && pipelineStagesResolved && mandatoryFieldsResolved;
 
   const dimensions: DimensionCard[] = DIMENSION_ORDER.map(key => {
     const score = scores[key];
@@ -563,8 +583,8 @@ export function buildHealthAuditModel(
         reason = accessSecurityReason(entityData);
         break;
       case "dataArchitecture":
-        checklist = dataArchitectureChecklist(entityData);
-        reason = dataArchitectureReason(entityData);
+        checklist = dataArchitectureChecklist(entityData, mandatoryFieldCount, mandatoryFieldsError);
+        reason = dataArchitectureReason(entityData, mandatoryFieldCount, mandatoryFieldsError);
         break;
       case "automationHealth":
         checklist = automationHealthChecklist(entityData, score);
@@ -572,7 +592,7 @@ export function buildHealthAuditModel(
         criticalAlert = automationHealthCriticalAlert(entityData, score);
         break;
     }
-    const recommendations = recommendationsFor(key, entityData, pipelineStageCount);
+    const recommendations = recommendationsFor(key, entityData, pipelineStageCount, mandatoryFieldCount);
     return {
       key,
       label: DIMENSION_LABELS[key],

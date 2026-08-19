@@ -23,6 +23,7 @@ import { useCrmRecordSamples } from "@/lib/useCrmRecordSamples";
 import { usePipelineStages } from "@/lib/usePipelineStages";
 import { useRuleCoverage } from "@/lib/useRuleCoverage";
 import { useModuleRecordCounts } from "@/lib/useModuleRecordCounts";
+import { useMandatoryFields } from "@/lib/useMandatoryFields";
 import { useOrgCurrency } from "@/lib/useOrgCurrency";
 import { findDealsApiName } from "@/lib/flowMapModel";
 
@@ -48,6 +49,7 @@ export default function DashboardPage() {
   const pipelineStages = usePipelineStages(config, tools, dealsApiName, onLog);
   const ruleCoverage = useRuleCoverage(config, tools, crm.entityData, onLog);
   const moduleRecordCounts = useModuleRecordCounts(config, tools, crm.entityData, onLog);
+  const mandatoryFields = useMandatoryFields(config, tools, crm.entityData.modules.items, isEntityResolved(crm.entityData.modules), onLog);
   const orgCurrency = useOrgCurrency(config, tools, onLog);
 
   function fetchAllData() {
@@ -56,6 +58,7 @@ export default function DashboardPage() {
     pipelineStages.refetch();
     ruleCoverage.refetch();
     moduleRecordCounts.refetch();
+    mandatoryFields.refetch();
     orgCurrency.refetch();
   }
 
@@ -194,6 +197,7 @@ export default function DashboardPage() {
             pipelineStages={pipelineStages.data}
             ruleCoverage={ruleCoverage.data}
             moduleRecordCounts={moduleRecordCounts.data}
+            mandatoryFields={mandatoryFields.data}
             currencySymbol={orgCurrency.symbol}
             fetchAll={fetchAllData}
           />

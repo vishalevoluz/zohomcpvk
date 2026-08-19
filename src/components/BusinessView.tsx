@@ -7,6 +7,7 @@ import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from
 import { evaluateCostCards, type CostCardResult } from "@/lib/costCards";
 import { computeTopActions, type PriorityAction } from "@/lib/priorityActions";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
+import type { MandatoryFieldsState } from "@/lib/useMandatoryFields";
 import HealthScoreDashboard from "@/components/HealthScoreDashboard";
 
 interface Props {
@@ -15,6 +16,7 @@ interface Props {
   pipelineStages: PipelineStagesState;
   ruleCoverage: RuleCoverage | null;
   moduleRecordCounts: ModuleRecordCountsState;
+  mandatoryFields: MandatoryFieldsState;
   currencySymbol: string | null;
   fetchAll: () => void;
 }
@@ -129,7 +131,7 @@ function IssueCard({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function BusinessView({ entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol, fetchAll }: Props) {
+export default function BusinessView({ entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, mandatoryFields, currencySymbol, fetchAll }: Props) {
   const [issuesExpanded, setIssuesExpanded] = useState(false);
   const [expandedIssueId, setExpandedIssueId] = useState<string | null>(null);
 
@@ -148,12 +150,12 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   const pipelineStagesResolved = !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null);
 
   const costCards = useMemo(
-    () => evaluateCostCards(entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts, currencySymbol),
-    [entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts, currencySymbol],
+    () => evaluateCostCards(entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts, currencySymbol, mandatoryFields),
+    [entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts, currencySymbol, mandatoryFields],
   );
   const priorityResult = useMemo(
-    () => computeTopActions(entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts),
-    [entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts],
+    () => computeTopActions(entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts, undefined, undefined, mandatoryFields),
+    [entityData, pipelineStages, recordSamples, ruleCoverage, moduleRecordCounts, mandatoryFields],
   );
   // Both panels evaluate the exact same Finding[] (see businessFindings.ts's
   // header comment), so every actionable id here is guaranteed to also be a
@@ -181,6 +183,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
         outOfOrderStageCount={pipelineStages.items.filter(s => s.outOfOrder).length}
         pipelineCount={pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null}
         pipelineStagesResolved={pipelineStagesResolved}
+        mandatoryFields={mandatoryFields}
       />
 
       {/* ── 3. What's Costing You ── */}

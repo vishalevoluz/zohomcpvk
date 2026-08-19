@@ -5,12 +5,13 @@ import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from
 import { RECORDS_SAMPLE_SIZE } from "@/lib/flowMapModel";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import {
-  hasEmailAction, isActiveUser, isMandatoryField, isAdminProfile, isActiveWorkflow,
-  workflowModuleLabel, moduleApiName, unreferencedModules, isDeletedModule, isInternalModule, isSystemHiddenModule,
+  hasEmailAction, isActiveUser, isAdminProfile, isActiveWorkflow,
+  moduleApiName, unreferencedModules, isDeletedModule, isInternalModule, isSystemHiddenModule,
   isDealStale, isDealUnforecastable, dealAmount, dealCurrencySymbol,
   hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent, userLastLoginDate,
 } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
+import type { MandatoryFieldsState } from "@/lib/useMandatoryFields";
 import { formatMoney } from "@/lib/money";
 
 // Single source of truth for every quantified condition the Business View can
@@ -50,6 +51,10 @@ interface FindingContext {
   ruleCoverage: RuleCoverage | null;
   moduleRecordCounts: ModuleRecordCountsState;
   currencySymbol: string | null;
+  // Real per-core-module mandatory field count, from useMandatoryFields.ts's
+  // layout-based fetch — not entityData.fields, whose flat Fields API can't
+  // represent an admin-configured required field at all.
+  mandatoryFields: MandatoryFieldsState;
 }
 
 type FindingDynamic = Omit<Finding, "id" | "severity" | "impact" | "effort" | "targetSection">;
@@ -64,6 +69,7 @@ interface FindingDef {
   requiresPipelineStages?: boolean;
   requiresRecordSamples?: RecordSampleStageId[];
   requiresModuleRecordCounts?: boolean;
+  requiresMandatoryFields?: boolean;
   // Returns null when the condition isn't triggered by this data.
   build: (ctx: FindingContext) => FindingDynamic | null;
 }
@@ -132,19 +138,17 @@ const FINDING_DEFS: FindingDef[] = [
   {
     id: "excessive-mandatory-fields",
     severity: "WARNING", impact: "Medium", effort: "Medium", targetSection: "fields",
-    requires: ["fields"],
-    build: ({ entityData }) => {
-      const mandatory = entityData.fields.items.filter(isMandatoryField);
-      if (mandatory.length <= 20) return null;
-      const byModule = new Map<string, number>();
-      for (const f of mandatory) {
-        const label = workflowModuleLabel(f) || "Unknown module";
-        byModule.set(label, (byModule.get(label) ?? 0) + 1);
-      }
-      const offenders = [...byModule.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([label, n]) => `${label} (${n})`);
+    requires: [], requiresMandatoryFields: true,
+    build: ({ mandatoryFields }) => {
+      if (mandatoryFields.count <= 20) return null;
+      const offenders = [...mandatoryFields.perModule]
+        .sort((a, b) => b.count - a.count)
+        .filter(m => m.count > 0)
+        .slice(0, 5)
+        .map(m => `${m.apiName} (${m.count})`);
       return {
-        offenders, count: mandatory.length,
-        honesty: `Confirmed from ${entityData.fields.items.length} fields across your core Leads, Contacts, Deals, and Accounts modules.`,
+        offenders, count: mandatoryFields.count,
+        honesty: `Confirmed from the layouts of your core Leads, Contacts, Deals, and Accounts modules.`,
       };
     },
   },
@@ -365,6 +369,7 @@ export function evaluateFindings(ctx: FindingContext): { findings: Finding[]; lo
   const findings: Finding[] = [];
   const uncertain: UncertainFinding[] = [];
   const pipelineResolved = !ctx.pipelineStages.loading && (ctx.pipelineStages.lastFetched !== null || ctx.pipelineStages.error !== null);
+  const mandatoryFieldsResolved = !ctx.mandatoryFields.loading && (ctx.mandatoryFields.lastFetched !== null || ctx.mandatoryFields.error !== null);
 
   for (const def of FINDING_DEFS) {
     const entitiesResolved = def.requires.every(t => isEntityResolved(ctx.entityData[t]));
@@ -374,8 +379,9 @@ export function evaluateFindings(ctx: FindingContext): { findings: Finding[]; lo
       return !!rs && !rs.loading && (rs.lastFetched !== null || rs.error !== null);
     });
     const moduleCountsOk = !def.requiresModuleRecordCounts || ctx.moduleRecordCounts.resolved;
+    const mandatoryFieldsOk = !def.requiresMandatoryFields || mandatoryFieldsResolved;
 
-    if (!entitiesResolved || !pipelineOk || !samplesOk || !moduleCountsOk) {
+    if (!entitiesResolved || !pipelineOk || !samplesOk || !moduleCountsOk || !mandatoryFieldsOk) {
       loadingIds.push(def.id);
       continue;
     }
@@ -384,15 +390,17 @@ export function evaluateFindings(ctx: FindingContext): { findings: Finding[]; lo
     // a clean result — items defaults to [] on both a real empty org and a
     // failed fetch, so a build() that returns null here means "couldn't
     // check", not "checked, and it's fine".
-    const erroredEntities = def.requires.filter(t => ctx.entityData[t].error !== null);
+    const erroredReasons = def.requires
+      .filter(t => ctx.entityData[t].error !== null)
+      .map(t => `${t}: ${ctx.entityData[t].error}`);
+    if (def.requiresMandatoryFields && ctx.mandatoryFields.error !== null) {
+      erroredReasons.push(`layouts: ${ctx.mandatoryFields.error}`);
+    }
 
     const dynamic = def.build(ctx);
     if (!dynamic) {
-      if (erroredEntities.length > 0) {
-        uncertain.push({
-          id: def.id,
-          reason: erroredEntities.map(t => `${t}: ${ctx.entityData[t].error}`).join("; "),
-        });
+      if (erroredReasons.length > 0) {
+        uncertain.push({ id: def.id, reason: erroredReasons.join("; ") });
       }
       continue;
     }

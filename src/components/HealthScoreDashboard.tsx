@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import type { RuleCoverage } from "@/lib/crmPredicates";
+import type { MandatoryFieldsState } from "@/lib/useMandatoryFields";
 import {
   buildHealthAuditModel,
   type DimensionKey,
@@ -22,6 +23,7 @@ interface Props {
   outOfOrderStageCount?: number;
   pipelineCount?: number | null;
   pipelineStagesResolved?: boolean;
+  mandatoryFields?: MandatoryFieldsState;
 }
 
 const DIMENSION_ICON_COMPONENTS: Record<DimensionIconKey, LucideIcon> = {
@@ -172,13 +174,22 @@ function CategoryCard({
   );
 }
 
-export default function HealthScoreDashboard({ entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount = 0, pipelineCount = null, pipelineStagesResolved = true }: Props) {
+export default function HealthScoreDashboard({
+  entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount = 0, pipelineCount = null, pipelineStagesResolved = true,
+  mandatoryFields,
+}: Props) {
   const [expandedKey, setExpandedKey] = useState<DimensionKey | null>(null);
   const [displayScore, setDisplayScore] = useState(0);
 
+  const mandatoryFieldsResolved = !mandatoryFields || (!mandatoryFields.loading && mandatoryFields.lastFetched !== null);
+  const mandatoryFieldCount = mandatoryFields?.lastFetched !== null && mandatoryFields ? mandatoryFields.count : null;
+
   const model = useMemo(
-    () => buildHealthAuditModel(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved),
-    [entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved],
+    () => buildHealthAuditModel(
+      entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved,
+      mandatoryFieldCount, mandatoryFields?.error ?? null, mandatoryFieldsResolved,
+    ),
+    [entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved, mandatoryFieldCount, mandatoryFields?.error, mandatoryFieldsResolved],
   );
 
   useEffect(() => {

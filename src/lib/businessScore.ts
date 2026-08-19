@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, isMandatoryField, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, identicalWorkflows, withoutOverlappingWorkflows, withoutIdenticalWorkflows } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, identicalWorkflows, withoutOverlappingWorkflows, withoutIdenticalWorkflows } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
@@ -79,10 +79,16 @@ function scoreAccessSecurity(profiles: unknown[], users: unknown[]): number {
   return Math.max(0, score);
 }
 
-function scoreDataArchitecture(fields: unknown[], modules: unknown[]): number {
+// mandatoryFieldCount comes from the real source — each core module's LAYOUT
+// (sections[].fields[].mandatory), fetched by useMandatoryFields.ts — not the
+// flat Fields API, whose "mandatory"/"system_mandatory" keys can't represent
+// an admin-configured required field at all (see useMandatoryFields.ts's own
+// header comment). null means that fetch hasn't resolved yet; scored as if
+// clean rather than guessed, same as every other "not yet known" case in this
+// file — the checklist text is what tells a reader this isn't confirmed.
+function scoreDataArchitecture(mandatoryFieldCount: number | null, modules: unknown[]): number {
   let score = 20;
-  const mandatoryCount = fields.filter(isMandatoryField).length;
-  if (mandatoryCount > 20) score -= Math.min(15, mandatoryCount - 20);
+  if (mandatoryFieldCount !== null && mandatoryFieldCount > 20) score -= Math.min(15, mandatoryFieldCount - 20);
   // A high module count isn't a problem by itself — plenty of well-run orgs
   // have 20+ modules doing real work. It only costs points when the count is
   // actually being inflated by empty/unused ones (read-only or nobody can
@@ -165,12 +171,18 @@ export function computeHealthScore(
   pipelineStageCount: number = entityData.stages.items.length,
   ruleCoverage: RuleCoverage | null = null,
   outOfOrderStageCount: number = 0,
+  // See scoreDataArchitecture's header comment — real layout-based count from
+  // useMandatoryFields.ts, not entityData.fields (the flat Fields API can't
+  // represent this at all). Defaults to null ("not yet known") for existing
+  // callers that haven't wired it through yet, same pattern pipelineStageCount
+  // uses above.
+  mandatoryFieldCount: number | null = null,
 ): HealthScoreResult {
   const dimensions: HealthScoreDimensions = {
     automationCoverage: scoreAutomationCoverage(entityData.modules.items, entityData.workflows.items, ruleCoverage),
     processCompleteness: scoreProcessCompleteness(entityData.pipelines.items, entityData.blueprints.items, pipelineStageCount, outOfOrderStageCount),
     accessSecurity: scoreAccessSecurity(entityData.profiles.items, entityData.users.items),
-    dataArchitecture: scoreDataArchitecture(entityData.fields.items, entityData.modules.items),
+    dataArchitecture: scoreDataArchitecture(mandatoryFieldCount, entityData.modules.items),
     automationHealth: scoreAutomationHealth(entityData.workflows.items),
   };
   const total = Object.values(dimensions).reduce((a, b) => a + b, 0);
@@ -201,10 +213,13 @@ export function estimateScoreGain(
   pipelineStageCount: number,
   ruleCoverage: RuleCoverage | null,
   outOfOrderStageCount = 0,
+  // See computeHealthScore's matching param — the real layout-based count.
+  mandatoryFieldCount: number | null = null,
 ): number | null {
-  const before = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount).total;
+  const before = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount).total;
   let mutated: Record<CrmEntityType, EntityState>;
   let mutatedPipelineStageCount = pipelineStageCount;
+  let mutatedMandatoryFieldCount = mandatoryFieldCount;
 
   switch (findingId) {
     case "no-email-workflow": {
@@ -219,14 +234,12 @@ export function estimateScoreGain(
       break;
     }
     case "excessive-mandatory-fields": {
-      let mandatorySeen = 0;
-      const projectedFields = entityData.fields.items.map(f => {
-        if (!isMandatoryField(f)) return f;
-        mandatorySeen++;
-        if (mandatorySeen <= 20) return f;
-        return { ...(f as Record<string, unknown>), required: false, mandatory: false, system_mandatory: false };
-      });
-      mutated = withEntity(entityData, "fields", projectedFields);
+      // No entityData.fields mutation to simulate anymore — the real count
+      // lives in useMandatoryFields.ts (layout-based), so "fixed" is simply
+      // projecting that count down to the 20 threshold directly.
+      if (mandatoryFieldCount === null) return null;
+      mutated = entityData;
+      mutatedMandatoryFieldCount = Math.min(mandatoryFieldCount, 20);
       break;
     }
     case "no-pipeline": {
@@ -274,7 +287,7 @@ export function estimateScoreGain(
       return null;
   }
 
-  const after = computeHealthScore(mutated, mutatedPipelineStageCount, ruleCoverage, outOfOrderStageCount).total;
+  const after = computeHealthScore(mutated, mutatedPipelineStageCount, ruleCoverage, outOfOrderStageCount, mutatedMandatoryFieldCount).total;
   return Math.max(0, Math.round(after) - Math.round(before));
 }
 

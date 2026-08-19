@@ -109,7 +109,7 @@ export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns
 // sample instead of either an always-empty result or an unbounded fan-out.
 const CORE_LIFECYCLE_MODULE_MATCHERS: RegExp[] = [/lead/i, /contact/i, /deal|opportunit/i, /account/i];
 
-function resolveCoreModuleApiNames(modules: unknown[]): string[] {
+export function resolveCoreModuleApiNames(modules: unknown[]): string[] {
   const usableModules = modules.filter(m => !isDeletedModule(m));
   return CORE_LIFECYCLE_MODULE_MATCHERS
     .map(pattern => usableModules.find(m => pattern.test(moduleApiName(m))))
