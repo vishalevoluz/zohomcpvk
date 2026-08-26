@@ -91,12 +91,12 @@ export default function ConnectWizard({ onConnected }: Props) {
             <ol className="wizard-list">
               <li>
                 Open the <strong>Zoho MCP Console</strong> at <code>mcp.zoho.com</code> (use your
-                data center&rsquo;s domain — e.g. <code>mcp.zoho.in</code> for India,{" "}
+                data center&rsquo;s domain, e.g. <code>mcp.zoho.in</code> for India,{" "}
                 <code>mcp.zoho.eu</code> for Europe) and sign in with your Zoho admin account.
               </li>
               <li>Click <strong>Create MCP Server</strong>.</li>
               <li>
-                Name it something recognizable — e.g. <code>EvoAudit</code> — and click{" "}
+                Name it something recognizable (e.g. <code>EvoAudit</code>) and click{" "}
                 <strong>Create</strong>.
               </li>
             </ol>
