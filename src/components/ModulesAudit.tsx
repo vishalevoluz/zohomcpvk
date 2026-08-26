@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
-import { isDeletedModule, isInternalModule } from "@/lib/crmPredicates";
+import { isDeletedModule, isInternalModule, isSystemHiddenModule } from "@/lib/crmPredicates";
 import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
@@ -204,7 +204,10 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
         // Functions__s, subforms — see isInternalModule) aren't modules a
         // user would ever recognize or need to audit — verified against a
         // live org where these inflated the raw count by 100+ entries.
-        const realMods = allMods.filter(m => !isDeletedModule(m) && !isInternalModule(m));
+        // system_hidden modules are Zoho-computed, not a real admin choice
+        // (see isSystemHiddenModule), so they're excluded here too rather
+        // than surfaced as a "Hidden Modules" finding the user can't act on.
+        const realMods = allMods.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
         setModules(realMods);
         setFilter("all");
         setColumnFilters({});

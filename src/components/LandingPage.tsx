@@ -92,7 +92,7 @@ export default function LandingPage() {
           </h1>
           <p className="landing-hero-sub">
             Connect your CRM in minutes and get a scored audit across data quality, automation,
-            adoption, pipeline hygiene and 9 more dimensions — with an exact, prioritized plan
+            adoption, pipeline hygiene and 9 more dimensions, with an exact, prioritized plan
             showing how each fix moves your score.
           </p>
           <div className="landing-hero-ctas">
@@ -104,7 +104,7 @@ export default function LandingPage() {
             </Link>
           </div>
           <div className="landing-hero-trust">
-            <span><Lock size={12} strokeWidth={1.75} /> Read-only — we never change your CRM</span>
+            <span><Lock size={12} strokeWidth={1.75} /> Read-only: we never change your CRM</span>
             <span><BadgeCheck size={12} strokeWidth={1.75} /> You control the connection and can revoke it in Zoho anytime</span>
           </div>
         </div>

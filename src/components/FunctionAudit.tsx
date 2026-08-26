@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import MultiToolSelect from "@/components/MultiToolSelect";
@@ -118,11 +118,6 @@ function getFeatureType(f: ZohoFunction): string {
   return String(f.feature_type ?? "—");
 }
 
-function getModuleName(f: ZohoFunction): string {
-  if (!f.module) return "—";
-  return String(f.module.moduleName ?? f.module.api_name ?? "—");
-}
-
 function formatDateTime(iso?: string): string {
   if (!iso) return "—";
   try {
@@ -201,18 +196,6 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   const [filter, setFilter] = useState<FnFilterKey>("all");
   const [search, setSearch] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
-  const [activeMenu, setActiveMenu] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!activeMenu) return;
-    function handleClick(e: MouseEvent) {
-      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
-      setActiveMenu(null);
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [activeMenu]);
 
   useEffect(() => {
     const next = tools.length > 0 ? tools : allTools;
@@ -392,8 +375,6 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                     <tr>
                       <th><span className="th-tip" data-tooltip-below="The display name of this custom Deluge function">Function Name<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The unique ID of the underlying Deluge function script (function.id)">Function ID<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="The CRM module this function is associated with">Module<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="The internal system name of the module (e.g. CustomModule89)">Module Name<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The type of automation this function is tied to (e.g. workflow)">Feature Type<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The scripting language used to write this function — Zoho uses Deluge">Language<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether this function is linked to and triggered by a workflow rule">Associated<span className="th-info">i</span></span></th>
@@ -401,7 +382,6 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                       <th><span className="th-tip" data-tooltip-below="When this function was first created">Created Time<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="When this function was last modified">Modified Time<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this function">Findings<span className="th-info">i</span></span></th>
-                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -415,8 +395,6 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                           <tr className={tags.length ? "row-flagged" : ""}>
                             <td className="cell-name">{getFnName(fn)}</td>
                             <td className="cell-mono fn-id">{getFnId(fn)}</td>
-                            <td className="cell-mono">{getModule(fn)}</td>
-                            <td className="cell-mono">{getModuleName(fn)}</td>
                             <td>
                               <span className="arg-badge">{getFeatureType(fn)}</span>
                             </td>
@@ -442,25 +420,6 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                                         tag === "locked"      ? "This function is locked and cannot be edited or executed by the current user." : tag
                                       }>{tag.replace(/_/g, " ")}</span>
                                     ))}
-                              </div>
-                            </td>
-                            <td className="cell-actions">
-                              <div className="action-menu-wrap" ref={activeMenu === getAssociationId(fn) + i ? menuRef : null}>
-                                <button
-                                  className={`btn-action ${activeMenu === getAssociationId(fn) + i ? "open" : ""}`}
-                                  onClick={e => { e.stopPropagation(); const k = getAssociationId(fn) + i; setActiveMenu(activeMenu === k ? null : k); }}
-                                  title="Actions"
-                                >⋯</button>
-                                {activeMenu === getAssociationId(fn) + i && (
-                                  <div className="action-dropdown">
-                                    <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(getFnName(fn)); setActiveMenu(null); }}>
-                                      <span className="action-icon">⎘</span>Copy Name
-                                    </button>
-                                    <button className="action-dropdown-item" onClick={() => { navigator.clipboard.writeText(getFnId(fn)); setActiveMenu(null); }}>
-                                      <span className="action-icon">⎘</span>Copy Function ID
-                                    </button>
-                                  </div>
-                                )}
                               </div>
                             </td>
                           </tr>

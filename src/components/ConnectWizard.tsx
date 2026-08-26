@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRight, Lock, Rocket, ListChecks, KeyRound, Link2, CircleCheck, CircleX } from "lucide-react";
+import { ArrowRight, Lock, Rocket, ListChecks, KeyRound, Link2, Copy, CircleCheck, CircleX } from "lucide-react";
 import type { McpConfig, McpTool } from "@/types/mcp";
 import { listTools } from "@/lib/zohoMcp";
 import { CONNECT_WIZARD_STEP_LABELS, CONNECT_WIZARD_TOOL_GROUPS, displayToolName } from "@/lib/connectWizardContent";
@@ -118,13 +118,13 @@ export default function ConnectWizard({ onConnected }: Props) {
             <p className="wizard-card-body">
               In your new server, add tools from the <strong>Zoho CRM</strong> service: search each
               tool name below and tick its checkbox. More enabled tools = more of the 115 audit
-              parameters we can check automatically — anything we can&rsquo;t see instead becomes a
+              parameters we can check automatically; anything we can&rsquo;t see instead becomes a
               manual-review item instead of a guess.
             </p>
             <div className="wizard-callout">
               <Lock size={13} strokeWidth={1.75} />
               Read-only by design: none of these tools can create, change or delete anything in your
-              CRM. Skip any tool named create/update/delete/convert — the audit never needs write access.
+              CRM. Skip any tool named create/update/delete/convert; the audit never needs write access.
             </div>
             {CONNECT_WIZARD_TOOL_GROUPS.map(group => (
               <div key={group.label} className="wizard-tool-group">
@@ -160,13 +160,37 @@ export default function ConnectWizard({ onConnected }: Props) {
             </div>
             <ol className="wizard-list">
               <li>
-                When adding tools, Zoho asks you to <strong>authorize</strong> the connection with
-                your Zoho login (OAuth). The default &ldquo;Authorization on Demand&rdquo; is fine —
-                the audit can only ever see what your CRM user can see.
+                In the MCP Console sidebar, open <strong>Connection</strong> (this is separate
+                from <strong>Connect</strong>, where your URL lives). This page controls how
+                users prove they&rsquo;re allowed to run the tools on your server.
               </li>
-              <li>Open the <strong>Connect</strong> section of the MCP Console.</li>
               <li>
-                Copy the <strong>MCP URL</strong> — it looks like{" "}
+                Under <strong>Configure Authorization Type</strong>, click <strong>Change</strong>{" "}
+                and select <strong>Authorization via Connection</strong> instead of the default
+                &ldquo;Authorization on Demand&rdquo;. This pre-authorizes one Zoho account for
+                every tool call the audit makes, so you don&rsquo;t get an OAuth prompt mid-audit.
+              </li>
+              <li>
+                Set up (or reuse) a <strong>Native Connection</strong> and authorize it with your
+                Zoho admin login. Once done it appears under <strong>Authorized Tools</strong>{" "}
+                like this:
+              </li>
+            </ol>
+            <div className="wizard-auth-preview">
+              <div className="wizard-auth-preview-label">
+                <CircleCheck size={11} strokeWidth={2} /> Authorized Tools
+              </div>
+              <div className="wizard-auth-preview-row">
+                <span className="wizard-auth-preview-cell wizard-auth-preview-name">Native Connection</span>
+                <span className="wizard-auth-preview-cell wizard-auth-preview-email">you@yourcompany.com</span>
+                <span className="wizard-auth-preview-cell wizard-auth-preview-service">Zoho CRM</span>
+                <span className="wizard-auth-preview-status">Connected</span>
+              </div>
+            </div>
+            <ol className="wizard-list" start={4}>
+              <li>With that connected, move on to the <strong>Connect</strong> section of the MCP Console.</li>
+              <li>
+                Copy the <strong>MCP URL</strong>; it looks like{" "}
                 <code>https://…zohomcp.com/mcp/…/message</code>.
               </li>
             </ol>
@@ -194,9 +218,24 @@ export default function ConnectWizard({ onConnected }: Props) {
               <h4>Paste your MCP URL</h4>
             </div>
             <p className="wizard-card-body">
-              Paste the server URL you copied in the previous step. We&rsquo;ll first check which
-              tools it actually exposes before running anything — nothing is ever written back to
-              your CRM.
+              In the MCP Console sidebar, open <strong>Connect</strong>. Under{" "}
+              <strong>Server URL</strong> you&rsquo;ll see your endpoint; click the copy icon next
+              to it, then paste it below.
+            </p>
+            <div className="wizard-url-preview">
+              <div className="wizard-url-preview-label">
+                <Link2 size={11} strokeWidth={2} /> Server URL
+              </div>
+              <div className="wizard-url-preview-row">
+                <code>https://yourname-xxxxxxxx.zohomcp.in/mcp/••••••••••••••••/message</code>
+                <span className="wizard-url-preview-copy">
+                  <Copy size={13} strokeWidth={1.75} />
+                </span>
+              </div>
+            </div>
+            <p className="wizard-card-body">
+              We&rsquo;ll first check which tools it actually exposes before running anything;
+              nothing is ever written back to your CRM.
             </p>
             <div className="wizard-form">
               <label>
@@ -236,7 +275,7 @@ export default function ConnectWizard({ onConnected }: Props) {
             <p className="wizard-card-body">
               We called <code>tools/list</code> on the server you just connected and checked it
               against the tools EvoAudit needs. Anything red below must be enabled before the
-              audit can run — an audit that&rsquo;s silently missing data is worse than no audit.
+              audit can run: an audit that&rsquo;s silently missing data is worse than no audit.
             </p>
             {missingRequired.length > 0 && (
               <div className="wizard-callout wizard-callout-danger">
@@ -244,7 +283,7 @@ export default function ConnectWizard({ onConnected }: Props) {
                 <span>
                   {missingRequired.length} required tool{missingRequired.length > 1 ? "s are" : " is"} not
                   enabled on this server: <strong>{missingRequired.map(displayToolName).join(", ")}</strong>. Go back to{" "}
-                  <strong>Enable tools</strong> and add {missingRequired.length > 1 ? "them" : "it"} — the
+                  <strong>Enable tools</strong> and add {missingRequired.length > 1 ? "them" : "it"}; the
                   audit is blocked until every required tool is present.
                 </span>
               </div>
