@@ -9,8 +9,8 @@ export interface MandatoryFieldsState {
   count: number;
   /** Real field labels, one entry per mandatory field per core module — not deduped across modules, since the same label (e.g. "Description") being required on both Leads and Deals is two distinct configurations, not a duplicate. */
   fieldLabels: string[];
-  /** Mandatory-field count per core module, only for modules the fetch actually resolved — lets a consumer name which module(s) are driving a high total. */
-  perModule: { apiName: string; count: number }[];
+  /** Mandatory-field count (and the real field labels) per core module, only for modules the fetch actually resolved — lets a consumer name which module(s) are driving a high total, or list its actual required fields. */
+  perModule: { apiName: string; count: number; labels: string[] }[];
   loading: boolean;
   error: string | null;
   lastFetched: number | null;
@@ -32,11 +32,15 @@ function pickLayout(layouts: unknown[]): Record<string, unknown> | null {
 
 // The flat Fields API has no reliable per-org "is this field required"
 // signal: its "mandatory" key never appears as a boolean on a field (only
-// inside editable_properties, a list of which properties an admin may edit),
-// and "system_mandatory" only covers Zoho's own hardcoded required fields
-// (Last_Name, Email, ...), never an admin-configured required custom/standard
-// field. That flag only exists on each LAYOUT's own field config — this is
-// the one real source for it.
+// inside editable_properties, a list of which properties an admin may edit).
+// Each LAYOUT's own field config is the one real source for it — but it
+// splits "required" across two separate booleans: "mandatory" (an admin
+// explicitly required this field on the layout) and "system_mandatory"
+// (one of Zoho's own hardcoded required fields, e.g. Deal Name, Last Name,
+// Email, Stage — required regardless of layout config). A rep can't save
+// the record without filling in either kind, so both count here; missing
+// system_mandatory undercounts every module, since its built-in required
+// fields exist on virtually every layout.
 function mandatoryFieldLabelsFromLayout(layout: Record<string, unknown> | null): string[] {
   if (!layout) return [];
   const sections = Array.isArray(layout.sections) ? (layout.sections as unknown[]) : [];
@@ -45,7 +49,7 @@ function mandatoryFieldLabelsFromLayout(layout: Record<string, unknown> | null):
     const fields = Array.isArray((s as Record<string, unknown>).fields) ? ((s as Record<string, unknown>).fields as unknown[]) : [];
     for (const f of fields) {
       const r = f as Record<string, unknown>;
-      if (r.mandatory === true) {
+      if (r.mandatory === true || r.system_mandatory === true) {
         const label = String(r.field_label ?? r.api_name ?? "").trim();
         if (label) labels.push(label);
       }
@@ -98,7 +102,7 @@ export function useMandatoryFields(
 
       const moduleLoc = findParam(findParamLocations(layoutsTool), /^module$/i) ?? { group: null, key: "module" };
       const allLabels: string[] = [];
-      const perModule: { apiName: string; count: number }[] = [];
+      const perModule: { apiName: string; count: number; labels: string[] }[] = [];
       let lastError: string | null = null;
       let anySucceeded = false;
 
@@ -112,7 +116,7 @@ export function useMandatoryFields(
           const layout = pickLayout(layouts);
           const labels = mandatoryFieldLabelsFromLayout(layout);
           allLabels.push(...labels);
-          perModule.push({ apiName, count: labels.length });
+          perModule.push({ apiName, count: labels.length, labels });
           anySucceeded = true;
           onLog({
             id: Math.random().toString(36).slice(2),

@@ -135,7 +135,9 @@ function CategoryCard({
                   <span className="hsd-checklist-label">{item.label}</span>
                   <span className="hsd-checklist-detail">{item.detail}</span>
                 </div>
-                {item.status === "fail" && <span className="hsd-checklist-weight">+{item.weight} pts available</span>}
+                {item.status === "pass"
+                  ? <span className="hsd-checklist-weight earned">+{item.weight} pts</span>
+                  : <span className="hsd-checklist-weight">+{item.weight} pts available</span>}
               </li>
             ))}
           </ul>
@@ -187,9 +189,9 @@ export default function HealthScoreDashboard({
   const model = useMemo(
     () => buildHealthAuditModel(
       entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved,
-      mandatoryFieldCount, mandatoryFields?.error ?? null, mandatoryFieldsResolved,
+      mandatoryFieldCount, mandatoryFields?.error ?? null, mandatoryFieldsResolved, mandatoryFields?.perModule ?? [],
     ),
-    [entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved, mandatoryFieldCount, mandatoryFields?.error, mandatoryFieldsResolved],
+    [entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved, mandatoryFieldCount, mandatoryFields?.error, mandatoryFieldsResolved, mandatoryFields?.perModule],
   );
 
   useEffect(() => {

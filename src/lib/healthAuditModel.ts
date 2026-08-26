@@ -183,7 +183,7 @@ export interface ChecklistItem {
   label: string;
   status: "pass" | "fail";
   detail: string;
-  /** Real point value this item is worth in the scoring formula — shown only on failing items ("+N pts available"). */
+  /** Real point value this item is worth in the scoring formula — shown as "+N pts" (earned) on passing items and "+N pts available" on failing ones. */
   weight: number;
 }
 
@@ -405,6 +405,7 @@ function dataArchitectureChecklist(
   entityData: Record<CrmEntityType, EntityState>,
   mandatoryFieldCount: number | null,
   mandatoryFieldsError: string | null,
+  mandatoryFieldsPerModule: { apiName: string; count: number; labels: string[] }[] = [],
 ): ChecklistItem[] {
   // null means useMandatoryFields.ts's per-module layout fetch hasn't
   // resolved (or failed) yet — this must never render as a confirmed 0.
@@ -428,13 +429,21 @@ function dataArchitectureChecklist(
   // A high module count only fails this check when it's actually inflated by
   // empty/unused modules — see scoreDataArchitecture's matching condition.
   const tooManyDueToClutter = moduleCount > 15 && emptyModules.length > 0;
+  // "Deals" is the sales module in the Leads/Contacts/Deals/Accounts core
+  // set — called out by name (not just its count) since a bare number gives
+  // no way to sanity-check which fields are actually driving it.
+  const perModuleBreakdown = mandatoryFieldsPerModule
+    .filter(m => m.labels.length > 0)
+    .map(m => `${m.apiName}: ${m.labels.join(", ")} (${m.count})`)
+    .join(". ");
   return [
     {
       id: "data-mandatory-fields", label: "Mandatory field count is reasonable",
       status: mandatoryFieldCount !== null && mandatoryFieldCount > 20 ? "fail" : "pass",
       detail: mandatoryFieldCount === null
         ? `Couldn't fetch layouts for your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldsError ? ` (${mandatoryFieldsError})` : ""} — this isn't a confirmed 0, the count is unknown.`
-        : `${mandatoryFieldCount} mandatory field${mandatoryFieldCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldCount > 20 ? " (over the 20 recommended)." : "."}`,
+        : `${mandatoryFieldCount} mandatory field${mandatoryFieldCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldCount > 20 ? " (over the 20 recommended)." : "."}`
+          + (perModuleBreakdown ? `\n${perModuleBreakdown}.` : ""),
       weight: mandatoryFieldCount !== null && mandatoryFieldCount > 20 ? Math.min(15, mandatoryFieldCount - 20) : 15,
     },
     {
@@ -559,6 +568,7 @@ export function buildHealthAuditModel(
   mandatoryFieldCount: number | null = null,
   mandatoryFieldsError: string | null = null,
   mandatoryFieldsResolved = true,
+  mandatoryFieldsPerModule: { apiName: string; count: number; labels: string[] }[] = [],
 ): HealthAuditModel {
   const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount);
   const resolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t])) && pipelineStagesResolved && mandatoryFieldsResolved;
@@ -583,7 +593,7 @@ export function buildHealthAuditModel(
         reason = accessSecurityReason(entityData);
         break;
       case "dataArchitecture":
-        checklist = dataArchitectureChecklist(entityData, mandatoryFieldCount, mandatoryFieldsError);
+        checklist = dataArchitectureChecklist(entityData, mandatoryFieldCount, mandatoryFieldsError, mandatoryFieldsPerModule);
         reason = dataArchitectureReason(entityData, mandatoryFieldCount, mandatoryFieldsError);
         break;
       case "automationHealth":
