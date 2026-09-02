@@ -63,25 +63,37 @@ export default function DashboardPage() {
   }
 
   const resolvedEntityCount = CRM_ENTITIES.filter(e => isEntityResolved(crm.entityData[e.type])).length;
-  const coreResolved = resolvedEntityCount === CRM_ENTITIES.length;
 
-  // Once the core CRM entities resolve, the secondary hooks that feed
-  // BusinessView/CRMOverviewDashboard (record samples, pipeline stages, rule
-  // coverage, org currency) are still fetching in the background and swap
-  // their skeleton placeholders for real, differently-sized content shortly
-  // after reveal — visibly shifting the page right after the user sees it.
-  // They ride the same MCP round-trip as the core entities and typically
-  // settle within a second or two of them, so holding the loader up a bit
-  // longer past coreResolved lets that settle before reveal instead of the
-  // user watching it happen. Resets whenever coreResolved goes false again
-  // (a manual refresh re-triggers the full loader, same as before).
+  // HealthScoreDashboard (the "CRM Health Score" panel at the top of the CRM
+  // Dashboard) computes its own "resolved" flag from pipelineStages and
+  // mandatoryFields too, not just crm.entityData — see buildHealthAuditModel's
+  // `resolved` line and BusinessView's `pipelineStagesResolved`. Those two ride
+  // separate fetch chains (getLayouts -> getPipelines, getLayouts -> mandatory
+  // field scan) that don't always land inside the old fixed 1200ms hold below,
+  // so the full-page loader used to hand off before they were actually done,
+  // exposing HealthScoreDashboard's own "Checking…" / "—" skeleton state under
+  // the sidebar instead of a finished dashboard. Folding both into the same
+  // gate the loader watches means it now only clears once the panel it's
+  // covering has real content to show.
+  const pipelineStagesReady = !pipelineStages.data.loading && (pipelineStages.data.lastFetched !== null || pipelineStages.data.error !== null);
+  const mandatoryFieldsReady = !mandatoryFields.data.loading && mandatoryFields.data.lastFetched !== null;
+  const TOTAL_LOAD_STEPS = CRM_ENTITIES.length + 2;
+  const resolvedLoadSteps = resolvedEntityCount + (pipelineStagesReady ? 1 : 0) + (mandatoryFieldsReady ? 1 : 0);
+  const coreResolved = resolvedLoadSteps === TOTAL_LOAD_STEPS;
+
+  // Even with the stricter gate above, a few other secondary hooks (record
+  // samples, rule coverage, org currency) still ride the same MCP round-trip
+  // and can swap in real content a beat after coreResolved flips — this short
+  // hold lets that settle before reveal instead of the user watching it shift.
+  // Resets whenever coreResolved goes false again (a manual refresh re-triggers
+  // the full loader, same as before).
   const [loaderHoldElapsed, setLoaderHoldElapsed] = useState(false);
   useEffect(() => {
     if (!config || !coreResolved) {
       setLoaderHoldElapsed(false);
       return;
     }
-    const timer = setTimeout(() => setLoaderHoldElapsed(true), 1200);
+    const timer = setTimeout(() => setLoaderHoldElapsed(true), 600);
     return () => clearTimeout(timer);
   }, [config, coreResolved]);
 
@@ -157,6 +169,11 @@ export default function DashboardPage() {
   // and on every later manual refresh, so refreshing shows the same loader
   // instead of a slim inline bar under an already-rendered dashboard.
   if (isPrefetching) {
+    // Held at 99% (never a false-looking 100%) until loaderHoldElapsed
+    // actually flips isPrefetching to false — coreResolved alone means every
+    // entity call returned, not that the secondary hooks riding along with
+    // them have settled yet (see the isPrefetching comment above).
+    const loaderPct = coreResolved ? 99 : Math.min(99, Math.round((resolvedLoadSteps / TOTAL_LOAD_STEPS) * 100));
     return (
       <div className="evo-loader-page">
         <div className="evo-loader-wrap">
@@ -164,8 +181,12 @@ export default function DashboardPage() {
             <span className="spinner spinner-lg" />
             <span className="evo-loader-name">Evo<span className="landing-logo-accent">Audit</span></span>
           </div>
+          <div className="evo-loader-progress-track" role="progressbar" aria-valuenow={loaderPct} aria-valuemin={0} aria-valuemax={100}>
+            <div className="evo-loader-progress-fill" style={{ width: `${loaderPct}%` }} />
+          </div>
+          <div className="evo-loader-progress-pct">{loaderPct}%</div>
           <div className="evo-loader-status">
-            Loading {resolvedEntityCount}/{CRM_ENTITIES.length} data sources
+            Loading {resolvedLoadSteps}/{TOTAL_LOAD_STEPS} data sources
           </div>
         </div>
       </div>
