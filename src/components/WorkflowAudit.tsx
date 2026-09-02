@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
-import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
@@ -172,6 +171,83 @@ function getCriteriaCount(w: ZohoWorkflow): number {
   if (Array.isArray(c)) return c.length;
   if (typeof c === "object") { const co = c as Record<string, unknown>; if (Array.isArray(co.conditions)) return co.conditions.length; }
   return 0;
+}
+
+// ─── Content comparison helpers (module / trigger / criteria / actions) ───────
+
+function normalizeConditionList(list: unknown[]): string[] {
+  return list.map(c => {
+    if (c && typeof c === "object") {
+      const co = c as Record<string, unknown>;
+      const fieldRaw = co.field;
+      const field = fieldRaw && typeof fieldRaw === "object"
+        ? String((fieldRaw as Record<string, unknown>).api_name ?? (fieldRaw as Record<string, unknown>).name ?? "")
+        : String(co.field_name ?? fieldRaw ?? "");
+      const comparator = String(co.comparator ?? co.comparison ?? co.operator ?? "");
+      const value = co.value ?? co.values ?? "";
+      return `${field}|${comparator}|${JSON.stringify(value)}`;
+    }
+    return JSON.stringify(c);
+  }).sort();
+}
+
+// Flattened, order-independent list of "field|comparator|value" strings — used for exact-match comparison.
+function getCriteriaConditions(w: ZohoWorkflow): string[] {
+  const c = w.criteria ?? w.conditions;
+  if (!c) return [];
+  if (Array.isArray(c)) return normalizeConditionList(c);
+  if (typeof c === "object") {
+    const co = c as Record<string, unknown>;
+    if (Array.isArray(co.conditions)) return normalizeConditionList(co.conditions);
+    if (Array.isArray(co.criteria)) return normalizeConditionList(co.criteria as unknown[]);
+  }
+  return [];
+}
+
+// Just the field names referenced by criteria — used for loose overlap detection.
+function getCriteriaFields(w: ZohoWorkflow): Set<string> {
+  return new Set(getCriteriaConditions(w).map(c => c.split("|")[0]).filter(Boolean));
+}
+
+function getActionsSignatureList(w: ZohoWorkflow): string[] {
+  const a = w.actions ?? w.action_list ?? w.workflow_actions;
+  if (!Array.isArray(a)) return [];
+  return a.map(act => {
+    if (act && typeof act === "object") {
+      const ao = act as Record<string, unknown>;
+      const type = String(ao.type ?? ao.action_type ?? ao.name ?? "");
+      const detail = ao.details ?? ao.data ?? ao.field_updates ?? ao.parameters ?? "";
+      return `${type}|${JSON.stringify(detail)}`;
+    }
+    return JSON.stringify(act);
+  }).sort();
+}
+
+// Just the action types (e.g. "field_update", "email_notification") — used for loose overlap detection.
+function getActionTypes(w: ZohoWorkflow): Set<string> {
+  return new Set(getActionsSignatureList(w).map(s => s.split("|")[0]).filter(Boolean));
+}
+
+// Full-content identity: two rules with this key equal are functionally the same workflow, regardless of name.
+function workflowContentKey(w: ZohoWorkflow): string {
+  return JSON.stringify({
+    module: getModule(w),
+    trigger: getTriggerEvents(w),
+    repeat: getRepeat(w),
+    criteria: getCriteriaConditions(w),
+    actions: getActionsSignatureList(w),
+  });
+}
+
+// True when two workflows target the same module and share at least one criteria field AND one action type,
+// without being fully content-identical — i.e. their behavior overlaps but isn't a clean duplicate.
+function workflowsOverlap(a: ZohoWorkflow, b: ZohoWorkflow): boolean {
+  if (getModule(a) === "—" || getModule(a) !== getModule(b)) return false;
+  const fieldsA = getCriteriaFields(a), fieldsB = getCriteriaFields(b);
+  const criteriaOverlap = fieldsA.size > 0 && fieldsB.size > 0 && [...fieldsA].some(f => fieldsB.has(f));
+  if (!criteriaOverlap) return false;
+  const actionsA = getActionTypes(a), actionsB = getActionTypes(b);
+  return actionsA.size > 0 && actionsB.size > 0 && [...actionsA].some(t => actionsB.has(t));
 }
 function isActive(w: ZohoWorkflow): boolean {
   if (w.status && typeof w.status === "object") { const s = w.status as { active?: boolean }; if (s.active === false) return false; if (s.active === true) return true; }
@@ -573,7 +649,7 @@ function WorkflowDetailModal({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-type WFFilterKey = "all" | "disabled" | "duplicate" | "conflicting" | "complex";
+type WFFilterKey = "all" | "disabled" | "duplicate" | "conflicting" | "overlapping" | "complex";
 type WFMainTab = "workflows" | "connected" | "create";
 
 const WORKFLOW_COLUMNS: ColumnFilterDef<ZohoWorkflow>[] = [
@@ -732,15 +808,25 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
 
   // Derived
   const disabled = workflows.filter(w => !isActive(w));
-  const nameCounts = new Map<string, number>();
-  workflows.forEach(w => { const n = getName(w).toLowerCase(); nameCounts.set(n, (nameCounts.get(n) ?? 0) + 1); });
-  const duplicate = workflows.filter(w => (nameCounts.get(getName(w).toLowerCase()) ?? 0) > 1);
+
+  // Duplicate: identical module + trigger + criteria + actions, regardless of name.
+  const contentCounts = new Map<string, number>();
+  workflows.forEach(w => { const k = workflowContentKey(w); contentCounts.set(k, (contentCounts.get(k) ?? 0) + 1); });
+  const duplicate = workflows.filter(w => (contentCounts.get(workflowContentKey(w)) ?? 0) > 1);
+
   const triggerKey = (w: ZohoWorkflow) => `${getModule(w)}::${getTriggerEvents(w)}`;
   const triggerCounts = new Map<string, number>();
   workflows.forEach(w => { const k = triggerKey(w); if (k !== "—::—") triggerCounts.set(k, (triggerCounts.get(k) ?? 0) + 1); });
   const conflicting = workflows.filter(w => { const k = triggerKey(w); return k !== "—::—" && (triggerCounts.get(k) ?? 0) > 1 && !duplicate.includes(w); });
+
+  // Overlapping: not fully identical, but share module + at least one criteria field + one action type with another rule.
+  const overlapping = workflows.filter((w, i) => {
+    if (duplicate.includes(w)) return false;
+    return workflows.some((o, j) => j !== i && !duplicate.includes(o) && workflowsOverlap(w, o));
+  });
+
   const complex = workflows.filter(w => getActionsCount(w) > 5 || getCriteriaCount(w) > 5);
-  const filterMap: Record<WFFilterKey, ZohoWorkflow[]> = { all: workflows, disabled, duplicate, conflicting, complex };
+  const filterMap: Record<WFFilterKey, ZohoWorkflow[]> = { all: workflows, disabled, duplicate, conflicting, overlapping, complex };
   const bySeverity = filterMap[filter];
   const bySearch = search.trim()
     ? bySeverity.filter(w => {
@@ -755,14 +841,16 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
     if (disabled.includes(w)) tags.push("disabled");
     if (duplicate.includes(w)) tags.push("duplicate");
     if (conflicting.includes(w)) tags.push("conflicting");
+    if (overlapping.includes(w)) tags.push("overlapping");
     if (complex.includes(w)) tags.push("complex");
     return tags;
   }
 
   const findings: { key: WFFilterKey; label: string; count: number; severity: string; tip: string }[] = [
     { key: "disabled",    label: "Disabled Workflows",    count: disabled.length,    severity: disabled.length > 0 ? "warn" : "ok",                                 tip: "Workflow rules that are currently turned off." },
-    { key: "duplicate",   label: "Duplicate Workflows",   count: duplicate.length,   severity: duplicate.length > 0 ? "warn" : "ok",                                tip: "Multiple workflow rules sharing the same name." },
+    { key: "duplicate",   label: "Duplicate Workflows",   count: duplicate.length,   severity: duplicate.length > 0 ? "warn" : "ok",                                tip: "Workflow rules with identical module, trigger, criteria and actions — regardless of name." },
     { key: "conflicting", label: "Conflicting Workflows", count: conflicting.length, severity: conflicting.length > 0 ? "danger" : "ok",                            tip: "Multiple active workflows on the same module and trigger event." },
+    { key: "overlapping", label: "Overlapping Conditions", count: overlapping.length, severity: overlapping.length > 0 ? "warn" : "ok",                             tip: "Workflows on the same module that share criteria fields and action types without being fully identical." },
     { key: "complex",     label: "Excessive Complexity",  count: complex.length,     severity: complex.length > 3 ? "danger" : complex.length > 0 ? "warn" : "ok", tip: "Workflows with more than 5 actions or criteria conditions." },
   ];
 
@@ -779,9 +867,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
           {workflows.length > 0 && <span className="pane-count">{workflows.length} workflow{workflows.length !== 1 ? "s" : ""}</span>}
         </div>
         <div className="audit-toolbar">
-          {tools.length > 0 ? (
-            <MultiToolSelect tools={tools} selected={selectedTools} onChange={setSelectedTools} />
-          ) : (
+          {tools.length === 0 && (
             <span className="no-tools-hint">No workflow tools found — check connection</span>
           )}
           <button onClick={() => void loadWorkflows()} disabled={loading || selectedTools.length === 0} className="btn-connect">
@@ -948,8 +1034,9 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
                                       : tags.map(tag => (
                                           <span key={tag} className={`audit-tag tag-wf-${tag}`} title={
                                             tag === "disabled"    ? "This workflow is currently inactive." :
-                                            tag === "duplicate"   ? "Another workflow shares this exact name." :
+                                            tag === "duplicate"   ? "Another workflow has identical module, trigger, criteria and actions." :
                                             tag === "conflicting" ? "Another active workflow targets the same module and trigger." :
+                                            tag === "overlapping" ? "Another workflow on this module shares criteria fields and action types." :
                                             tag === "complex"     ? "More than 5 actions or conditions." : tag
                                           }>{tag}</span>
                                         ))}

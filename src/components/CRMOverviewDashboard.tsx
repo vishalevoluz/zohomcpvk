@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, identicalWorkflows, overlappingWorkflows } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -741,29 +741,39 @@ interface WorkflowBreakdownRow {
   module: string;
   active: boolean;
   lastTriggered: string | null;
+  duplicate: boolean;
+  overlapping: boolean;
 }
 
 // Sorted inactive-first, then never-triggered-first within active — same
 // "surface the actionable ones" convention as the other breakdowns here.
 function computeWorkflowBreakdown(entityData: Record<CrmEntityType, EntityState>): WorkflowBreakdownRow[] {
-  return entityData.workflows.items
+  const items = entityData.workflows.items;
+  const duplicateSet = new Set(identicalWorkflows(items));
+  const overlappingSet = new Set(overlappingWorkflows(items));
+  return items
     .map((w, i) => ({
       id: String((w as Record<string, unknown> | null)?.id ?? i),
       name: getItemName(w, i),
       module: workflowModuleLabel(w) || "—",
       active: isActiveWorkflow(w),
       lastTriggered: workflowLastTriggered(w),
+      duplicate: duplicateSet.has(w),
+      overlapping: overlappingSet.has(w),
     }))
     .sort((a, b) => Number(a.active) - Number(b.active) || Number(!!a.lastTriggered) - Number(!!b.lastTriggered));
 }
 
 // "never" isn't mutually exclusive with active/inactive (an active workflow
-// can genuinely have never fired yet), so each toggle applies its own
-// independent predicate rather than assigning one category per row.
-function matchesWorkflowFilter(row: WorkflowBreakdownRow, filter: "all" | "active" | "inactive" | "never"): boolean {
+// can genuinely have never fired yet), and duplicate/overlapping are their own
+// independent flags too — so each toggle applies its own predicate rather than
+// assigning one category per row.
+function matchesWorkflowFilter(row: WorkflowBreakdownRow, filter: "all" | "active" | "inactive" | "never" | "duplicate" | "overlapping"): boolean {
   if (filter === "all") return true;
   if (filter === "active") return row.active;
   if (filter === "inactive") return !row.active;
+  if (filter === "duplicate") return row.duplicate;
+  if (filter === "overlapping") return row.overlapping;
   return !row.lastTriggered;
 }
 
@@ -780,11 +790,15 @@ function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): { summary: strin
   if (rows.length === 0) return { summary: "No workflows found — nothing to evaluate yet." };
   const inactive = rows.filter(r => !r.active).length;
   const neverTriggered = rows.filter(r => r.active && !r.lastTriggered).length;
+  const duplicate = rows.filter(r => r.duplicate).length;
+  const overlapping = rows.filter(r => r.overlapping).length;
   const flags: string[] = [];
+  if (duplicate > 0) flags.push(`${duplicate} workflow${duplicate !== 1 ? "s are" : " is"} an exact duplicate of another (same module, trigger, criteria and actions)`);
+  if (overlapping > 0) flags.push(`${overlapping} workflow${overlapping !== 1 ? "s share" : " shares"} a trigger event with another active rule`);
   if (inactive > 0) flags.push(`${inactive} workflow${inactive !== 1 ? "s are" : " is"} inactive`);
   if (neverTriggered > 0) flags.push(`${neverTriggered} active workflow${neverTriggered !== 1 ? "s have" : " has"} never fired`);
-  if (flags.length === 0) return { summary: "All workflows are active and have fired at least once — automation looks healthy." };
-  return { summary: `Zia flags: ${flags.join("; ")}. Reactivate what's still needed, and fix or remove the rest — a workflow that never fires isn't protecting anything.` };
+  if (flags.length === 0) return { summary: "All workflows are active, unique, and have fired at least once — automation looks healthy." };
+  return { summary: `Zia flags: ${flags.join("; ")}. Merge or remove duplicates, reactivate what's still needed, and fix or remove the rest.` };
 }
 
 // ─── Activity (Email / Task / Call) drill-down ─────────────────────────────────
@@ -1663,7 +1677,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     if (selectedCard) detailPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedCard]);
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
-  const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never">("all");
+  const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never" | "duplicate" | "overlapping">("all");
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
   const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
@@ -2813,7 +2827,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "workflows" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Workflows — Active / Inactive / Last Triggered</h4>
+            <h4>Workflows — Active / Inactive / Duplicate / Overlapping</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <input
@@ -2842,6 +2856,20 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             >
               {workflowBreakdown.filter(r => !r.lastTriggered).length} Never Triggered
             </button>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "duplicate" ? "selected" : ""}`}
+              onClick={() => setWorkflowFilter(prev => (prev === "duplicate" ? "all" : "duplicate"))}
+              title="Same module, trigger, criteria and actions as another rule — regardless of name"
+            >
+              {workflowBreakdown.filter(r => r.duplicate).length} Duplicate
+            </button>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter === "overlapping" ? "selected" : ""}`}
+              onClick={() => setWorkflowFilter(prev => (prev === "overlapping" ? "all" : "overlapping"))}
+              title="Shares a module + trigger event with another active rule"
+            >
+              {workflowBreakdown.filter(r => r.overlapping).length} Overlapping
+            </button>
             {workflowFilter !== "all" && (
               <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setWorkflowFilter("all")}>
                 Show All
@@ -2857,6 +2885,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.module}</span>
                 <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : ""}`}>{formatLastTriggered(row.lastTriggered)}</span>
+                {row.duplicate && <span className="kpi-drilldown-badge status-inactive" title="Identical module, trigger, criteria and actions as another rule">duplicate</span>}
+                {row.overlapping && <span className="kpi-drilldown-badge status-inactive" title="Shares a module + trigger event with another active rule">overlapping</span>}
                 <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
               </div>
             ))}
@@ -3269,7 +3299,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <div className="crm-feedback-about">
               <h3 className="crm-fb-form-title">About This App</h3>
               <p className="crm-fb-about-desc">
-                EvoAudit audits your connected Zoho CRM — modules, workflows, blueprints, fields, functions, and users —
+                EvoAudit audits your connected Zoho CRM (modules, workflows, blueprints, fields, functions, and users)
                 against best practices, and surfaces what&rsquo;s costing you leads, licenses, or clean data.
               </p>
             </div>

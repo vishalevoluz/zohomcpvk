@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
-import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
@@ -286,16 +285,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
           )}
         </div>
         <div className="audit-toolbar">
-          {availableTools.length > 0 ? (
-            <>
-              {usingFallback && (
-                <span className="no-tools-hint" title="No tools matched function keywords — showing all tools.">
-                  ⚠ Select function tool manually
-                </span>
-              )}
-              <MultiToolSelect tools={availableTools} selected={selectedTools} onChange={setSelectedTools} />
-            </>
-          ) : (
+          {availableTools.length === 0 && (
             <span className="no-tools-hint">No tools found — check connection</span>
           )}
           <button onClick={() => void loadFunctions()} disabled={loading || selectedTools.length === 0} className="btn-connect">

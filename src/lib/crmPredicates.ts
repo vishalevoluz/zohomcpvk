@@ -48,12 +48,6 @@ export function workflowModuleLabel(item: unknown): string {
   return String(mod);
 }
 
-function workflowName(item: unknown): string {
-  if (!item || typeof item !== "object") return "Unknown";
-  const r = item as Record<string, unknown>;
-  return String(r.name ?? r.workflow_name ?? r.id ?? "Unknown");
-}
-
 // module::trigger-event signature a workflow fires on — same shape
 // WorkflowAudit.tsx's "Conflicting Workflows" finding already groups by, kept
 // here so the Health Score's Workflow Health checklist can report the same
@@ -84,16 +78,75 @@ export function overlappingWorkflows(workflows: unknown[]): unknown[] {
   return active.filter(w => { const k = workflowTriggerKey(w); return k !== "—::—" && (triggerCounts.get(k) ?? 0) > 1; });
 }
 
-// Workflows that are near-certain duplicates: same name AND the same
-// module + trigger signature. Name alone can be coincidence (two unrelated
-// rules on different modules happening to share a label) — name plus a
-// matching functional signature means one was very likely cloned from the
-// other and never renamed, merged, or removed.
+function normalizeConditionList(list: unknown[]): string[] {
+  return list.map(c => {
+    if (c && typeof c === "object") {
+      const co = c as Record<string, unknown>;
+      const fieldRaw = co.field;
+      const field = fieldRaw && typeof fieldRaw === "object"
+        ? String((fieldRaw as Record<string, unknown>).api_name ?? (fieldRaw as Record<string, unknown>).name ?? "")
+        : String(co.field_name ?? fieldRaw ?? "");
+      const comparator = String(co.comparator ?? co.comparison ?? co.operator ?? "");
+      const value = co.value ?? co.values ?? "";
+      return `${field}|${comparator}|${JSON.stringify(value)}`;
+    }
+    return JSON.stringify(c);
+  }).sort();
+}
+
+// Order-independent "field|comparator|value" list — same normalization
+// WorkflowAudit.tsx's getCriteriaConditions uses, kept in sync so both places
+// agree on what counts as identical criteria.
+function workflowCriteriaSignature(item: unknown): string[] {
+  if (!item || typeof item !== "object") return [];
+  const r = item as Record<string, unknown>;
+  const c = r.criteria ?? r.conditions;
+  if (!c) return [];
+  if (Array.isArray(c)) return normalizeConditionList(c);
+  if (typeof c === "object") {
+    const co = c as Record<string, unknown>;
+    if (Array.isArray(co.conditions)) return normalizeConditionList(co.conditions);
+    if (Array.isArray(co.criteria)) return normalizeConditionList(co.criteria as unknown[]);
+  }
+  return [];
+}
+
+function workflowActionsSignature(item: unknown): string[] {
+  if (!item || typeof item !== "object") return [];
+  const r = item as Record<string, unknown>;
+  const a = r.actions ?? r.action_list ?? r.workflow_actions;
+  if (!Array.isArray(a)) return [];
+  return a.map(act => {
+    if (act && typeof act === "object") {
+      const ao = act as Record<string, unknown>;
+      const type = String(ao.type ?? ao.action_type ?? ao.name ?? "");
+      const detail = ao.details ?? ao.data ?? ao.field_updates ?? ao.parameters ?? "";
+      return `${type}|${JSON.stringify(detail)}`;
+    }
+    return JSON.stringify(act);
+  }).sort();
+}
+
+// Full functional identity: module + trigger + criteria + actions. Two rules
+// with this key equal behave identically regardless of name — name is
+// deliberately excluded since a cloned-and-relabeled rule is exactly the case
+// this needs to catch, not exempt.
+function workflowContentKey(item: unknown): string {
+  return JSON.stringify({
+    trigger: workflowTriggerKey(item),
+    criteria: workflowCriteriaSignature(item),
+    actions: workflowActionsSignature(item),
+  });
+}
+
+// Workflows that are functional duplicates: identical module + trigger +
+// criteria + actions. Name is intentionally not part of the signature — two
+// rules cloned from one another and left with different labels are still the
+// same automation running twice, which is exactly what this should surface.
 export function identicalWorkflows(workflows: unknown[]): unknown[] {
-  const keyOf = (w: unknown) => `${workflowName(w).trim().toLowerCase()}::${workflowTriggerKey(w)}`;
   const counts = new Map<string, number>();
-  workflows.forEach(w => { const k = keyOf(w); counts.set(k, (counts.get(k) ?? 0) + 1); });
-  return workflows.filter(w => (counts.get(keyOf(w)) ?? 0) > 1);
+  workflows.forEach(w => { const k = workflowContentKey(w); counts.set(k, (counts.get(k) ?? 0) + 1); });
+  return workflows.filter(w => (counts.get(workflowContentKey(w)) ?? 0) > 1);
 }
 
 // "Consolidate the overlapping/duplicate group into one rule" projected —
@@ -114,7 +167,7 @@ export function withoutOverlappingWorkflows(workflows: unknown[]): unknown[] {
 export function withoutIdenticalWorkflows(workflows: unknown[]): unknown[] {
   const seen = new Set<string>();
   return workflows.filter(w => {
-    const k = `${workflowName(w).trim().toLowerCase()}::${workflowTriggerKey(w)}`;
+    const k = workflowContentKey(w);
     if (seen.has(k)) return false;
     seen.add(k);
     return true;

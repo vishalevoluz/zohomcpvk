@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
-import MultiToolSelect from "@/components/MultiToolSelect";
 
 interface PickListValue {
   display_value?: string;
@@ -469,16 +468,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
             )}
           </div>
           <div className="audit-toolbar">
-            {availableTools.length > 0 ? (
-              <>
-                {usingFallback && (
-                  <span className="no-tools-hint" title="No tools matched field keywords — showing all tools.">
-                    ⚠ Select fields tool manually
-                  </span>
-                )}
-                <MultiToolSelect tools={availableTools} selected={selectedTools} onChange={setSelectedTools} />
-              </>
-            ) : (
+            {availableTools.length === 0 && (
               <span className="no-tools-hint">No tools found — check connection</span>
             )}
             {requiredParams.map(key => {

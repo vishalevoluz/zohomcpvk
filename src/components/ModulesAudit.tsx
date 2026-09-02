@@ -4,7 +4,6 @@ import { useState, useEffect } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import { isDeletedModule, isInternalModule, isSystemHiddenModule } from "@/lib/crmPredicates";
-import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
@@ -296,9 +295,7 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
           )}
         </div>
         <div className="audit-toolbar">
-          {tools.length > 0 ? (
-            <MultiToolSelect tools={tools} selected={selectedTools} onChange={setSelectedTools} />
-          ) : (
+          {tools.length === 0 && (
             <span className="no-tools-hint">No module tools found — check connection</span>
           )}
           <button onClick={() => void loadModules()} disabled={loading || selectedTools.length === 0} className="btn-connect">

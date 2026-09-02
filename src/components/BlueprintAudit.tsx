@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
-import MultiToolSelect from "@/components/MultiToolSelect";
 import ScopeHint from "@/components/ScopeHint";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 
@@ -1280,9 +1279,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
           )}
         </div>
         <div className="audit-toolbar">
-          {tools.length > 0 ? (
-            <MultiToolSelect tools={tools} selected={selectedTools} onChange={setSelectedTools} />
-          ) : (
+          {tools.length === 0 && (
             <span className="no-tools-hint">No blueprint tools found — check connection</span>
           )}
           <button onClick={() => void loadBlueprints()} disabled={loading || selectedTools.length === 0} className="btn-connect">

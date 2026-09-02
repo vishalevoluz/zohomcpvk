@@ -2100,6 +2100,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .tag-wf-disabled    { background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
 .tag-wf-duplicate   { background: var(--color-warning-bg); color: #854F0B; }
 .tag-wf-conflicting { background: var(--color-danger-bg); color: var(--color-danger); }
+.tag-wf-overlapping { background: var(--color-warning-bg); color: #854F0B; }
 .tag-wf-complex     { background: var(--color-brand-bg); color: var(--color-brand); }
 
 /* ─── Blueprint audit tags ───────────────────────────────────── */
