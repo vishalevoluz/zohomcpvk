@@ -814,6 +814,26 @@ function computeWorkflowBreakdown(entityData: Record<CrmEntityType, EntityState>
     .sort((a, b) => Number(a.active) - Number(b.active) || Number(!!a.lastTriggered) - Number(!!b.lastTriggered));
 }
 
+interface WorkflowDuplicateGroupView {
+  key: string;
+  condition: string;
+  items: { id: string; name: string }[];
+}
+
+// Grouped view of identicalWorkflowGroups, for the Duplicate filter to render
+// as expandable match-condition cards - same "one row per group, count badge,
+// expandable member chips" shape as the Functions card's Duplicate Function
+// Names tab, instead of scattering each duplicate as its own flat row.
+function computeWorkflowDuplicateGroups(entityData: Record<CrmEntityType, EntityState>): WorkflowDuplicateGroupView[] {
+  const items = entityData.workflows.items;
+  return identicalWorkflowGroups(items)
+    .map(group => {
+      const members = group.map((w, i) => ({ id: String((w as Record<string, unknown> | null)?.id ?? i), name: getItemName(w, i) }));
+      return { key: members.map(m => m.id).join(","), condition: workflowMatchCondition(group[0], true), items: members };
+    })
+    .sort((a, b) => b.items.length - a.items.length);
+}
+
 // "never" isn't mutually exclusive with active/inactive (an active workflow
 // can genuinely have never fired yet), and duplicate/overlapping are their own
 // independent flags too - so each toggle applies its own predicate rather than
@@ -1205,6 +1225,16 @@ function computeFunctionDuplicates(items: FunctionItem[]): FunctionDuplicateGrou
     else byKey.set(key, { name: it.name, items: [{ id: it.id, apiName: it.apiName, category: it.category }] });
   }
   return [...byKey.values()].filter(g => g.items.length > 1).sort((a, b) => b.items.length - a.items.length);
+}
+
+// Same transparency treatment as the workflow duplicate/overlap badges: the
+// matching condition (a case-insensitive display-name match - the only thing
+// computeFunctionDuplicates groups on, since Zoho lets two functions share a
+// display name even though their underlying api_name is always unique),
+// which functions matched, and how many times.
+function functionDuplicateTooltip(group: FunctionDuplicateGroup): string {
+  const names = group.items.map(it => it.apiName || it.id).join(", ") || "-";
+  return `Matched on - Function display name: "${group.name}" (case-insensitive), regardless of API name. ${group.items.length} functions share this name: ${names}. Detected ${group.items.length} times total.`;
 }
 
 // getFunctionCode's response is the raw Deluge/runtime source text itself
@@ -1731,7 +1761,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
   const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
-  const [expandedFunctionDuplicate, setExpandedFunctionDuplicate] = useState<string | null>(null);
+  // Duplicate-name groups show their matched functions immediately, same as
+  // the Workflow card's "Duplicate Match Details" panel (expanded by default)
+  // - this tracks which groups a user has manually collapsed, rather than
+  // which one (singular) is expanded.
+  const [collapsedFunctionDuplicates, setCollapsedFunctionDuplicates] = useState<Set<string>>(new Set());
+  // Same collapse-tracking, mirrored for the Workflow drilldown's duplicate
+  // groups - expanded by default, same as the Functions card.
+  const [collapsedWorkflowDuplicates, setCollapsedWorkflowDuplicates] = useState<Set<string>>(new Set());
   const [previewFunctionId, setPreviewFunctionId] = useState<string | null>(null);
   const [functionsListExpanded, setFunctionsListExpanded] = useState(false);
   type FunctionsSubTab = "issues" | "duplicates" | "all";
@@ -1959,6 +1996,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null),
   );
   const workflowBreakdown = computeWorkflowBreakdown(entityData);
+  const workflowDuplicateGroups = computeWorkflowDuplicateGroups(entityData);
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
@@ -2617,9 +2655,9 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <div className="kpi-drilldown-summary">
-            <span className="kpi-drilldown-stat good">{functionActiveCount} Active</span>
-            <span className="kpi-drilldown-stat bad">{functionInactiveCount} Inactive</span>
-            <span className="kpi-drilldown-stat neutral">{functionDuplicates.length} Duplicate Names</span>
+            <span className="kpi-drilldown-stat good" data-tooltip="This function is enabled and can be triggered by its associated automation, button, or schedule.">{functionActiveCount} Active</span>
+            <span className="kpi-drilldown-stat bad" data-tooltip="This function is disabled - it exists in Zoho but will not execute until re-enabled.">{functionInactiveCount} Inactive</span>
+            <span className="kpi-drilldown-stat neutral" data-tooltip="Two or more functions share the exact same display name (case-insensitive), even though each has a unique API name underneath - easy to pick the wrong one from a list in Zoho's UI.">{functionDuplicates.length} Duplicate Names</span>
           </div>
 
           {/* Recommendations stay visible regardless of which tab below is open */}
@@ -2645,6 +2683,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               type="button"
               className={`function-tab ${functionsSubTab === "duplicates" ? "active" : ""}`}
               onClick={() => setFunctionsSubTab("duplicates")}
+              data-tooltip="Functions matched on display name only (case-insensitive) - the underlying API name always stays unique."
             >
               <span>Duplicate Function Names</span>
               <span className="function-tab-count">{functionDuplicates.length}</span>
@@ -2731,25 +2770,33 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <p className="business-view-hint">No duplicate function names found.</p>
             ) : (
               <div className="kpi-drilldown-table kpi-drilldown-table-single">
-                {functionDuplicates.filter(group => matchesSearch(group.name)).map(group => (
+                {functionDuplicates.filter(group => matchesSearch(group.name)).map(group => {
+                  const isExpanded = !collapsedFunctionDuplicates.has(group.name);
+                  return (
                   <div key={group.name} className="kpi-drilldown-row kpi-drilldown-row-layouts">
                     <button
                       className="function-dup-toggle"
-                      onClick={() => setExpandedFunctionDuplicate(prev => (prev === group.name ? null : group.name))}
+                      onClick={() => setCollapsedFunctionDuplicates(prev => {
+                        const next = new Set(prev);
+                        if (next.has(group.name)) next.delete(group.name); else next.add(group.name);
+                        return next;
+                      })}
+                      data-tooltip={functionDuplicateTooltip(group)}
                     >
                       <span className="kpi-drilldown-name">{group.name}</span>
                       <span className="kpi-drilldown-badge neutral">{group.items.length}×</span>
-                      <span className="function-dup-caret">{expandedFunctionDuplicate === group.name ? "▾" : "▸"}</span>
+                      <span className="function-dup-caret">{isExpanded ? "▾" : "▸"}</span>
                     </button>
-                    {expandedFunctionDuplicate === group.name && (
+                    {isExpanded && (
                       <div className="kpi-drilldown-layout-names">
                         {group.items.map(it => (
-                          <span key={it.id} className="kpi-drilldown-layout-chip custom">{it.apiName || it.id} · {it.category}</span>
+                          <span key={it.id} className="kpi-drilldown-layout-chip custom" data-tooltip={`API name: ${it.apiName || "-"} · Category: ${it.category} · Association ID: ${it.id}`}>{it.apiName || it.id} · {it.category}</span>
                         ))}
                       </div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )
           )}
@@ -2929,21 +2976,59 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </button>
             )}
           </div>
-          <div className="kpi-drilldown-table kpi-drilldown-table-single">
-            {workflowBreakdown
-              .filter(row => matchesWorkflowFilter(row, workflowFilter))
-              .filter(row => matchesSearch(row.name, row.module))
-              .map(row => (
-              <div key={row.id} className="kpi-drilldown-row">
-                <span className="kpi-drilldown-name">{row.name}</span>
-                <span className="kpi-drilldown-module">{row.module}</span>
-                <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : ""}`} data-tooltip={workflowLastTriggeredTooltip(row)}>{formatLastTriggered(row.lastTriggered)}</span>
-                {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.duplicateDetail ?? "Identical module, trigger, criteria and actions as another rule"}>duplicate</span>}
-                {row.overlapping && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.overlappingDetail ?? "Shares a module + trigger event with another active rule"}>overlapping</span>}
-                <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`} data-tooltip={row.active ? WORKFLOW_ACTIVE_TOOLTIP : WORKFLOW_INACTIVE_TOOLTIP}>{row.active ? "active" : "inactive"}</span>
+          {workflowFilter === "duplicate" ? (
+            workflowDuplicateGroups.length === 0 ? (
+              <p className="business-view-hint">No duplicate workflows found.</p>
+            ) : (
+              <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                {workflowDuplicateGroups
+                  .filter(group => matchesSearch(group.condition, ...group.items.map(it => it.name)))
+                  .map(group => {
+                    const isExpanded = !collapsedWorkflowDuplicates.has(group.key);
+                    return (
+                    <div key={group.key} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                      <button
+                        className="function-dup-toggle"
+                        onClick={() => setCollapsedWorkflowDuplicates(prev => {
+                          const next = new Set(prev);
+                          if (next.has(group.key)) next.delete(group.key); else next.add(group.key);
+                          return next;
+                        })}
+                        data-tooltip={`Matched on - ${group.condition}. Detected ${group.items.length} times total.`}
+                      >
+                        <span className="kpi-drilldown-name">{group.condition}</span>
+                        <span className="kpi-drilldown-badge neutral">{group.items.length}×</span>
+                        <span className="function-dup-caret">{isExpanded ? "▾" : "▸"}</span>
+                      </button>
+                      {isExpanded && (
+                        <div className="kpi-drilldown-layout-names">
+                          {group.items.map(it => (
+                            <span key={it.id} className="kpi-drilldown-layout-chip custom" data-tooltip={`Workflow ID: ${it.id}`}>{it.name}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })}
               </div>
-            ))}
-          </div>
+            )
+          ) : (
+            <div className="kpi-drilldown-table kpi-drilldown-table-single">
+              {workflowBreakdown
+                .filter(row => matchesWorkflowFilter(row, workflowFilter))
+                .filter(row => matchesSearch(row.name, row.module))
+                .map(row => (
+                <div key={row.id} className="kpi-drilldown-row">
+                  <span className="kpi-drilldown-name">{row.name}</span>
+                  <span className="kpi-drilldown-module">{row.module}</span>
+                  <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : ""}`} data-tooltip={workflowLastTriggeredTooltip(row)}>{formatLastTriggered(row.lastTriggered)}</span>
+                  {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.duplicateDetail ?? "Identical module, trigger, criteria and actions as another rule"}>duplicate</span>}
+                  {row.overlapping && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.overlappingDetail ?? "Shares a module + trigger event with another active rule"}>overlapping</span>}
+                  <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`} data-tooltip={row.active ? WORKFLOW_ACTIVE_TOOLTIP : WORKFLOW_INACTIVE_TOOLTIP}>{row.active ? "active" : "inactive"}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="zia-rec zia-rec-medium activity-zia-rec">
             <div className="zia-rec-header">
               <span className="zia-rec-icon">✦</span>
