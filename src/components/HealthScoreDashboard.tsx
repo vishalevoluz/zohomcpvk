@@ -44,13 +44,13 @@ const ZONE_LABEL: Record<string, string> = {
 const IMPACT_TOOLTIPS: Record<string, string> = {
   High: "Fixing this meaningfully improves revenue, risk, or how efficiently your team works.",
   Medium: "Fixing this helps, but the business impact is moderate.",
-  Low: "Fixing this is minor cleanup — nice to have, not a priority.",
+  Low: "Fixing this is minor cleanup - nice to have, not a priority.",
 };
 
 const EFFORT_TOOLTIPS: Record<string, string> = {
   Easy: "A quick change your Zoho admin or consultant can make in one sitting.",
   Medium: "Takes some planning and setup time, but isn't a major project.",
-  Hard: "A bigger project — expect it to take real time and testing to get right.",
+  Hard: "A bigger project - expect it to take real time and testing to get right.",
 };
 
 const RING_RADIUS = 85;
@@ -71,7 +71,7 @@ function ScoreRing({ score, zone, resolved, displayScore }: { score: number; zon
         />
       </svg>
       <div className="hsd-ring-center">
-        <span className="hsd-score-num">{resolved ? displayScore : "—"}</span>
+        <span className="hsd-score-num">{resolved ? displayScore : "-"}</span>
         <span className="hsd-score-max">/100</span>
       </div>
     </div>
@@ -105,7 +105,7 @@ function CategoryCard({
       <button type="button" className="hsd-category-header" onClick={onToggle} data-tooltip-below={dim.tooltip}>
         <span className="hsd-category-icon"><Icon size={17} strokeWidth={2} /></span>
         <span className="hsd-category-label">{dim.label}</span>
-        <span className="hsd-category-score">{resolved ? `${dim.score}/20` : "—"}</span>
+        <span className="hsd-category-score">{resolved ? `${dim.score}/20` : "-"}</span>
         <span className={`hsd-category-pill zone-${resolved ? dim.zone : "loading"}`}>
           {resolved ? ZONE_LABEL[dim.zone] : "Checking…"}
         </span>
@@ -145,7 +145,7 @@ function CategoryCard({
           <div className="hsd-recommendations">
             <h4>How to Maximize Your Score</h4>
             {dim.allSet ? (
-              <p className="hsd-all-set">Nothing to fix here — this category is in good shape.</p>
+              <p className="hsd-all-set">Nothing to fix here - this category is in good shape.</p>
             ) : (
               <>
                 {dim.recommendations.map(rec => (
@@ -229,7 +229,7 @@ export default function HealthScoreDashboard({
             <div className="hsd-reasons">
               {model.dimensions.map(dim => (
                 <p key={dim.key} className={`hsd-reason-line zone-${dim.zone}`}>
-                  <strong>{dim.label} {dim.score}/20</strong> — {dim.reason}
+                  <strong>{dim.label} {dim.score}/20</strong> - {dim.reason}
                 </p>
               ))}
             </div>
@@ -237,11 +237,11 @@ export default function HealthScoreDashboard({
 
           <div className="hsd-kpi-row">
             <div className="hsd-kpi-tile tone-neutral">
-              <span className="hsd-kpi-value">{model.resolved ? `${model.total}/100` : "—"}</span>
+              <span className="hsd-kpi-value">{model.resolved ? `${model.total}/100` : "-"}</span>
               <span className="hsd-kpi-label">Current Score</span>
             </div>
             <div className={`hsd-kpi-tile ${model.resolved && model.gainTotal === 0 ? "tone-healthy" : "tone-warning"}`}>
-              <span className="hsd-kpi-value"><TrendingUp size={14} /> {model.resolved ? `+${model.gainTotal}` : "—"}</span>
+              <span className="hsd-kpi-value"><TrendingUp size={14} /> {model.resolved ? `+${model.gainTotal}` : "-"}</span>
               <span className="hsd-kpi-label">Improvement Available</span>
             </div>
           </div>
@@ -264,7 +264,7 @@ export default function HealthScoreDashboard({
               </div>
             ))}
             <p className="hsd-roadmap-summary">
-              Estimated Overall Score — Current <strong>{model.total}</strong> → Potential <strong>{model.potentialTotal}</strong> ({model.gainTotal} points available)
+              Estimated Overall Score - Current <strong>{model.total}</strong> → Potential <strong>{model.potentialTotal}</strong> ({model.gainTotal} points available)
             </p>
           </>
         )}

@@ -8,7 +8,7 @@ import type { PipelineStage, PipelineStagesState, PipelineWithStages } from "@/l
 
 const INIT_STATE: PipelineStagesState = { items: [], pipelineCount: 0, pipelines: [], loading: false, error: null, lastFetched: null };
 
-// This MCP server has no dedicated "list stages" tool — real stage names live in
+// This MCP server has no dedicated "list stages" tool - real stage names live in
 // a module's active layout's pipeline config, reached via getLayouts (module ->
 // layouts) then getPipelines (layout_id -> pipeline.maps). Neither response
 // marks a single "the" layout/pipeline as canonical, so prefer an active/visible
@@ -30,7 +30,7 @@ function pickPipeline(pipelines: unknown[]): Record<string, unknown> | null {
 
 // Zoho stage configs signal a closed stage either through forecast_type
 // ("Closed Won"/"Closed Lost") or, on servers that omit that field, through
-// the stage name itself — both are checked so the flag doesn't silently no-op
+// the stage name itself - both are checked so the flag doesn't silently no-op
 // on an MCP server that doesn't return forecast_type.
 function isClosedStage(s: { name: string; forecastType?: string }): boolean {
   return /won|lost/i.test(s.forecastType ?? "") || /won|lost/i.test(s.name);
@@ -38,7 +38,7 @@ function isClosedStage(s: { name: string; forecastType?: string }): boolean {
 
 // Zoho pipeline references use the same display_value/actual_value picklist
 // convention as the stage maps below (see postBlueprint's "pipeline" schema:
-// { id, api_name, name, display_value }) — not the generic record-name
+// { id, api_name, name, display_value }) - not the generic record-name
 // fields (r.name/display_name/label/...) getItemName in useCrmEntities.ts
 // checks first, which is tuned for CRM records/workflows/blueprints and left
 // every pipeline reading as "Item N" here.

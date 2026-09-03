@@ -9,7 +9,7 @@ export const SECTIONS = [
   { id: "functions" as const,  label: "Functions",  icon: "ƒ", keywords: ["function", "script", "custom_function", "deluge", "automation_script", "serverless"] },
 ] as const;
 
-// Keyword map for tool categorization — includes "fields" even though it's hidden from the sidebar
+// Keyword map for tool categorization - includes "fields" even though it's hidden from the sidebar
 const CATEGORIZE_KEYWORDS: Record<Section, string[]> = {
   "crm-dashboard": [],
   workflows:    ["workflow", "automation", "trigger", "rule"],

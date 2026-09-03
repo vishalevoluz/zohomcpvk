@@ -24,12 +24,12 @@ export interface PriorityAction {
   offenders: string[];
   stakeLabel?: string;
   honesty: string;
-  /** Points the CRM Health Score is projected to gain if this is fixed — null when no clean simulation exists (see estimateScoreGain). */
+  /** Points the CRM Health Score is projected to gain if this is fixed - null when no clean simulation exists (see estimateScoreGain). */
   projectedGain: number | null;
   rank: number;
 }
 
-// Actionable-fix framing for each finding in businessFindings.ts — same
+// Actionable-fix framing for each finding in businessFindings.ts - same
 // shared `id` as costCards.ts's CARD_COPY, which is what lets a cost card's
 // "Fix this ↓" link land on the exact matching action.
 const ACTION_COPY: Record<string, { title: string; why: (f: Finding) => string; owner: ActionOwner; timeToValue: string }> = {
@@ -67,7 +67,7 @@ const ACTION_COPY: Record<string, { title: string; why: (f: Finding) => string; 
   },
   "empty-modules": {
     title: "Hide Unused Empty Modules",
-    why: () => "Unused modules clutter the interface and confuse new team members. Hide them from each profile's module settings (Setup → Users & Control → Profiles → Module Permissions) instead of deleting — reversible, and keeps any historical data intact.",
+    why: () => "Unused modules clutter the interface and confuse new team members. Hide them from each profile's module settings (Setup → Users & Control → Profiles → Module Permissions) instead of deleting - reversible, and keeps any historical data intact.",
     owner: "You", timeToValue: "~20 mins",
   },
   "stale-deals": {
@@ -77,7 +77,7 @@ const ACTION_COPY: Record<string, { title: string; why: (f: Finding) => string; 
   },
   "unforecastable-deals": {
     title: "Fill In Missing Deal Amounts & Close Dates",
-    why: () => "You can't forecast revenue from deals with no amount or close date — this is quick per-deal cleanup.",
+    why: () => "You can't forecast revenue from deals with no amount or close date - this is quick per-deal cleanup.",
     owner: "Your sales manager", timeToValue: "~1 hour",
   },
   "stale-user-logins": {
@@ -121,7 +121,7 @@ export function computeTopActions(
   const candidates = findings.filter(f => ACTION_COPY[f.id]);
 
   // Impact tier first (High -> Medium -> Low), then Effort (Easy -> Medium ->
-  // Hard) within a tier — a Low-impact item can never outrank a High-impact
+  // Hard) within a tier - a Low-impact item can never outrank a High-impact
   // one, guaranteed by construction rather than by a same-weighted score.
   candidates.sort((a, b) => {
     if (IMPACT_ORDER[a.impact] !== IMPACT_ORDER[b.impact]) return IMPACT_ORDER[a.impact] - IMPACT_ORDER[b.impact];

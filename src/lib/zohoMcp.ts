@@ -47,7 +47,7 @@ async function mcpRequest<T>(
     return data.result;
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") {
-      throw new Error("Request timed out — MCP server did not respond within 15s");
+      throw new Error("Request timed out - MCP server did not respond within 15s");
     }
     throw err;
   } finally {
@@ -85,7 +85,7 @@ function buildExampleValue(schema: McpSchemaProperty): unknown {
 // Some MCP servers (e.g. Zoho's) group arguments by request location
 // (path_variables / query_params / body / headers) instead of a flat property
 // bag. A param can live directly under inputSchema.properties (flat) or one
-// level down inside one of those groups — this locates either shape.
+// level down inside one of those groups - this locates either shape.
 export interface ParamLocation { group: string | null; key: string }
 
 export function findParamLocations(tool: McpTool | undefined): ParamLocation[] {

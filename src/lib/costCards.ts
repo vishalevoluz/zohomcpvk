@@ -19,7 +19,7 @@ export interface CostCardResult {
   honesty: string;
 }
 
-// Business-consequence framing for each finding in businessFindings.ts — the
+// Business-consequence framing for each finding in businessFindings.ts - the
 // diagnosis/"what this is costing you" presentation. The same finding also
 // feeds priorityActions.ts's actionable-fix framing, sharing the `id` so a
 // card and its matching action can never drift apart (see "Fix this ↓" in
@@ -31,7 +31,7 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
   },
   "excessive-mandatory-fields": {
     icon: "▤", headline: "Your Sales Team Is Avoiding the CRM",
-    body: f => `${f.count} mandatory fields${f.offenders.length ? ` — concentrated in ${f.offenders.join(", ")}` : ""} push reps to skip records or enter junk data just to save.`,
+    body: f => `${f.count} mandatory fields${f.offenders.length ? ` - concentrated in ${f.offenders.join(", ")}` : ""} push reps to skip records or enter junk data just to save.`,
   },
   "no-pipeline": {
     icon: "⇥", headline: "You Cannot Forecast Your Revenue",
@@ -39,7 +39,7 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
   },
   "workflows-inactive": {
     icon: "⟳", headline: "Your Automation Is Partly Broken",
-    body: f => `${f.note ?? f.count} workflows have silently stopped running${f.offenders.length ? `, including ${f.offenders.slice(0, 3).join(", ")}` : ""} — leads and tasks may be falling through the gaps.`,
+    body: f => `${f.note ?? f.count} workflows have silently stopped running${f.offenders.length ? `, including ${f.offenders.slice(0, 3).join(", ")}` : ""} - leads and tasks may be falling through the gaps.`,
   },
   "no-blueprint": {
     icon: "◈", headline: "Your Sales Process Is Unenforceable",
@@ -49,39 +49,39 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
     icon: "◑",
     headline: "Everyone Has Admin-Level Access",
     body: f => f.note === "too-many-admins"
-      ? `${f.count} profiles${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} carry full admin access — more people than necessary can edit, export, or delete any record.`
+      ? `${f.count} profiles${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} carry full admin access - more people than necessary can edit, export, or delete any record.`
       : "All users share identical, admin-level access. This is a data security and compliance risk.",
   },
   "empty-modules": {
     icon: "⊞", headline: "You Are Running Unused Complexity",
-    body: f => `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} sit empty with zero automation — clutter that slows your team down without adding value.`,
+    body: f => `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} sit empty with zero automation - clutter that slows your team down without adding value.`,
   },
   "stale-deals": {
     icon: "⌛", headline: "Deals Are Going Cold in Your Pipeline",
-    body: f => `${f.stakeLabel ?? `${f.count} open deal${f.count !== 1 ? "s" : ""}`} haven't been touched in over 30 days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} — likely to rot unless followed up.`,
+    body: f => `${f.stakeLabel ?? `${f.count} open deal${f.count !== 1 ? "s" : ""}`} haven't been touched in over 30 days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} - likely to rot unless followed up.`,
   },
   "unforecastable-deals": {
     icon: "❔", headline: "Deals Are Missing Key Forecast Data",
-    body: f => `${f.count} open deal${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "are" : "is"} missing an amount or close date${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} — you can't forecast what you can't measure.`,
+    body: f => `${f.count} open deal${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "are" : "is"} missing an amount or close date${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} - you can't forecast what you can't measure.`,
   },
   "stale-user-logins": {
     icon: "⏱", headline: "Active Seats Nobody Is Using",
-    body: f => `${f.stakeLabel ?? `${f.count} user${f.count !== 1 ? "s" : ""}`} marked active haven't logged in for 90+ days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} — a paid seat with zero use.`,
+    body: f => `${f.stakeLabel ?? `${f.count} user${f.count !== 1 ? "s" : ""}`} marked active haven't logged in for 90+ days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} - a paid seat with zero use.`,
   },
   "duplicate-emails": {
     icon: "⧉", headline: "Duplicate Records Are Splitting Your Data",
-    body: f => `${f.count} lead/contact records share an email with another record${f.offenders.length ? `, e.g. ${f.offenders.slice(0, 3).join(", ")}` : ""} — inflating counts and splitting customer history.`,
+    body: f => `${f.count} lead/contact records share an email with another record${f.offenders.length ? `, e.g. ${f.offenders.slice(0, 3).join(", ")}` : ""} - inflating counts and splitting customer history.`,
   },
   "no-lead-source": {
     icon: "◫", headline: "You Don't Know What's Working",
-    body: f => `${f.count} lead${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "have" : "has"} no source tagged — you can't tell which marketing actually brings in business.`,
+    body: f => `${f.count} lead${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "have" : "has"} no source tagged - you can't tell which marketing actually brings in business.`,
   },
 };
 
 export interface CostCardsResult {
   shown: CostCardResult[];
   loadingIds: string[];
-  /** Findings that couldn't be confirmed clean because a required data source failed to fetch — never fold these into "no issues found". */
+  /** Findings that couldn't be confirmed clean because a required data source failed to fetch - never fold these into "no issues found". */
   uncertain: UncertainFinding[];
   overflowCount: number;
   allTriggered: CostCardResult[];
@@ -89,7 +89,7 @@ export interface CostCardsResult {
 
 const SEVERITY_ORDER: Record<CostCardSeverity, number> = { CRITICAL: 0, WARNING: 1, REVIEW: 2 };
 // Covers every finding CARD_COPY currently defines, so nothing needs the
-// "+N more" click by default — it only kicks in once more findings are added
+// "+N more" click by default - it only kicks in once more findings are added
 // than currently exist.
 const INITIAL_SHOWN_COUNT = 12;
 
@@ -118,7 +118,7 @@ export function evaluateCostCards(
 
   triggered.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
   // This list now stands in for both the old "What Is Costing You" (5 shown)
-  // and "Top Priority Actions" (a separate 5 shown) panels merged into one —
+  // and "Top Priority Actions" (a separate 5 shown) panels merged into one -
   // capping at the old single-panel number would show fewer distinct issues
   // than before the merge, so the visible count is raised to cover roughly
   // what both used to show combined.

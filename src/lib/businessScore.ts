@@ -31,14 +31,14 @@ function scoreAutomationCoverage(modules: unknown[], workflows: unknown[], ruleC
   // Measured against the lead-to-deal lifecycle modules the flow map's own
   // "automation layer" checks (Leads, Contacts, Deals, Accounts) rather than
   // every module in the org. Orgs can have hundreds of custom/junction modules
-  // that were never candidates for a workflow rule in the first place — dividing
+  // that were never candidates for a workflow rule in the first place - dividing
   // by all of them makes real coverage round down to 0 no matter how many of the
   // modules that actually matter are automated.
   const coreApiNames = automationCoverageApiNames(modules);
   if (coreApiNames.length === 0) return 20;
   const activeWorkflows = workflows.filter(isActiveWorkflow);
   // "Automated" now means workflows OR any of assignment/approval/validation/
-  // layout rules — a module fully covered by a validation rule + assignment
+  // layout rules - a module fully covered by a validation rule + assignment
   // rule but no workflow shouldn't read as unautomated just because workflows
   // happen to be the only rule type entityData fetches as a flat list.
   const covered = coreApiNames.filter(apiName => {
@@ -54,7 +54,7 @@ function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], p
   if (blueprints.length === 0) score -= 7;
   if (pipelineStageCount === 0) score -= 7;
   // A pipeline with stages sequenced after Closed Won/Lost is misconfigured
-  // even though stages technically exist — deals shouldn't have anywhere to
+  // even though stages technically exist - deals shouldn't have anywhere to
   // go once a pipeline is closed, so this can't score as if stages were fine.
   if (outOfOrderStageCount > 0) score -= 7;
   return Math.max(0, score);
@@ -62,13 +62,13 @@ function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], p
 
 function scoreAccessSecurity(profiles: unknown[], users: unknown[]): number {
   let score = 20;
-  // Deleted accounts are gone from the org and cost nothing — excluded up
+  // Deleted accounts are gone from the org and cost nothing - excluded up
   // front so a deleted user with a leftover admin-named profile or "disabled"
   // status can't affect this score, matching accessSecurityChecklist in
   // healthAuditModel.ts (which must describe the same counts this scores).
   const activeUsers = users.filter(u => !isDeletedUser(u));
   // How many USERS actually hold elevated access, not how many admin-named
-  // profile definitions exist — an org can have a single "Administrator"
+  // profile definitions exist - an org can have a single "Administrator"
   // profile assigned to every user, which the profile-catalog count alone
   // would completely miss.
   const adminCount = activeUsers.filter(isAdminProfileUser).length;
@@ -79,25 +79,25 @@ function scoreAccessSecurity(profiles: unknown[], users: unknown[]): number {
   return Math.max(0, score);
 }
 
-// mandatoryFieldCount comes from the real source — each core module's LAYOUT
-// (sections[].fields[].mandatory), fetched by useMandatoryFields.ts — not the
+// mandatoryFieldCount comes from the real source - each core module's LAYOUT
+// (sections[].fields[].mandatory), fetched by useMandatoryFields.ts - not the
 // flat Fields API, whose "mandatory"/"system_mandatory" keys can't represent
 // an admin-configured required field at all (see useMandatoryFields.ts's own
 // header comment). null means that fetch hasn't resolved yet; scored as if
 // clean rather than guessed, same as every other "not yet known" case in this
-// file — the checklist text is what tells a reader this isn't confirmed.
+// file - the checklist text is what tells a reader this isn't confirmed.
 function scoreDataArchitecture(mandatoryFieldCount: number | null, modules: unknown[]): number {
   let score = 20;
   if (mandatoryFieldCount !== null && mandatoryFieldCount > 20) score -= Math.min(15, mandatoryFieldCount - 20);
-  // A high module count isn't a problem by itself — plenty of well-run orgs
+  // A high module count isn't a problem by itself - plenty of well-run orgs
   // have 20+ modules doing real work. It only costs points when the count is
   // actually being inflated by empty/unused ones (read-only or nobody can
-  // create/edit records in them) — that's the real clutter, not the number.
+  // create/edit records in them) - that's the real clutter, not the number.
   // Deleted, internal/system pseudo-modules, and system-hidden ones (Zoho's
-  // own hidden status, not an admin's deliberate hide — see
-  // isSystemHiddenModule) are excluded entirely — none of these are real
+  // own hidden status, not an admin's deliberate hide - see
+  // isSystemHiddenModule) are excluded entirely - none of these are real
   // modules. User-hidden ones ARE kept in this count, matching the Modules
-  // KPI card in CRMOverviewDashboard.tsx — but excluded from the empty-count
+  // KPI card in CRMOverviewDashboard.tsx - but excluded from the empty-count
   // below (hidden takes precedence over empty, so a module isn't flagged
   // both ways).
   const activeModules = modules.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
@@ -109,19 +109,19 @@ function scoreDataArchitecture(mandatoryFieldCount: number | null, modules: unkn
 function scoreAutomationHealth(workflows: unknown[]): number {
   // A percentage of total, matching what the dimension's own tooltip promises
   // ("what share of your existing workflows are actually turned on"). The old
-  // formula subtracted a flat inactive count capped at 20 — any org with 20+
+  // formula subtracted a flat inactive count capped at 20 - any org with 20+
   // inactive rules (common once workflows accumulate over years) permanently
   // bottomed out at 0 regardless of how many were active, so activating more
   // workflows never moved this dimension at all.
   if (workflows.length === 0) return 20;
   const active = workflows.filter(isActiveWorkflow).length;
-  // Floored at 1 whenever at least one workflow is active — otherwise a tiny
+  // Floored at 1 whenever at least one workflow is active - otherwise a tiny
   // active ratio (e.g. 1 of 64) rounds down to the same 0/20 as having zero
   // active workflows at all, hiding that some automation genuinely exists.
   if (active === 0) return 0;
   let score = Math.max(1, Math.round(20 * (active / workflows.length)));
   // Active-ratio alone scores multiple rules racing on the same trigger, or
-  // near-duplicate clones nobody ever merged, as perfectly healthy — they're
+  // near-duplicate clones nobody ever merged, as perfectly healthy - they're
   // "on", just not well. Flat deductions (not scaled by count) so one org
   // with a handful of stray overlaps isn't punished the same as an org with
   // a systemic overlap problem, matching the flat penalties elsewhere in this
@@ -132,7 +132,7 @@ function scoreAutomationHealth(workflows: unknown[]): number {
 }
 
 // Same healthy/needs-attention/at-risk/critical banding used for the overall
-// score (80/60/40 out of 100), scaled to whatever max a given score is out of —
+// score (80/60/40 out of 100), scaled to whatever max a given score is out of -
 // so per-dimension bars (out of 20) land in the same zones as the total would.
 export function zoneForValue(score: number, max: number): HealthZone {
   const pct = max > 0 ? (score / max) * 100 : 0;
@@ -146,13 +146,13 @@ function zoneForTotal(total: number): { zone: HealthZone; verdict: string; color
   const zone = zoneForValue(total, 100);
   switch (zone) {
     // Deliberately hedged rather than "well-configured and running
-    // efficiently" — the 100-point score only covers automation coverage,
+    // efficiently" - the 100-point score only covers automation coverage,
     // process setup, access security, data structure, and workflow health.
     // It says nothing about record-level data quality (stale/duplicate
     // records, missing forecast data, etc.), which "What Is Costing You"
-    // below checks separately — a high score here must never imply those are
+    // below checks separately - a high score here must never imply those are
     // clean too.
-    case "healthy": return { zone, verdict: "Your CRM's core structure — automation coverage, process setup, access controls, data structure, and workflow health — is solid. Check the sections below for any remaining data-quality issues.", color: "#16A34A" };
+    case "healthy": return { zone, verdict: "Your CRM's core structure - automation coverage, process setup, access controls, data structure, and workflow health - is solid. Check the sections below for any remaining data-quality issues.", color: "#16A34A" };
     case "needs-attention": return { zone, verdict: "Your CRM has gaps that are likely costing you leads or time.", color: "#D97706" };
     case "at-risk": return { zone, verdict: "Significant issues detected. These are impacting your sales process.", color: "#EA580C" };
     case "critical": return { zone, verdict: "Your CRM has serious problems. Immediate action recommended.", color: "#DC2626" };
@@ -161,7 +161,7 @@ function zoneForTotal(total: number): { zone: HealthZone; verdict: string; color
 
 // pipelineStageCount comes from the real getLayouts → getPipelines chain (see
 // usePipelineStages.ts / the flow map's pill chain) rather than the generic
-// "stages" entity — no MCP server exposes a dedicated stages-listing tool, so
+// "stages" entity - no MCP server exposes a dedicated stages-listing tool, so
 // entityData.stages.items is always empty and used to permanently dock 7
 // points from Process Completeness even for orgs with a fully configured
 // pipeline. Defaults to entityData.stages.items.length for callers that
@@ -171,7 +171,7 @@ export function computeHealthScore(
   pipelineStageCount: number = entityData.stages.items.length,
   ruleCoverage: RuleCoverage | null = null,
   outOfOrderStageCount: number = 0,
-  // See scoreDataArchitecture's header comment — real layout-based count from
+  // See scoreDataArchitecture's header comment - real layout-based count from
   // useMandatoryFields.ts, not entityData.fields (the flat Fields API can't
   // represent this at all). Defaults to null ("not yet known") for existing
   // callers that haven't wired it through yet, same pattern pipelineStageCount
@@ -199,13 +199,13 @@ function withEntity(
 }
 
 // "Top Priority Actions"' projected score-effect line ("fixing this moves
-// your score from 62 to ~69") — built by re-running the REAL scoring formulas
+// your score from 62 to ~69") - built by re-running the REAL scoring formulas
 // above against a hypothetical "this finding fixed" copy of entityData,
 // rather than a hand-guessed number, so it stays traceable to the same logic
 // that produced the current score. Only implemented for findings whose
 // underlying dimension formula is a clean, invertible flat penalty; returns
 // null for findings with no clean simulation (e.g. record-quality findings
-// like stale deals or duplicate emails — businessScore.ts doesn't score
+// like stale deals or duplicate emails - businessScore.ts doesn't score
 // record-level data quality at all, so there's nothing honest to project).
 export function estimateScoreGain(
   findingId: string,
@@ -213,7 +213,7 @@ export function estimateScoreGain(
   pipelineStageCount: number,
   ruleCoverage: RuleCoverage | null,
   outOfOrderStageCount = 0,
-  // See computeHealthScore's matching param — the real layout-based count.
+  // See computeHealthScore's matching param - the real layout-based count.
   mandatoryFieldCount: number | null = null,
 ): number | null {
   const before = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount).total;
@@ -234,7 +234,7 @@ export function estimateScoreGain(
       break;
     }
     case "excessive-mandatory-fields": {
-      // No entityData.fields mutation to simulate anymore — the real count
+      // No entityData.fields mutation to simulate anymore - the real count
       // lives in useMandatoryFields.ts (layout-based), so "fixed" is simply
       // projecting that count down to the 20 threshold directly.
       if (mandatoryFieldCount === null) return null;

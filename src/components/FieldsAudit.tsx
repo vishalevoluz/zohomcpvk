@@ -91,11 +91,11 @@ function getLabel(f: ZohoField): string {
 }
 
 function getApiName(f: ZohoField): string {
-  return String(f.api_name ?? "—");
+  return String(f.api_name ?? "-");
 }
 
 function getDataType(f: ZohoField): string {
-  return String(f.data_type ?? "—");
+  return String(f.data_type ?? "-");
 }
 
 function isMandatory(f: ZohoField): boolean {
@@ -113,19 +113,19 @@ function isReadOnly(f: ZohoField): boolean {
 }
 
 function getFormula(f: ZohoField): string {
-  if (!f.formula) return "—";
+  if (!f.formula) return "-";
   if (typeof f.formula === "object" && f.formula.expression) return String(f.formula.expression);
   return "Yes";
 }
 
 function getLookup(f: ZohoField): string {
-  if (!f.lookup) return "—";
+  if (!f.lookup) return "-";
   if (typeof f.lookup === "object") {
     const mod = f.lookup.module;
-    if (mod) return String(mod.display_label ?? mod.api_name ?? "—");
+    if (mod) return String(mod.display_label ?? mod.api_name ?? "-");
     return "Yes";
   }
-  return "—";
+  return "-";
 }
 
 function getPicklistValues(f: ZohoField): PickListValue[] {
@@ -142,7 +142,7 @@ function isPicklistType(f: ZohoField): boolean {
 }
 
 function formatDateTime(iso?: string): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   try {
     return new Date(iso).toLocaleString(undefined, {
       year: "numeric", month: "short", day: "numeric",
@@ -214,7 +214,7 @@ interface Props {
   autoLoad?: boolean;
 }
 
-// The connected MCP server's canonical "list fields" tool — preferred over
+// The connected MCP server's canonical "list fields" tool - preferred over
 // whatever happens to be first in the categorized tool list so autofill is deterministic.
 const FIELDS_LIST_TOOL = "getfields";
 function pickDefaultTool(tools: McpTool[]): McpTool | undefined {
@@ -315,7 +315,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
       for (const key of requiredParams) {
         const val = (toolParams[key] ?? "").trim();
         if (!val) {
-          setError(`Required parameter "${key}" is empty — enter a value before loading.`);
+          setError(`Required parameter "${key}" is empty - enter a value before loading.`);
           return;
         }
         params[key] = val;
@@ -396,21 +396,21 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
       label: "Duplicate Fields",
       count: duplicates.length,
       severity: duplicates.length > 0 ? "danger" : "ok",
-      tip: "Fields sharing the same API name — duplicate fields cause unpredictable data overwrites and API conflicts.",
+      tip: "Fields sharing the same API name - duplicate fields cause unpredictable data overwrites and API conflicts.",
     },
     {
       key: "missing_required",
       label: "Missing Required Config",
       count: missingRequired.length,
       severity: missingRequired.length > 0 ? "danger" : "ok",
-      tip: "Mandatory picklist/multi-select fields with no values configured — users cannot fill them in, breaking record creation.",
+      tip: "Mandatory picklist/multi-select fields with no values configured - users cannot fill them in, breaking record creation.",
     },
     {
       key: "unused_custom",
       label: "Unused Custom Fields",
       count: unusedCustom.length,
       severity: unusedCustom.length > 0 ? "warn" : "ok",
-      tip: "Custom fields hidden from all views — candidates to review with your consultant. We can only see view visibility here, not whether a workflow, function, or external integration still reads or writes this field.",
+      tip: "Custom fields hidden from all views - candidates to review with your consultant. We can only see view visibility here, not whether a workflow, function, or external integration still reads or writes this field.",
     },
     {
       key: "naming_violation",
@@ -424,7 +424,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
       label: "Excessive Picklist Values",
       count: excessivePicklist.length,
       severity: excessivePicklist.length > 0 ? "warn" : "ok",
-      tip: `Picklist fields with more than ${PICKLIST_EXCESS_THRESHOLD} options — large lists are hard to use and maintain. Consider grouping values or using a lookup instead.`,
+      tip: `Picklist fields with more than ${PICKLIST_EXCESS_THRESHOLD} options - large lists are hard to use and maintain. Consider grouping values or using a lookup instead.`,
     },
   ];
 
@@ -436,7 +436,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
         <div className="fields-embedded-header">
           <span className="pane-icon">⊟</span>
           <h3 className="fields-embedded-title">
-            Fields —&nbsp;<span className="fields-embedded-module">{defaultModule}</span>
+            Fields -&nbsp;<span className="fields-embedded-module">{defaultModule}</span>
           </h3>
           {fields.length > 0 && (
             <span className="pane-count">{fields.length} field{fields.length !== 1 ? "s" : ""}</span>
@@ -469,7 +469,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
           </div>
           <div className="audit-toolbar">
             {availableTools.length === 0 && (
-              <span className="no-tools-hint">No tools found — check connection</span>
+              <span className="no-tools-hint">No tools found - check connection</span>
             )}
             {requiredParams.map(key => {
               const prop = schemaProps[key];
@@ -498,7 +498,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
                 onChange={e => setToolParams(p => ({ ...p, module: e.target.value }))}
                 onKeyDown={e => e.key === "Enter" && loadFields()}
                 placeholder="Module (e.g. Leads)"
-                title="Zoho CRM module API name — e.g. Leads, Contacts, Deals"
+                title="Zoho CRM module API name - e.g. Leads, Contacts, Deals"
                 list="zoho-modules"
                 style={{ width: 160 }}
               />
@@ -597,7 +597,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
             </div>
 
             {displayed.length === 0 ? (
-              <div className="empty-state">No {filter.replace(/_/g, " ")} found — this is a good sign!</div>
+              <div className="empty-state">No {filter.replace(/_/g, " ")} found - this is a good sign!</div>
             ) : (
               <div className="table-scroll">
                 <table className="modules-table">
@@ -607,11 +607,11 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
                       <th><span className="th-tip" data-tooltip-below="The API name used in Zoho API calls and Deluge scripts (e.g. First_Name)">API Name<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The field data type (e.g. text, picklist, lookup, formula, datetime)">Data Type<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether this field must be filled in before a record can be saved">Mandatory<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Whether this field enforces uniqueness — no two records can share the same value">Unique<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Whether this field enforces uniqueness - no two records can share the same value">Unique<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether this field can only be read, not edited by users">Read Only<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The Deluge expression used to auto-calculate this field's value (formula fields only)">Formula<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The related module this lookup field points to (lookup/relation fields only)">Lookup<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="Number of available picklist options — hover over the count to see values (picklist/multi-select fields only)">Picklist Values<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="Number of available picklist options - hover over the count to see values (picklist/multi-select fields only)">Picklist Values<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Audit issues detected for this field">Findings<span className="th-info">i</span></span></th>
                     </tr>
                   </thead>
@@ -669,7 +669,7 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
                                   {picklistCount}
                                 </span>
                               ) : (
-                                <span className="cell-mono" style={{ color: "var(--muted)" }}>—</span>
+                                <span className="cell-mono" style={{ color: "var(--muted)" }}>-</span>
                               )}
                             </td>
                             <td>
@@ -678,11 +678,11 @@ export default function FieldsAudit({ config, tools, allTools = [], onLog, embed
                                   ? <span className="audit-tag tag-ok" title="No issues detected for this field">clean</span>
                                   : tags.map(tag => (
                                       <span key={tag} className={`audit-tag tag-fn-${tag === "duplicate" || tag === "missing_required" ? "missing_ref" : tag === "naming_violation" ? "invalid_binding" : "unused"}`} title={
-                                        tag === "duplicate"           ? "Another field shares this API name — duplicates cause data conflicts in API calls and reports." :
-                                        tag === "missing_required"    ? "This mandatory picklist field has no values defined — users cannot fill it in, blocking record saves." :
-                                        tag === "unused_custom"       ? "This custom field is hidden from all views — a candidate to review with your consultant. We can only confirm view visibility here, not whether a workflow, function, or external integration still depends on it." :
+                                        tag === "duplicate"           ? "Another field shares this API name - duplicates cause data conflicts in API calls and reports." :
+                                        tag === "missing_required"    ? "This mandatory picklist field has no values defined - users cannot fill it in, blocking record saves." :
+                                        tag === "unused_custom"       ? "This custom field is hidden from all views - a candidate to review with your consultant. We can only confirm view visibility here, not whether a workflow, function, or external integration still depends on it." :
                                         tag === "naming_violation"    ? "API name doesn't follow Zoho convention (PascalCase: starts with capital, only letters/numbers/underscores)." :
-                                        tag === "excessive_picklist"  ? `Picklist has more than ${PICKLIST_EXCESS_THRESHOLD} values — large lists are hard to use. Consider a lookup field instead.` :
+                                        tag === "excessive_picklist"  ? `Picklist has more than ${PICKLIST_EXCESS_THRESHOLD} values - large lists are hard to use. Consider a lookup field instead.` :
                                         tag
                                       }>{tag.replace(/_/g, " ")}</span>
                                     ))}

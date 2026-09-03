@@ -22,7 +22,7 @@ interface Props {
 }
 
 const SEVERITY_TOOLTIPS: Record<string, string> = {
-  CRITICAL: "Urgent — this is actively costing you money or exposing you to risk right now.",
+  CRITICAL: "Urgent - this is actively costing you money or exposing you to risk right now.",
   WARNING: "A real gap in your setup that should be fixed soon, before it gets worse.",
   REVIEW: "Worth a look when you have time, but not urgent.",
 };
@@ -30,13 +30,13 @@ const SEVERITY_TOOLTIPS: Record<string, string> = {
 const IMPACT_TOOLTIPS: Record<string, string> = {
   High: "Fixing this meaningfully improves revenue, risk, or how efficiently your team works.",
   Medium: "Fixing this helps, but the business impact is moderate.",
-  Low: "Fixing this is minor cleanup — nice to have, not a priority.",
+  Low: "Fixing this is minor cleanup - nice to have, not a priority.",
 };
 
 const EFFORT_TOOLTIPS: Record<string, string> = {
   Easy: "A quick change your Zoho admin or consultant can make in one sitting.",
   Medium: "Takes some planning and setup time, but isn't a major project.",
-  Hard: "A bigger project — expect it to take real time and testing to get right.",
+  Hard: "A bigger project - expect it to take real time and testing to get right.",
 };
 
 function SectionTitle({ text, tooltip }: { text: string; tooltip: string }) {
@@ -50,7 +50,7 @@ function SectionTitle({ text, tooltip }: { text: string; tooltip: string }) {
   );
 }
 
-// One card per finding — "what this is costing you" (from costCards.ts) and,
+// One card per finding - "what this is costing you" (from costCards.ts) and,
 // wherever the same finding id has an actionable-fix framing (priorityActions.ts),
 // "how to fix it" inline in the same card, instead of two separate lists a
 // reader has to cross-reference by hand. Both framings already come from the
@@ -82,7 +82,7 @@ function IssueCard({
           <div className="issue-fix-title-row">
             <span className="issue-fix-label">Fix</span>
             <span className="issue-fix-title">{action.title}</span>
-            {action.quickWin && <span className="quick-win-badge" data-tooltip="High impact, easy to do — the best return for the least effort.">Quick Win</span>}
+            {action.quickWin && <span className="quick-win-badge" data-tooltip="High impact, easy to do - the best return for the least effort.">Quick Win</span>}
           </div>
           <div className="priority-action-badges">
             <span className={`impact-badge ${action.impact.toLowerCase()}`} data-tooltip={IMPACT_TOOLTIPS[action.impact]}>
@@ -111,7 +111,7 @@ function IssueCard({
           )}
           {action?.projectedGain !== null && action?.projectedGain !== undefined && action.projectedGain > 0 && (
             <p className="priority-action-projected">
-              Fixing this moves your CRM Health Score from {currentScore} to ~{Math.min(100, currentScore + action.projectedGain)} points — a {action.projectedGain}-point gain.
+              Fixing this moves your CRM Health Score from {currentScore} to ~{Math.min(100, currentScore + action.projectedGain)} points - a {action.projectedGain}-point gain.
             </p>
           )}
           <div className="priority-action-detail-block">
@@ -120,7 +120,7 @@ function IssueCard({
           </div>
           {action && (
             <p className="priority-action-detail-owner">
-              Best handled by <strong>{action.owner}</strong> — usually takes about {action.timeToValue}.
+              Best handled by <strong>{action.owner}</strong> - usually takes about {action.timeToValue}.
             </p>
           )}
         </div>
@@ -135,14 +135,14 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   const [issuesExpanded, setIssuesExpanded] = useState(false);
   const [expandedIssueId, setExpandedIssueId] = useState<string | null>(null);
 
-  // Only one card's detail is ever open at a time — clicking "View Details"
+  // Only one card's detail is ever open at a time - clicking "View Details"
   // on another card closes whichever was previously expanded.
   function toggleIssueDetail(id: string) {
     setExpandedIssueId(prev => (prev === id ? null : id));
   }
 
   // Same "fetch settled, not necessarily successful" gate businessFindings.ts
-  // already uses (pipelineResolved there) — the Health Score gauge must not
+  // already uses (pipelineResolved there) - the Health Score gauge must not
   // treat itself as final while this separate getLayouts -> getPipelines
   // fetch is still mid-flight, or it renders a premature score built on a
   // still-empty pipelineStageCount (see buildHealthAuditModel's
@@ -159,7 +159,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
   );
   // Both panels evaluate the exact same Finding[] (see businessFindings.ts's
   // header comment), so every actionable id here is guaranteed to also be a
-  // cost card — this map only ever enriches a card, never orphans an action.
+  // cost card - this map only ever enriches a card, never orphans an action.
   const actionById = new Map(priorityResult.allActions.map(a => [a.id, a]));
   const allLowSeverity = costCards.allTriggered.length > 0 && costCards.allTriggered.every(c => c.severity === "REVIEW");
 
@@ -190,7 +190,7 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
       <div className="business-view-section">
         <SectionTitle
           text="What's Costing You"
-          tooltip="What's actually costing you money or risk right now, ranked by severity — with the fix, who owns it, and how long it takes, wherever a clear fix exists."
+          tooltip="What's actually costing you money or risk right now, ranked by severity - with the fix, who owns it, and how long it takes, wherever a clear fix exists."
         />
         <div className="cost-cards-grid">
           {costCards.shown.map(card => (
@@ -210,15 +210,15 @@ export default function BusinessView({ entityData, recordSamples, pipelineStages
         {costCards.loadingIds.length === 0 && costCards.shown.length === 0 && (
           costCards.uncertain.length > 0 ? (
             <p className="business-view-hint business-view-hint-warn">
-              Couldn&apos;t verify {costCards.uncertain.length} check{costCards.uncertain.length !== 1 ? "s" : ""} — {costCards.uncertain.map(u => u.reason).join("; ")}. No issues were found in what we <em>could</em> check, but this isn&apos;t a confirmed all-clear.
+              Couldn&apos;t verify {costCards.uncertain.length} check{costCards.uncertain.length !== 1 ? "s" : ""} - {costCards.uncertain.map(u => u.reason).join("; ")}. No issues were found in what we <em>could</em> check, but this isn&apos;t a confirmed all-clear.
             </p>
           ) : (
-            <p className="business-view-hint">No urgent issues detected right now — nice work.</p>
+            <p className="business-view-hint">No urgent issues detected right now - nice work.</p>
           )
         )}
         {allLowSeverity && costCards.shown.length > 0 && (
           <p className="business-view-hint priority-actions-low-impact-note">
-            No urgent issues found — here are some optimizations worth a look when you have time.
+            No urgent issues found - here are some optimizations worth a look when you have time.
           </p>
         )}
         {costCards.overflowCount > 0 && !issuesExpanded && (

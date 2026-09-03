@@ -83,7 +83,7 @@ function pickModulesTool(tools: McpTool[]): McpTool | undefined {
 }
 
 // getModuleById is looked up directly on allTools by name, not through the
-// "fields" keyword category — this section is intentionally NOT wired to a
+// "fields" keyword category - this section is intentionally NOT wired to a
 // dedicated fields-listing tool.
 function normalizeName(n: string): string {
   return n.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -166,13 +166,13 @@ function extractFieldsFromModuleDetail(result: unknown): ZohoField[] {
 }
 
 function getFieldLabel(f: ZohoField): string { return String(f.field_label ?? f.display_label ?? f.api_name ?? "Unknown"); }
-function getFieldApiName(f: ZohoField): string { return String(f.api_name ?? "—"); }
-function getFieldDataType(f: ZohoField): string { return String(f.data_type ?? "—"); }
+function getFieldApiName(f: ZohoField): string { return String(f.api_name ?? "-"); }
+function getFieldDataType(f: ZohoField): string { return String(f.data_type ?? "-"); }
 // getModuleById's field entries carry no reliable "is this required in the
-// UI" signal — "mandatory" here (like the flat Fields API) is at best a
+// UI" signal - "mandatory" here (like the flat Fields API) is at best a
 // system-required marker, not what an admin configured on the module's
 // layout. Real requiredness only lives on the layout itself (sections[].
-// fields[].mandatory), fetched lazily per module below — this flat check is
+// fields[].mandatory), fetched lazily per module below - this flat check is
 // now only the fallback for when that layout fetch hasn't resolved yet.
 function isFieldMandatoryFallback(f: ZohoField): boolean { return f.mandatory === true || f.system_mandatory === true; }
 function isFieldReadOnly(f: ZohoField): boolean { return f.read_only === true || f.field_read_only === true; }
@@ -234,11 +234,11 @@ export default function FieldsExplorer({ config, allTools, onLog }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [moduleFields, setModuleFields] = useState<Record<string, ModuleFieldsState>>({});
   // Real mandatory-field names per module, fetched from that module's layout
-  // (not the module-detail response) the first time its row is expanded —
+  // (not the module-detail response) the first time its row is expanded -
   // lazy, so exploring one module doesn't fire a layout call for every
   // module the sequential preload above already touched.
   const [layoutMandatory, setLayoutMandatory] = useState<Record<string, LayoutMandatoryState>>({});
-  const [loadedThrough, setLoadedThrough] = useState(0); // sequential preload cursor — one module at a time
+  const [loadedThrough, setLoadedThrough] = useState(0); // sequential preload cursor - one module at a time
   const hasFetchedModules = useRef(false);
   const inFlightIndex = useRef(-1);
 
@@ -265,7 +265,7 @@ export default function FieldsExplorer({ config, allTools, onLog }: Props) {
         errorMessage: mods.length === 0 ? "No modules found" : undefined,
         durationMs: Date.now() - start, timestamp: new Date(),
       });
-      if (mods.length === 0) setModulesError("No modules found — check the connected modules tool.");
+      if (mods.length === 0) setModulesError("No modules found - check the connected modules tool.");
     } catch (e) {
       setModulesError(e instanceof Error ? e.message : "Failed to load modules");
     } finally {
@@ -369,9 +369,9 @@ export default function FieldsExplorer({ config, allTools, onLog }: Props) {
           )}
         </div>
         <div className="audit-toolbar">
-          {moduleTools.length === 0 && <span className="no-tools-hint">No modules tool found — check connection</span>}
+          {moduleTools.length === 0 && <span className="no-tools-hint">No modules tool found - check connection</span>}
           {moduleTools.length > 0 && !moduleByIdTool && (
-            <span className="no-tools-hint">No getModuleById-style tool found — check connection</span>
+            <span className="no-tools-hint">No getModuleById-style tool found - check connection</span>
           )}
           <button onClick={handleReloadAll} disabled={modulesLoading || moduleTools.length === 0} className="btn-connect">
             {modulesLoading ? <><span className="spinner" /> Loading…</> : "↺ Reload All"}
@@ -423,10 +423,10 @@ export default function FieldsExplorer({ config, allTools, onLog }: Props) {
                     {!moduleByIdTool && <p className="audit-empty-sub">No getModuleById-style tool available.</p>}
                     {state?.status === "error" && <p className="form-error">⚠ {state.error}</p>}
                     {!layoutsTool && (
-                      <p className="audit-empty-sub">No getLayouts-style tool found — Mandatory falls back to the (unreliable) module-detail flag.</p>
+                      <p className="audit-empty-sub">No getLayouts-style tool found - Mandatory falls back to the (unreliable) module-detail flag.</p>
                     )}
                     {layoutMandatory[apiName]?.status === "error" && (
-                      <p className="audit-empty-sub">Couldn&apos;t fetch this module&apos;s layout — Mandatory falls back to the (unreliable) module-detail flag.</p>
+                      <p className="audit-empty-sub">Couldn&apos;t fetch this module&apos;s layout - Mandatory falls back to the (unreliable) module-detail flag.</p>
                     )}
                     {state?.status === "loaded" && state.fields.length === 0 && (
                       <p className="audit-empty-sub">No fields found in the module detail response.</p>
@@ -439,7 +439,7 @@ export default function FieldsExplorer({ config, allTools, onLog }: Props) {
                               <th>Field Label</th>
                               <th>API Name</th>
                               <th>Data Type</th>
-                              <th><span className="th-tip" data-tooltip-below="From this module's layout — the real, admin-configured required-field flag, not the module metadata's own (unreliable) mandatory marker">Mandatory<span className="th-info">i</span></span></th>
+                              <th><span className="th-tip" data-tooltip-below="From this module's layout - the real, admin-configured required-field flag, not the module metadata's own (unreliable) mandatory marker">Mandatory<span className="th-info">i</span></span></th>
                               <th>Read Only</th>
                             </tr>
                           </thead>

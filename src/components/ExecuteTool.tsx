@@ -65,7 +65,7 @@ export default function ExecuteTool({ config, tools, selectedTool, onLog }: Prop
       <div className="field">
         <label className="field-label">Tool</label>
         <select value={toolName} onChange={e => onToolChange(e.target.value)} className="select-tool">
-          <option value="">— select a tool —</option>
+          <option value="">- select a tool -</option>
           {tools.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
         </select>
         {currentTool?.description && (
@@ -78,7 +78,7 @@ export default function ExecuteTool({ config, tools, selectedTool, onLog }: Prop
           <p className="field-label">Parameters</p>
           {Object.entries(currentTool.inputSchema.properties).flatMap(([k, v]) => {
             // Some servers group params by request location (path_variables/query_params/
-            // body/headers) instead of a flat bag — show the nested params, not the group.
+            // body/headers) instead of a flat bag - show the nested params, not the group.
             if (v.type === "object" && v.properties) {
               return Object.entries(v.properties).map(([nk, nv]) => (
                 <div key={`${k}.${nk}`} className="schema-row">

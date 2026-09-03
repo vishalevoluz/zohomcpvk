@@ -6,7 +6,7 @@ export function isActiveWorkflow(item: unknown): boolean {
   if (!item || typeof item !== "object") return true;
   const r = item as Record<string, unknown>;
   // Zoho's workflow rules API nests it as status: { active: boolean } rather than
-  // a flat string/boolean — check that shape first, then fall back to the flatter
+  // a flat string/boolean - check that shape first, then fall back to the flatter
   // shapes other MCP servers/entities may use.
   if (r.status && typeof r.status === "object") {
     const active = (r.status as Record<string, unknown>).active;
@@ -14,7 +14,7 @@ export function isActiveWorkflow(item: unknown): boolean {
   }
   if (r.active === false || r.enabled === false) return false;
   // Case-insensitive: a flat status of "inactive"/"disabled"/"false" in any
-  // casing (e.g. "Inactive", "INACTIVE") must be caught here — an exact-case
+  // casing (e.g. "Inactive", "INACTIVE") must be caught here - an exact-case
   // match previously let a lowercase "inactive" status fall through to the
   // default-active return below, showing a genuinely off workflow as live.
   const s = String(r.status ?? "").toLowerCase();
@@ -48,13 +48,13 @@ export function workflowModuleLabel(item: unknown): string {
   return String(mod);
 }
 
-// module::trigger-event signature a workflow fires on — same shape
+// module::trigger-event signature a workflow fires on - same shape
 // WorkflowAudit.tsx's "Conflicting Workflows" finding already groups by, kept
 // here so the Health Score's Workflow Health checklist can report the same
-// count instead of drifting from the audit table. "—" is the not-found
+// count instead of drifting from the audit table. "-" is the not-found
 // fallback for both halves, matching workflowModuleLabel's own default.
 function workflowTriggerKey(item: unknown): string {
-  if (!item || typeof item !== "object") return "—::—";
+  if (!item || typeof item !== "object") return "-::-";
   const r = item as Record<string, unknown>;
   const executeWhen = r.execute_when as Record<string, unknown> | undefined;
   let trigger: string;
@@ -62,20 +62,20 @@ function workflowTriggerKey(item: unknown): string {
     trigger = String(executeWhen.type).replace(/_/g, " ");
   } else {
     const t = r.trigger_on ?? r.trigger ?? r.triggers;
-    trigger = !t ? "—" : Array.isArray(t) ? t.join(", ") : String(t);
+    trigger = !t ? "-" : Array.isArray(t) ? t.join(", ") : String(t);
   }
-  return `${workflowModuleLabel(r) || "—"}::${trigger}`;
+  return `${workflowModuleLabel(r) || "-"}::${trigger}`;
 }
 
 // Active workflows that share the exact same module + trigger event as at
-// least one other active workflow — multiple rules racing to fire on the same
+// least one other active workflow - multiple rules racing to fire on the same
 // event, in an undefined order, every time a matching record is touched.
 // Inactive workflows can't race with anything, so they're excluded up front.
 export function overlappingWorkflows(workflows: unknown[]): unknown[] {
   const active = workflows.filter(isActiveWorkflow);
   const triggerCounts = new Map<string, number>();
-  active.forEach(w => { const k = workflowTriggerKey(w); if (k !== "—::—") triggerCounts.set(k, (triggerCounts.get(k) ?? 0) + 1); });
-  return active.filter(w => { const k = workflowTriggerKey(w); return k !== "—::—" && (triggerCounts.get(k) ?? 0) > 1; });
+  active.forEach(w => { const k = workflowTriggerKey(w); if (k !== "-::-") triggerCounts.set(k, (triggerCounts.get(k) ?? 0) + 1); });
+  return active.filter(w => { const k = workflowTriggerKey(w); return k !== "-::-" && (triggerCounts.get(k) ?? 0) > 1; });
 }
 
 function normalizeConditionList(list: unknown[]): string[] {
@@ -94,7 +94,7 @@ function normalizeConditionList(list: unknown[]): string[] {
   }).sort();
 }
 
-// Order-independent "field|comparator|value" list — same normalization
+// Order-independent "field|comparator|value" list - same normalization
 // WorkflowAudit.tsx's getCriteriaConditions uses, kept in sync so both places
 // agree on what counts as identical criteria.
 function workflowCriteriaSignature(item: unknown): string[] {
@@ -128,7 +128,7 @@ function workflowActionsSignature(item: unknown): string[] {
 }
 
 // Full functional identity: module + trigger + criteria + actions. Two rules
-// with this key equal behave identically regardless of name — name is
+// with this key equal behave identically regardless of name - name is
 // deliberately excluded since a cloned-and-relabeled rule is exactly the case
 // this needs to catch, not exempt.
 function workflowContentKey(item: unknown): string {
@@ -140,7 +140,7 @@ function workflowContentKey(item: unknown): string {
 }
 
 // Workflows that are functional duplicates: identical module + trigger +
-// criteria + actions. Name is intentionally not part of the signature — two
+// criteria + actions. Name is intentionally not part of the signature - two
 // rules cloned from one another and left with different labels are still the
 // same automation running twice, which is exactly what this should surface.
 export function identicalWorkflows(workflows: unknown[]): unknown[] {
@@ -149,7 +149,58 @@ export function identicalWorkflows(workflows: unknown[]): unknown[] {
   return workflows.filter(w => (counts.get(workflowContentKey(w)) ?? 0) > 1);
 }
 
-// "Consolidate the overlapping/duplicate group into one rule" projected —
+// Same match as identicalWorkflows above, but grouped by the shared content
+// key instead of flattened into one "is a duplicate" list - callers that need
+// to say *which* other rule(s) a given workflow duplicates (not just that it
+// has one) read the group here rather than re-deriving it. A workflow with
+// empty criteria and no actions groups with every other empty/no-op rule on
+// the same module+trigger - that's a real (if trivial) functional duplicate,
+// not a bug, but it's exactly the case a caller most needs to explain rather
+// than just flag.
+export function identicalWorkflowGroups(workflows: unknown[]): unknown[][] {
+  const byKey = new Map<string, unknown[]>();
+  workflows.forEach(w => {
+    const k = workflowContentKey(w);
+    const arr = byKey.get(k) ?? [];
+    arr.push(w);
+    byKey.set(k, arr);
+  });
+  return [...byKey.values()].filter(g => g.length > 1);
+}
+
+// Same grouping overlappingWorkflows filters on (active workflows sharing a
+// module+trigger signature), returned as groups so a caller can list which
+// other active rule(s) race on the same event.
+export function overlappingWorkflowGroups(workflows: unknown[]): unknown[][] {
+  const active = workflows.filter(isActiveWorkflow);
+  const byKey = new Map<string, unknown[]>();
+  active.forEach(w => {
+    const k = workflowTriggerKey(w);
+    if (k === "-::-") return;
+    const arr = byKey.get(k) ?? [];
+    arr.push(w);
+    byKey.set(k, arr);
+  });
+  return [...byKey.values()].filter(g => g.length > 1);
+}
+
+// Field names referenced by a workflow's criteria (e.g. ["Email", "Lead_Source"])
+// - the human-readable half of workflowCriteriaSignature's "field|comparator|value"
+// strings, for surfacing *what condition* a duplicate/overlap match was found on
+// rather than just asserting the rules are identical/overlapping.
+export function workflowCriteriaFieldNames(item: unknown): string[] {
+  return [...new Set(workflowCriteriaSignature(item).map(c => c.split("|")[0]).filter(Boolean))];
+}
+
+// Just the trigger-event half of workflowTriggerKey's "module::trigger" join
+// key, for display next to workflowModuleLabel rather than the internal key.
+export function workflowTriggerLabel(item: unknown): string {
+  const key = workflowTriggerKey(item);
+  const idx = key.indexOf("::");
+  return idx === -1 ? key : key.slice(idx + 2);
+}
+
+// "Consolidate the overlapping/duplicate group into one rule" projected -
 // used by businessScore.ts's estimateScoreGain to simulate the real fix
 // (merge, don't just disable) rather than guessing a flat point value.
 export function withoutOverlappingWorkflows(workflows: unknown[]): unknown[] {
@@ -157,7 +208,7 @@ export function withoutOverlappingWorkflows(workflows: unknown[]): unknown[] {
   return workflows.filter(w => {
     if (!isActiveWorkflow(w)) return true;
     const k = workflowTriggerKey(w);
-    if (k === "—::—") return true;
+    if (k === "-::-") return true;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -178,7 +229,7 @@ export type BlueprintStatus = "active" | "inactive" | "draft";
 
 // Blueprint status is its own flat "Active" | "Inactive" | "Draft" string (or
 // a boolean `active`), not the nested { active: boolean } shape workflows use
-// — and unlike isActiveWorkflow, "Draft" must NOT collapse into "active" by
+// - and unlike isActiveWorkflow, "Draft" must NOT collapse into "active" by
 // default: an unpublished blueprint enforces nothing yet, so treating it as
 // active would overstate real process coverage (see the flow map's Deals
 // blueprint node in flowMapModel.ts, which has the same exact-status check).
@@ -194,7 +245,7 @@ export function blueprintStatus(item: unknown): BlueprintStatus {
 }
 
 // Mirrors the generated_type-based standard/custom split ModulesAudit.tsx
-// uses for modules — Zoho layouts carry the same generated_type metadata
+// uses for modules - Zoho layouts carry the same generated_type metadata
 // field when present. Falls back to name matching since not every MCP server
 // version returns generated_type for layouts: the org's original layout is
 // conventionally named "Standard" and every other layout was hand-created.
@@ -227,7 +278,7 @@ export function userProfileName(user: unknown): string {
 }
 
 // Counting admin-profile PROFILES (isAdminProfile over the profile catalog)
-// answers a different question than counting admin-profile USERS — an org
+// answers a different question than counting admin-profile USERS - an org
 // can have just one "Administrator" profile definition while assigning it to
 // every single user. Team Security cares about the latter: how many people
 // actually hold elevated access, regardless of how many profile definitions
@@ -239,12 +290,12 @@ export function isAdminProfileUser(user: unknown): boolean {
 export type UserStatusBucket = "active" | "inactive" | "deleted";
 
 // Three-way classification matching what the Full User List's status badge
-// already reads correctly — "deleted" is its own bucket (a removed account
+// already reads correctly - "deleted" is its own bucket (a removed account
 // that doesn't consume a license) and must never collapse into "inactive"
 // (a disabled-but-still-licensed seat), since Team Security and the Active
 // Users KPI need to treat those two very differently. Anything that isn't
 // literally "active" or "deleted" (e.g. "inactive", "disabled",
-// "deactivated" — Zoho MCP servers aren't consistent on the exact word)
+// "deactivated" - Zoho MCP servers aren't consistent on the exact word)
 // defaults to "inactive" rather than silently counting as active.
 export function userStatusBucket(item: unknown): UserStatusBucket {
   if (!item || typeof item !== "object") return "active";
@@ -266,12 +317,12 @@ export function isActiveUser(item: unknown): boolean {
 
 // Case-insensitive and deleted-aware: Zoho's Users API returns a lowercase
 // "active"/"inactive" status string on some servers and "Disabled"/"Deleted"
-// on others — an exact-case match against "Inactive" (or one that didn't
+// on others - an exact-case match against "Inactive" (or one that didn't
 // separate "deleted" out) let every real inactive/deleted user fall through
 // as active, which fed both the Active Users count and the Team Security
 // "no inactive licenses" claim being wrong in exactly opposite directions
-// from the truth. Deleted accounts are deliberately excluded here — they
-// don't hold a license — see isDeletedUser for that bucket.
+// from the truth. Deleted accounts are deliberately excluded here - they
+// don't hold a license - see isDeletedUser for that bucket.
 export function isInactiveUser(item: unknown): boolean {
   return userStatusBucket(item) === "inactive";
 }
@@ -295,7 +346,7 @@ export function moduleApiName(m: unknown): string {
 // A module can still show up in the metadata list for a short window after
 // deletion. recycle_bin_on_delete only appears on real, fully-populated
 // module records, so its presence is what confirms `status` is trustworthy
-// here — only then do we treat "deleted" as a reason to exclude the module.
+// here - only then do we treat "deleted" as a reason to exclude the module.
 export function isDeletedModule(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
   const r = item as Record<string, unknown>;
@@ -304,7 +355,7 @@ export function isDeletedModule(item: unknown): boolean {
 }
 
 // `status` ("visible" / "user_hidden" / "system_hidden") is Zoho's own
-// authoritative visibility concept and takes priority whenever present —
+// authoritative visibility concept and takes priority whenever present -
 // verified against a live org where 68 modules had status "visible" but
 // viewable:false (mostly subform-linked fields) and would have been
 // wrongly excluded by treating viewable/show_as_tab as hidden signals.
@@ -321,7 +372,7 @@ export function isHiddenModule(item: unknown): boolean {
 // Narrower than isHiddenModule: only Zoho's own "system_hidden" status, not an
 // admin's deliberate "user_hidden" customization. A system-hidden module is
 // hidden by Zoho itself (not a real module a business owner ever chose to
-// use), so — unlike a merely user-hidden one — it shouldn't count toward "how
+// use), so - unlike a merely user-hidden one - it shouldn't count toward "how
 // many modules does this org have" any more than an internal pseudo-module
 // does. See isInternalModule for the same reasoning applied to a different
 // class of not-really-a-module entries.
@@ -333,7 +384,7 @@ export function isSystemHiddenModule(item: unknown): boolean {
 
 // Zoho auto-generates a standalone "module" entry for every file/image-upload
 // field, plus internal bookkeeping entities (Locking_Information__s,
-// Functions__s, Scoring_Rules__s, Entity_Scores__s, …) — all sharing an
+// Functions__s, Scoring_Rules__s, Entity_Scores__s, …) - all sharing an
 // api_name ending in "__s". Verified against a live org: these accounted for
 // 81 of that org's 323 raw module records, none of which appear anywhere a
 // user would recognize as a real module (Zoho's own Setup > Modules list
@@ -352,7 +403,7 @@ function isReadOnlyModule(r: Record<string, unknown>): boolean {
 }
 
 // "Unused" here means api access disabled, or nobody can create/edit records
-// in it while it's still technically viewable — same definition ModulesAudit.tsx
+// in it while it's still technically viewable - same definition ModulesAudit.tsx
 // and CRMOverviewDashboard.tsx use, so "Empty" means the same thing everywhere.
 export function isEmptyModule(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
@@ -362,13 +413,13 @@ export function isEmptyModule(item: unknown): boolean {
 
 const WORKFLOW_EXEMPT_MODULE_NAMES = new Set(["Products", "Price_Books"]);
 
-// Some modules are reference/catalog data by design — a product catalog or
+// Some modules are reference/catalog data by design - a product catalog or
 // price book is maintained by hand or synced from an external system, never
 // something a workflow rule (which only fires on record create/edit) would
 // touch. Counting these against automation-coverage scoring would penalize
 // the mere existence of the module, not a real process gap. Read-only modules
 // (api access disabled, or nobody can create/edit records in them) are exempt
-// for the same reason regardless of name — there's no create/edit event for a
+// for the same reason regardless of name - there's no create/edit event for a
 // workflow to ever fire on.
 export function isWorkflowExemptModule(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
@@ -400,14 +451,14 @@ export function workflowReferencesModule(workflow: unknown, apiName: string): bo
 }
 
 // Blueprint list items carry the same shape of module reference as workflows
-// (a "module" key, string or {api_name}) — reuse the same matching logic.
+// (a "module" key, string or {api_name}) - reuse the same matching logic.
 export function blueprintsForModule(blueprints: unknown[], apiName: string): unknown[] {
   return blueprints.filter(bp => workflowReferencesModule(bp, apiName));
 }
 
 // Per-module rule counts for the automation types that require a `module`
 // query param per call (assignment/approval/validation/layout rules), plus a
-// flat org-level count for schedules — fetched separately from entityData by
+// flat org-level count for schedules - fetched separately from entityData by
 // useRuleCoverage.ts since they can't ride along with the flat entity fetches.
 // Lives here (rather than in businessScore.ts) so both businessScore.ts and
 // flowMapModel.ts can share the same "what counts as automation" definition
@@ -421,12 +472,12 @@ export interface RuleCoverage {
 }
 
 // The per-module rule-coverage buckets that count as "this module has
-// automation" — schedules are excluded since they're an org-level concept,
+// automation" - schedules are excluded since they're an org-level concept,
 // not tied to a specific module.
 export const PER_MODULE_COVERAGE_KEYS: (keyof Pick<RuleCoverage, "validation" | "layout" | "assignment" | "approval">)[] =
   ["validation", "layout", "assignment", "approval"];
 
-// Total assignment/approval/validation/layout rules configured for a module —
+// Total assignment/approval/validation/layout rules configured for a module -
 // the same broadened "has automation" signal used by the CRM Health Score's
 // Automation Coverage dimension, so the flow map's per-module Automation nodes
 // agree with it instead of only counting workflows.
@@ -436,7 +487,7 @@ export function ruleCoverageCount(ruleCoverage: RuleCoverage | null, apiName: st
 }
 
 // Per-type breakdown (validation/layout/assignment/approval counts) for one
-// module — lets callers show exactly which rule types were found instead of
+// module - lets callers show exactly which rule types were found instead of
 // just a combined total, e.g. the flow map's Automation node tooltip.
 export function ruleCoverageBreakdown(ruleCoverage: RuleCoverage | null, apiName: string): Record<typeof PER_MODULE_COVERAGE_KEYS[number], number> {
   return {
@@ -447,7 +498,7 @@ export function ruleCoverageBreakdown(ruleCoverage: RuleCoverage | null, apiName
   };
 }
 
-// Modules with zero references from any workflow or blueprint — the
+// Modules with zero references from any workflow or blueprint - the
 // heuristic "probably unused" shortlist shared by the empty-modules finding
 // and by useModuleRecordCounts.ts (which uses it to bound how many
 // getRecordCount calls it makes to a handful, not one per module in the org).
@@ -464,7 +515,7 @@ export function unreferencedModules(modules: unknown[], workflows: unknown[], bl
 // ─── Deal-quality predicates ────────────────────────────────────────────────
 // Zoho's "Stage" field names vary by org (custom pipelines rename stages
 // freely), so "closed" is matched by keyword rather than an exact stage
-// list — every org's closed-won/closed-lost stage name contains "closed".
+// list - every org's closed-won/closed-lost stage name contains "closed".
 function dealStage(deal: unknown): string {
   if (!deal || typeof deal !== "object") return "";
   const r = deal as Record<string, unknown>;
@@ -509,7 +560,7 @@ export function dealAmount(deal: unknown): number | null {
 }
 
 // Every Deal record Zoho returns carries its own "$currency_symbol" system
-// field (e.g. "$", "₹") — reading it straight off the record is more
+// field (e.g. "$", "₹") - reading it straight off the record is more
 // reliable than a separate org-details call, which depends on a tool
 // (getOrganizations) this MCP connection may not have authorized at all.
 export function dealCurrencySymbol(deal: unknown): string | null {
@@ -540,7 +591,7 @@ export function hasNoLeadSource(lead: unknown): boolean {
 }
 
 // ─── User activity ──────────────────────────────────────────────────────────
-// Zoho's Users API field for this varies by version/server — checked
+// Zoho's Users API field for this varies by version/server - checked
 // defensively across the plausible names, same style as workflowLastTriggered
 // above. Returns null (not "0 days") when no such field is present at all, so
 // callers can tell "confirmed recent" apart from "we can't tell" and skip the
@@ -565,7 +616,7 @@ export function userLoginAgeDays(user: unknown): number | null {
 }
 
 // True only when at least one sampled user actually carries a readable
-// last-activity field — distinguishes "checked, and everyone's recent" from
+// last-activity field - distinguishes "checked, and everyone's recent" from
 // "this MCP server/org doesn't expose login activity at all", so the
 // stale-logins finding can honestly not fire in the latter case instead of
 // silently reporting zero stale users.
@@ -574,7 +625,7 @@ export function userLoginFieldPresent(users: unknown[]): boolean {
 }
 
 // The field a blueprint transitions records through (e.g. "Stage" for Deals,
-// "Status" for Tasks) — used to read each sampled record's current blueprint
+// "Status" for Tasks) - used to read each sampled record's current blueprint
 // state without a per-record blueprint API call.
 export function findBlueprintFieldApiName(blueprints: unknown[], apiName: string): string | null {
   for (const bp of blueprintsForModule(blueprints, apiName)) {

@@ -26,7 +26,7 @@ const STEPS = [
   {
     icon: ListChecks,
     title: "Fix, re-audit, improve",
-    body: "Every finding becomes a ranked action with the exact score gain — “fix these 3 things and you move from 64 to 78”. Re-audit to prove the improvement.",
+    body: "Every finding becomes a ranked action with the exact score gain - “fix these 3 things and you move from 64 to 78”. Re-audit to prove the improvement.",
   },
 ];
 
@@ -157,7 +157,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="landing-footer">
-        <span>Built by <strong>Evoluz Global Solutions</strong> — Zoho implementation specialists.</span>
+        <span>Built by <strong>Evoluz Global Solutions</strong> - Zoho implementation specialists.</span>
         <span className="faint">
           Your data: we read only what your MCP endpoint allows, nothing is ever written to your
           CRM, and you can delete your audit data on request.

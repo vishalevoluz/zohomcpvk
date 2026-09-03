@@ -196,30 +196,30 @@ function getBPName(bp: ZohoBlueprint): string {
 }
 
 function getBPModule(bp: ZohoBlueprint): string {
-  if (!bp.module) return "—";
+  if (!bp.module) return "-";
   if (typeof bp.module === "string") return bp.module;
   const m = bp.module as Record<string, unknown>;
-  return String(m.api_name ?? m.plural_label ?? m.name ?? "—");
+  return String(m.api_name ?? m.plural_label ?? m.name ?? "-");
 }
 
 function getBPField(bp: ZohoBlueprint): string {
-  return String(bp.field?.name ?? "—");
+  return String(bp.field?.name ?? "-");
 }
 
 function getBPLayout(bp: ZohoBlueprint): string {
-  return String(bp.layout?.display_label ?? bp.layout?.name ?? "—");
+  return String(bp.layout?.display_label ?? bp.layout?.name ?? "-");
 }
 
 function getBPCreatedBy(bp: ZohoBlueprint): string {
-  return String(bp.created_by?.name ?? "—");
+  return String(bp.created_by?.name ?? "-");
 }
 
 function getBPModifiedBy(bp: ZohoBlueprint): string {
-  return String(bp.modified_by?.name ?? "—");
+  return String(bp.modified_by?.name ?? "-");
 }
 
 function formatDateTime(iso?: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   try {
     return new Date(iso).toLocaleString(undefined, {
       year: "numeric", month: "short", day: "numeric",
@@ -563,7 +563,7 @@ function BlueprintDetailModal({
         const params: Record<string, unknown> = { blueprintId: initialBp.id, type: cloneType };
         const result = await executeTool(config, "cloneBlueprint", params);
         const apiErr = detectApiError(result);
-        setActionMsg({ ok: !apiErr, text: apiErr ?? `Blueprint cloned as ${cloneType}. The clone starts as Draft — reload the list to see it.` });
+        setActionMsg({ ok: !apiErr, text: apiErr ?? `Blueprint cloned as ${cloneType}. The clone starts as Draft - reload the list to see it.` });
         onLog({ id: crypto.randomUUID(), tool: "cloneBlueprint", input: params, output: result, status: apiErr ? "error" : "success", durationMs: Date.now() - start, timestamp: new Date() });
         if (!apiErr) setActionPanel(null);
       }
@@ -582,7 +582,7 @@ function BlueprintDetailModal({
             <span className="pane-icon" style={{ fontSize: 20 }}>◈</span>
             <div>
               <div className="bp-detail-title">{getBPName(displayBp)}</div>
-              <div className="bp-detail-sub">ID: {String(displayBp.id ?? "—")} · {getBPModule(displayBp)}</div>
+              <div className="bp-detail-sub">ID: {String(displayBp.id ?? "-")} · {getBPModule(displayBp)}</div>
             </div>
           </div>
           <div className="bp-detail-header-actions">
@@ -636,7 +636,7 @@ function BlueprintDetailModal({
               )}
               {actionPanel === "deactivate" && (
                 <p className="bp-action-desc">
-                  Records will retain their current stage. Deactivating does <strong>not</strong> unlock structural editing — use the dependent clone pattern for changes.
+                  Records will retain their current stage. Deactivating does <strong>not</strong> unlock structural editing - use the dependent clone pattern for changes.
                 </p>
               )}
               {actionPanel === "clone" && (
@@ -712,7 +712,7 @@ function BlueprintDetailModal({
                   <div className="bp-info-row">
                     <span className="bp-info-label">Records in Process</span>
                     <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span className="bp-info-value">{recordCount === null ? "—" : recordCount === -1 ? "Error" : String(recordCount)}</span>
+                      <span className="bp-info-value">{recordCount === null ? "-" : recordCount === -1 ? "Error" : String(recordCount)}</span>
                       <button className="btn-secondary" style={{ padding: "2px 10px", fontSize: 12 }} onClick={loadRecordCount} disabled={countLoading}>
                         {countLoading ? <><span className="spinner" /> Loading…</> : "Load Count"}
                       </button>
@@ -857,9 +857,9 @@ function BlueprintDetailModal({
                     <tbody>
                       {transitions.map((t, i) => (
                         <tr key={String(t.id ?? i)}>
-                          <td className="cell-name">{String(t.name ?? "—")}</td>
-                          <td className="cell-mono">{getTransitionFrom(t) || "—"}</td>
-                          <td className="cell-mono">{getTransitionTo(t) || "—"}</td>
+                          <td className="cell-name">{String(t.name ?? "-")}</td>
+                          <td className="cell-mono">{getTransitionFrom(t) || "-"}</td>
+                          <td className="cell-mono">{getTransitionTo(t) || "-"}</td>
                           <td><span className={`bool-badge ${getMandatoryFields(t).length > 0 ? "yes" : "no"}`}>{getMandatoryFields(t).length}</span></td>
                           <td><span className={`bool-badge ${getValidationRules(t).length > 0 ? "yes" : "no"}`}>{getValidationRules(t).length}</span></td>
                           <td><span className={`bool-badge ${getTransitionActions(t).length > 0 ? "yes" : "no"}`}>{getTransitionActions(t).length}</span></td>
@@ -945,7 +945,7 @@ function ConfirmActionDialog({
                   onChange={e => onChange({ moveRecords: e.target.checked })}
                 />
                 <span>
-                  <strong>Move records</strong> — remap existing records to new states
+                  <strong>Move records</strong> - remap existing records to new states
                   <span className="bp-confirm-hint">Enable only when replacing an existing active blueprint (dependent clone pattern). For fresh blueprints, leave unchecked.</span>
                 </span>
               </label>
@@ -953,7 +953,7 @@ function ConfirmActionDialog({
           )}
           {dialog.type === "deactivate" && (
             <p className="bp-confirm-desc">
-              This will deactivate <strong>{getBPName(dialog.bp)}</strong>. Records will retain their current stage. Note: deactivating does not unlock the blueprint for editing — use the dependent clone pattern for structural changes.
+              This will deactivate <strong>{getBPName(dialog.bp)}</strong>. Records will retain their current stage. Note: deactivating does not unlock the blueprint for editing - use the dependent clone pattern for structural changes.
             </p>
           )}
           {dialog.type === "clone" && (
@@ -1189,7 +1189,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
         const params: Record<string, unknown> = { blueprintId: dialog.bp.id, type: dialog.cloneType };
         const result = await executeTool(config, "cloneBlueprint", params);
         const apiErr = detectApiError(result);
-        const msg = apiErr ?? `Blueprint cloned as ${dialog.cloneType}. The clone starts as Draft — reload to see it.`;
+        const msg = apiErr ?? `Blueprint cloned as ${dialog.cloneType}. The clone starts as Draft - reload to see it.`;
         setActionMessage({ ok: !apiErr, text: msg });
         onLog({ id: crypto.randomUUID(), tool: "cloneBlueprint", input: params, output: result, status: apiErr ? "error" : "success", durationMs: Date.now() - start, timestamp: new Date() });
       }
@@ -1255,10 +1255,10 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
   }
 
   const findings: { key: BPFilterKey; label: string; count: number; severity: string; tip: string }[] = [
-    { key: "inactive",            label: "Inactive Blueprints",  count: inactive.length,           severity: inactive.length > 0 ? "warn" : "ok",           tip: "Blueprint processes not currently active — stage transitions are not being enforced on records." },
+    { key: "inactive",            label: "Inactive Blueprints",  count: inactive.length,           severity: inactive.length > 0 ? "warn" : "ok",           tip: "Blueprint processes not currently active - stage transitions are not being enforced on records." },
     { key: "dead_end",           label: "Dead-end Stages",       count: deadEnd.length,            severity: deadEnd.length > 0 ? "danger" : "ok",          tip: "Stages that can be reached via transitions but have no outgoing transitions defined. Records can get permanently stuck here." },
-    { key: "missing_transitions", label: "Missing Transitions",  count: missingTransitions.length, severity: missingTransitions.length > 0 ? "danger" : "ok", tip: "Picklist values in the blueprint field that aren't connected to any transition — those stages are completely unreachable." },
-    { key: "incomplete",          label: "Incomplete Processes", count: incomplete.length,          severity: incomplete.length > 0 ? "warn" : "ok",          tip: "Transitions with no mandatory fields, validation rules, or actions configured — they do nothing when executed." },
+    { key: "missing_transitions", label: "Missing Transitions",  count: missingTransitions.length, severity: missingTransitions.length > 0 ? "danger" : "ok", tip: "Picklist values in the blueprint field that aren't connected to any transition - those stages are completely unreachable." },
+    { key: "incomplete",          label: "Incomplete Processes", count: incomplete.length,          severity: incomplete.length > 0 ? "warn" : "ok",          tip: "Transitions with no mandatory fields, validation rules, or actions configured - they do nothing when executed." },
   ];
 
   const hasMetaTool = !!findTool(allTools, "getBlueprintProcessConfigurationMeta");
@@ -1280,7 +1280,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
         </div>
         <div className="audit-toolbar">
           {tools.length === 0 && (
-            <span className="no-tools-hint">No blueprint tools found — check connection</span>
+            <span className="no-tools-hint">No blueprint tools found - check connection</span>
           )}
           <button onClick={() => void loadBlueprints()} disabled={loading || selectedTools.length === 0} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : "↺ Reload"}
@@ -1350,7 +1350,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
         <div className="bp-create-section">
           <h3 className="bp-create-title">Create Blueprint</h3>
           <p className="bp-create-desc">
-            Provide the full blueprint configuration as JSON. After creation, update every transition via the Zoho CRM API (PUT /settings/blueprints/transitions/&#123;transitionId&#125;) to set modified_time — required by the UI. chart_data is practically required before first activation.
+            Provide the full blueprint configuration as JSON. After creation, update every transition via the Zoho CRM API (PUT /settings/blueprints/transitions/&#123;transitionId&#125;) to set modified_time - required by the UI. chart_data is practically required before first activation.
           </p>
           {createResult && (
             <div className={createResult.ok ? "form-success" : "form-error"} style={{ marginBottom: 12 }}>
@@ -1430,7 +1430,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
 
                 {displayed.length === 0 ? (
                   <div className="empty-state">
-                    {search.trim() ? `No blueprints match "${search.trim()}".` : `No ${filter.replace(/_/g, " ")} blueprints found — this is a good sign!`}
+                    {search.trim() ? `No blueprints match "${search.trim()}".` : `No ${filter.replace(/_/g, " ")} blueprints found - this is a good sign!`}
                   </div>
                 ) : (
                   <div className="table-scroll">
@@ -1464,7 +1464,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
                             <React.Fragment key={rowKey}>
                               <tr className={tags.length ? "row-flagged" : ""}>
                                 <td className="cell-name">{getBPName(bp)}</td>
-                                <td className="cell-mono fn-id">{String(bp.id ?? "—")}</td>
+                                <td className="cell-mono fn-id">{String(bp.id ?? "-")}</td>
                                 <td>
                                   <span className={`bool-badge ${active ? "yes" : "no"}`}>
                                     {active ? "Active" : "Inactive"}
@@ -1482,7 +1482,7 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
                                   <td>
                                     <div className="bp-count-cell">
                                       {bpCount !== undefined
-                                        ? <span className="bp-count-val">{bpCount === -1 ? "—" : bpCount}</span>
+                                        ? <span className="bp-count-val">{bpCount === -1 ? "-" : bpCount}</span>
                                         : <button
                                             className="btn-secondary"
                                             style={{ padding: "2px 8px", fontSize: 11 }}
@@ -1506,8 +1506,8 @@ export default function BlueprintAudit({ config, tools, allTools, onLog }: Props
                                       : tags.map(tag => (
                                           <span key={tag} className={`audit-tag tag-bp-${tag}`} title={
                                             tag === "inactive"            ? "This blueprint is inactive and not enforcing any stage transitions on records." :
-                                            tag === "dead_end"            ? "This blueprint has stages with no outgoing transitions — records can get permanently stuck." :
-                                            tag === "missing_transitions" ? "Some picklist stages in this blueprint have no connected transitions — those stages are unreachable." :
+                                            tag === "dead_end"            ? "This blueprint has stages with no outgoing transitions - records can get permanently stuck." :
+                                            tag === "missing_transitions" ? "Some picklist stages in this blueprint have no connected transitions - those stages are unreachable." :
                                             tag === "incomplete"          ? "This blueprint has transitions with no mandatory fields, validation rules, or actions configured." : tag
                                           }>{tag.replace(/_/g, " ")}</span>
                                         ))}

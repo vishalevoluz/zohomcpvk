@@ -97,28 +97,28 @@ function getFnName(f: ZohoFunction): string {
 function getFnId(f: ZohoFunction): string {
   const nested = f.function;
   if (nested && typeof nested === "object" && nested.id) return String(nested.id);
-  return String(f.id ?? "—");
+  return String(f.id ?? "-");
 }
 
 function getAssociationId(f: ZohoFunction): string {
-  return String(f.id ?? "—");
+  return String(f.id ?? "-");
 }
 
 function getModule(f: ZohoFunction): string {
-  if (!f.module) return "—";
-  return String(f.module.plural_label ?? f.module.api_name ?? f.module.singular_label ?? "—");
+  if (!f.module) return "-";
+  return String(f.module.plural_label ?? f.module.api_name ?? f.module.singular_label ?? "-");
 }
 
 function getLanguage(f: ZohoFunction): string {
-  return String(f.language ?? "—");
+  return String(f.language ?? "-");
 }
 
 function getFeatureType(f: ZohoFunction): string {
-  return String(f.feature_type ?? "—");
+  return String(f.feature_type ?? "-");
 }
 
 function formatDateTime(iso?: string): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   try {
     return new Date(iso).toLocaleString(undefined, {
       year: "numeric", month: "short", day: "numeric",
@@ -144,7 +144,7 @@ function hasFunctionId(f: ZohoFunction): boolean {
 }
 
 function getCreatedBy(f: ZohoFunction): string {
-  return String(f.created_by?.name ?? "—");
+  return String(f.created_by?.name ?? "-");
 }
 
 // ─── Audit logic ──────────────────────────────────────────────────────────────
@@ -269,8 +269,8 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   }
 
   const findings: { key: FnFilterKey; label: string; count: number; severity: string; tip: string }[] = [
-    { key: "unused",      label: "Unassociated Functions", count: unused.length,     severity: unused.length > 0 ? "warn" : "ok",    tip: "Custom functions not linked to any workflow rule — they exist in Zoho but are never triggered automatically." },
-    { key: "missing_ref", label: "Missing Function Refs",  count: missingRef.length, severity: missingRef.length > 0 ? "danger" : "ok", tip: "The underlying Deluge function ID (function.id) is missing from this association — the link to the script may be broken." },
+    { key: "unused",      label: "Unassociated Functions", count: unused.length,     severity: unused.length > 0 ? "warn" : "ok",    tip: "Custom functions not linked to any workflow rule - they exist in Zoho but are never triggered automatically." },
+    { key: "missing_ref", label: "Missing Function Refs",  count: missingRef.length, severity: missingRef.length > 0 ? "danger" : "ok", tip: "The underlying Deluge function ID (function.id) is missing from this association - the link to the script may be broken." },
     { key: "locked",      label: "Locked Functions",       count: locked.length,     severity: locked.length > 0 ? "warn" : "ok",    tip: "Functions that are locked and cannot be edited or executed by the current user." },
   ];
 
@@ -286,7 +286,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
         </div>
         <div className="audit-toolbar">
           {availableTools.length === 0 && (
-            <span className="no-tools-hint">No tools found — check connection</span>
+            <span className="no-tools-hint">No tools found - check connection</span>
           )}
           <button onClick={() => void loadFunctions()} disabled={loading || selectedTools.length === 0} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : functions.length ? "Reload" : "Load Functions"}
@@ -356,7 +356,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
 
             {displayed.length === 0 ? (
               <div className="empty-state">
-                {search.trim() ? `No functions match "${search.trim()}".` : `No ${filter.replace(/_/g, " ")} found — this is a good sign!`}
+                {search.trim() ? `No functions match "${search.trim()}".` : `No ${filter.replace(/_/g, " ")} found - this is a good sign!`}
               </div>
             ) : (
               <div className="table-scroll">
@@ -366,7 +366,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                       <th><span className="th-tip" data-tooltip-below="The display name of this custom Deluge function">Function Name<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The unique ID of the underlying Deluge function script (function.id)">Function ID<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The type of automation this function is tied to (e.g. workflow)">Feature Type<span className="th-info">i</span></span></th>
-                      <th><span className="th-tip" data-tooltip-below="The scripting language used to write this function — Zoho uses Deluge">Language<span className="th-info">i</span></span></th>
+                      <th><span className="th-tip" data-tooltip-below="The scripting language used to write this function - Zoho uses Deluge">Language<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="Whether this function is linked to and triggered by a workflow rule">Associated<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="The user who created this function">Created By<span className="th-info">i</span></span></th>
                       <th><span className="th-tip" data-tooltip-below="When this function was first created">Created Time<span className="th-info">i</span></span></th>
@@ -405,8 +405,8 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                                   ? <span className="audit-tag tag-ok" title="No issues detected for this function">clean</span>
                                   : tags.map(tag => (
                                       <span key={tag} className={`audit-tag tag-fn-${tag}`} title={
-                                        tag === "unused"      ? "This function is not associated with any workflow rule — it will never be triggered automatically." :
-                                        tag === "missing_ref" ? "The Deluge function ID is missing — this association may be broken or the underlying script deleted." :
+                                        tag === "unused"      ? "This function is not associated with any workflow rule - it will never be triggered automatically." :
+                                        tag === "missing_ref" ? "The Deluge function ID is missing - this association may be broken or the underlying script deleted." :
                                         tag === "locked"      ? "This function is locked and cannot be edited or executed by the current user." : tag
                                       }>{tag.replace(/_/g, " ")}</span>
                                     ))}

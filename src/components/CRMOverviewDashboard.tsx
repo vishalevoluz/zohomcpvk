@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, identicalWorkflows, overlappingWorkflows } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, identicalWorkflows, overlappingWorkflows, identicalWorkflowGroups, overlappingWorkflowGroups, workflowCriteriaFieldNames, workflowTriggerLabel } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -36,7 +36,7 @@ function parseMcpJson(result: unknown): Record<string, unknown> | null {
   return r;
 }
 
-// Functions naming/duplicate/failure health — like RuleCoverage (see
+// Functions naming/duplicate/failure health - like RuleCoverage (see
 // useRuleCoverage.ts), this is fetched separately from entityData since
 // getFunctions/getAutomationFunctionFailures aren't part of the shared
 // flat-entity list.
@@ -49,7 +49,7 @@ interface FunctionHealth {
   failureCount: number;
 }
 
-// Placeholder/test names left over from building or copy-pasting a function —
+// Placeholder/test names left over from building or copy-pasting a function -
 // "Function1", "Untitled", "Copy of X", or a plain "test"/"temp" prefix.
 const SUSPICIOUS_FUNCTION_NAME = /^(function\d*$|untitled|new[ _]?function|copy[ _]?of|test|temp)/i;
 const MAX_FUNCTION_PAGES = 5; // 5 * 200 = up to 1000 functions scanned
@@ -112,15 +112,15 @@ interface KpiItem {
   severity: Severity;
   note: string;
   clickable?: boolean;
-  /** True when the underlying fetch failed and this count could not be confirmed — render "—", not a fake 0. */
+  /** True when the underlying fetch failed and this count could not be confirmed - render "-", not a fake 0. */
   unknown?: boolean;
-  /** Hover/click attribution: which tool this came from and how many records it saw — shown as a tooltip on the tile. */
+  /** Hover/click attribution: which tool this came from and how many records it saw - shown as a tooltip on the tile. */
   source: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// No \b around these — tool names are camelCase/PascalCase (e.g. "getZiaInsights"),
+// No \b around these - tool names are camelCase/PascalCase (e.g. "getZiaInsights"),
 // so a word-boundary regex never matches inside the concatenated identifier.
 const ZIA_PATTERNS = [/zia/i, /recommend/i, /analy[sz]/i, /insight/i, /suggest/i];
 
@@ -147,7 +147,7 @@ function hasQueryField(tool: McpTool): boolean {
 }
 
 // Zoho API errors often come back as a JSON string inside the tool's text
-// output (e.g. {"code":"MANDATORY_NOT_FOUND",...}) — show it as a readable
+// output (e.g. {"code":"MANDATORY_NOT_FOUND",...}) - show it as a readable
 // message instead of dumping the raw JSON into the chat.
 function formatZiaResponseText(text: string): string {
   try {
@@ -166,7 +166,7 @@ function formatZiaResponseText(text: string): string {
 }
 
 function findZiaTool(tools: McpTool[]): McpTool | null {
-  // Prefer a Zia-ish tool that actually accepts free text — avoids matching a
+  // Prefer a Zia-ish tool that actually accepts free text - avoids matching a
   // structured CRUD tool (e.g. one requiring a "recommendations" record array)
   // whose name/description merely contains a matching keyword.
   for (const p of ZIA_PATTERNS) {
@@ -230,7 +230,7 @@ function generateRecommendations(
   if (wfs.length > 20) {
     recs.push({
       id: "workflow-sprawl",
-      title: "High Workflow Count — Consider Consolidation",
+      title: "High Workflow Count - Consider Consolidation",
       description: `You have ${wfs.length} workflows. Consolidating overlapping triggers and combining related actions reduces maintenance overhead and potential conflicts.`,
       severity: "low", category: "changes", icon: "⟳",
     });
@@ -276,13 +276,13 @@ function generateRecommendations(
     });
   }
 
-  // Functions — the shared entityData doesn't track custom functions (see
+  // Functions - the shared entityData doesn't track custom functions (see
   // FunctionAudit.tsx, which fetches them separately), so naming/duplicate/
   // failure health is fetched independently (see functionHealth effect) and
   // falls back to a tool-presence check when that data isn't in yet.
   if (functionHealth) {
     const scannedNote = functionHealth.hasMore
-      ? ` (based on the first ${functionHealth.totalScanned} scanned — your org has more)`
+      ? ` (based on the first ${functionHealth.totalScanned} scanned - your org has more)`
       : ` (${functionHealth.totalScanned} scanned)`;
 
     if (functionHealth.duplicateGroups.length > 0) {
@@ -294,7 +294,7 @@ function generateRecommendations(
       recs.push({
         id: "duplicate-functions",
         title: `${functionHealth.duplicateGroups.length} Duplicate Function Names Found`,
-        description: `Multiple functions share the exact same name${scannedNote}: ${top}. Duplicate names make it impossible to tell which one a workflow or button actually calls — rename or delete the unused copies.`,
+        description: `Multiple functions share the exact same name${scannedNote}: ${top}. Duplicate names make it impossible to tell which one a workflow or button actually calls - rename or delete the unused copies.`,
         severity: "medium", category: "changes", icon: "ƒ",
       });
     }
@@ -313,7 +313,7 @@ function generateRecommendations(
         recs.push({
           id: "function-failures",
           title: `${functionHealth.failureCount} Recent Function Execution Failures`,
-          description: `${functionHealth.failureCount} function run${functionHealth.failureCount !== 1 ? "s have" : " has"} failed recently. A failing function silently breaks whatever workflow, button, or blueprint action depends on it — check getAutomationFunctionFailures for the specific errors.`,
+          description: `${functionHealth.failureCount} function run${functionHealth.failureCount !== 1 ? "s have" : " has"} failed recently. A failing function silently breaks whatever workflow, button, or blueprint action depends on it - check getAutomationFunctionFailures for the specific errors.`,
           severity: "high", category: "changes", icon: "⚠",
         });
       } else {
@@ -330,7 +330,7 @@ function generateRecommendations(
       recs.push({
         id: "audit-functions",
         title: "No Naming Issues Found in Scanned Functions",
-        description: `Scanned ${functionHealth.totalScanned} functions — no duplicate or placeholder names detected. Connect getAutomationFunctionFailures too so failed executions can be surfaced here as well.`,
+        description: `Scanned ${functionHealth.totalScanned} functions - no duplicate or placeholder names detected. Connect getAutomationFunctionFailures too so failed executions can be surfaced here as well.`,
         severity: "low", category: "changes", icon: "ƒ",
       });
     }
@@ -339,7 +339,7 @@ function generateRecommendations(
     recs.push(hasFunctionTools ? {
       id: "audit-functions",
       title: "Audit Custom Functions for Orphaned Scripts",
-      description: "Function tools are connected. Review your Deluge functions for ones no longer linked to any workflow, button, or blueprint action — orphaned functions still count against your org's script limits and are easy to lose track of. Check the Functions tab for the full breakdown.",
+      description: "Function tools are connected. Review your Deluge functions for ones no longer linked to any workflow, button, or blueprint action - orphaned functions still count against your org's script limits and are easy to lose track of. Check the Functions tab for the full breakdown.",
       severity: "medium", category: "changes", icon: "ƒ",
     } : {
       id: "audit-functions",
@@ -359,7 +359,7 @@ function generateRecommendations(
       recs.push({
         id: "too-many-admins",
         title: `${adminCount} Admin Profiles Detected`,
-        description: `${adminCount} profiles have admin-level naming. Audit whether all of these actually require full administrator access — excess admin profiles are a security risk.`,
+        description: `${adminCount} profiles have admin-level naming. Audit whether all of these actually require full administrator access - excess admin profiles are a security risk.`,
         severity: "high", category: "changes", icon: "◑",
       });
     }
@@ -391,7 +391,7 @@ function generateRecommendations(
     if (fields.length > 200) {
       recs.push({
         id: "field-overload",
-        title: `${fields.length} Fields — Review for Redundancy`,
+        title: `${fields.length} Fields - Review for Redundancy`,
         description: `${fields.length} fields are configured. Audit for duplicate, rarely-used, or deprecated fields. Excess fields clutter layouts and slow data entry.`,
         severity: "low", category: "changes", icon: "▤",
       });
@@ -433,7 +433,7 @@ function generateRecommendations(
     recs.push({
       id: "zoho-campaigns",
       title: "Bridge Marketing with Zoho Campaigns",
-      description: "No pipeline data found. Connect Zoho Campaigns to bridge marketing efforts with CRM — track lead conversion from campaigns and attribute revenue to marketing activities.",
+      description: "No pipeline data found. Connect Zoho Campaigns to bridge marketing efforts with CRM - track lead conversion from campaigns and attribute revenue to marketing activities.",
       severity: "medium", category: "integrations", icon: "◫",
     });
   }
@@ -457,7 +457,7 @@ function generateRecommendations(
     recs.push({
       id: "slack-integration",
       title: "Add Real-Time Notifications via Slack or Teams",
-      description: "Push CRM notifications — new leads, deal stage changes, task assignments — directly to Slack or Microsoft Teams channels for instant team awareness.",
+      description: "Push CRM notifications - new leads, deal stage changes, task assignments - directly to Slack or Microsoft Teams channels for instant team awareness.",
       severity: "low", category: "integrations", icon: "◈",
     });
   }
@@ -482,7 +482,7 @@ function generateRecommendations(
     recs.push({
       id: "pipeline-setup",
       title: "Define a Structured Sales Pipeline",
-      description: "No sales pipelines detected. Set up a clear pipeline with defined stages — Lead, Qualification, Proposal, Negotiation, Closed Won/Lost — to improve deal visibility and forecasting.",
+      description: "No sales pipelines detected. Set up a clear pipeline with defined stages - Lead, Qualification, Proposal, Negotiation, Closed Won/Lost - to improve deal visibility and forecasting.",
       severity: "high", category: "architecture", icon: "⇥",
     });
   }
@@ -491,7 +491,7 @@ function generateRecommendations(
     recs.push({
       id: "blueprint-over-workflow",
       title: "Migrate Complex Workflows to Blueprints",
-      description: `You have ${wfs.length} workflows but only ${bps.length} blueprints. Complex sequential processes should be modeled as Blueprints — they provide better visibility, audit trails, and enforce process adherence.`,
+      description: `You have ${wfs.length} workflows but only ${bps.length} blueprints. Complex sequential processes should be modeled as Blueprints - they provide better visibility, audit trails, and enforce process adherence.`,
       severity: "medium", category: "architecture", icon: "◈",
     });
   }
@@ -507,7 +507,7 @@ function generateRecommendations(
   if (profiles.length > 0) {
     recs.push({
       id: "profile-access",
-      title: `Review ${profiles.length} Profile${profiles.length > 1 ? "s" : ""} — Enforce Least Privilege`,
+      title: `Review ${profiles.length} Profile${profiles.length > 1 ? "s" : ""} - Enforce Least Privilege`,
       description: `${profiles.length} profile${profiles.length > 1 ? "s are" : " is"} configured. Map each profile to specific modules and fields. Restrict module creation/deletion rights to managers only and read-only for standard roles.`,
       severity: "high", category: "architecture", icon: "◑",
     });
@@ -515,7 +515,7 @@ function generateRecommendations(
     recs.push({
       id: "profile-access",
       title: "Audit Profile-Based Module Access",
-      description: "Review which profiles have access to each module and sensitive fields. Apply the principle of least privilege — restrict data access to roles that genuinely need it.",
+      description: "Review which profiles have access to each module and sensitive fields. Apply the principle of least privilege - restrict data access to roles that genuinely need it.",
       severity: "high", category: "architecture", icon: "⊞",
     });
   }
@@ -535,7 +535,7 @@ function generateRecommendations(
     recs.push({
       id: "field-architecture",
       title: `Standardize ${fields.length} Field Definitions`,
-      description: `${fields.length} fields are in use. Establish a field registry — document each field's purpose, owner, and allowed values. Prevent duplicate fields by enforcing a naming convention before any new fields are added.`,
+      description: `${fields.length} fields are in use. Establish a field registry - document each field's purpose, owner, and allowed values. Prevent duplicate fields by enforcing a naming convention before any new fields are added.`,
       severity: "medium", category: "architecture", icon: "▤",
     });
   }
@@ -554,7 +554,7 @@ function generateRecommendations(
     recs.push({
       id: "module-rationalization",
       title: "Rationalize Custom Module Usage",
-      description: `You have ${mods.length} modules. Audit custom modules for utilization — underused custom modules should be merged, repurposed, or decommissioned to reduce system complexity.`,
+      description: `You have ${mods.length} modules. Audit custom modules for utilization - underused custom modules should be merged, repurposed, or decommissioned to reduce system complexity.`,
       severity: "low", category: "architecture", icon: "⊞",
     });
   }
@@ -566,7 +566,7 @@ function generateRecommendations(
     severity: "medium", category: "architecture", icon: "⟳",
   });
 
-  // Approval Process — real per-module counts when getApprovalRules is connected;
+  // Approval Process - real per-module counts when getApprovalRules is connected;
   // falls back to the general best-practice suggestion otherwise.
   const approvalEntries = ruleCoverage ? Object.entries(ruleCoverage.approval) : [];
   if (approvalEntries.length > 0) {
@@ -575,7 +575,7 @@ function generateRecommendations(
       recs.push({
         id: "approval-process",
         title: `${zeroApproval.length} of ${approvalEntries.length} Core Modules Have No Approval Process`,
-        description: `${zeroApproval.join(", ")} ${zeroApproval.length > 1 ? "have" : "has"} no approval process configured. Approval Processes require manager sign-off before a record change goes through — e.g. blocking a high-value deal or large discount from closing without review — instead of letting any rep close or edit sensitive records with no checkpoint.`,
+        description: `${zeroApproval.join(", ")} ${zeroApproval.length > 1 ? "have" : "has"} no approval process configured. Approval Processes require manager sign-off before a record change goes through - e.g. blocking a high-value deal or large discount from closing without review - instead of letting any rep close or edit sensitive records with no checkpoint.`,
         severity: "medium", category: "architecture", icon: "☑",
       });
     } else {
@@ -595,7 +595,7 @@ function generateRecommendations(
     });
   }
 
-  // Assignment Rules — real per-module counts when getAssignmentRules is connected.
+  // Assignment Rules - real per-module counts when getAssignmentRules is connected.
   const assignmentEntries = ruleCoverage ? Object.entries(ruleCoverage.assignment) : [];
   if (assignmentEntries.length > 0) {
     const zeroAssignment = assignmentEntries.filter(([, count]) => count === 0).map(([name]) => name);
@@ -603,7 +603,7 @@ function generateRecommendations(
       recs.push({
         id: "assignment-rules",
         title: `${zeroAssignment.length} of ${assignmentEntries.length} Core Modules Have No Assignment Rules`,
-        description: `${zeroAssignment.join(", ")} ${zeroAssignment.length > 1 ? "have" : "has"} zero assignment rules configured. Assignment rules automatically route new records to the right rep or queue — e.g. sending Leads from a specific source straight to the SDR on rotation — instead of leaving them sitting unassigned until someone notices.`,
+        description: `${zeroAssignment.join(", ")} ${zeroAssignment.length > 1 ? "have" : "has"} zero assignment rules configured. Assignment rules automatically route new records to the right rep or queue - e.g. sending Leads from a specific source straight to the SDR on rotation - instead of leaving them sitting unassigned until someone notices.`,
         severity: "medium", category: "architecture", icon: "➜",
       });
     } else {
@@ -618,12 +618,12 @@ function generateRecommendations(
     recs.push({
       id: "assignment-rules",
       title: "Add Assignment Rules to Route Records Automatically",
-      description: "Assignment rules automatically route new records to the right rep or queue based on criteria like source, region, or product — e.g. sending Leads from a specific source straight to the SDR on rotation. Without one, new records sit unassigned until someone manually claims them.",
+      description: "Assignment rules automatically route new records to the right rep or queue based on criteria like source, region, or product - e.g. sending Leads from a specific source straight to the SDR on rotation. Without one, new records sit unassigned until someone manually claims them.",
       severity: "medium", category: "architecture", icon: "➜",
     });
   }
 
-  // Validation Rules — real per-module counts when getValidationRules is connected.
+  // Validation Rules - real per-module counts when getValidationRules is connected.
   const valEntries = ruleCoverage ? Object.entries(ruleCoverage.validation) : [];
   if (valEntries.length > 0) {
     const zeroVal = valEntries.filter(([, count]) => count === 0).map(([name]) => name);
@@ -631,7 +631,7 @@ function generateRecommendations(
       recs.push({
         id: "validation-rules",
         title: `${zeroVal.length} of ${valEntries.length} Core Modules Have No Validation Rules`,
-        description: `${zeroVal.join(", ")} ${zeroVal.length > 1 ? "have" : "has"} zero validation rules configured. Validation rules stop bad data before it's ever saved — e.g. blocking a Closed Won deal with no amount, or an invalid email format — instead of relying on a workflow to clean it up afterward.`,
+        description: `${zeroVal.join(", ")} ${zeroVal.length > 1 ? "have" : "has"} zero validation rules configured. Validation rules stop bad data before it's ever saved - e.g. blocking a Closed Won deal with no amount, or an invalid email format - instead of relying on a workflow to clean it up afterward.`,
         severity: "medium", category: "architecture", icon: "⚑",
       });
     } else {
@@ -646,12 +646,12 @@ function generateRecommendations(
     recs.push({
       id: "validation-rules",
       title: "Add Validation Rules to Enforce Data Quality at Entry",
-      description: "Validation rules stop bad data before it's ever saved — e.g. blocking a Closed Won deal with no amount, or an email field with an invalid format. They catch mistakes at the source instead of relying on a workflow to clean them up afterward.",
+      description: "Validation rules stop bad data before it's ever saved - e.g. blocking a Closed Won deal with no amount, or an email field with an invalid format. They catch mistakes at the source instead of relying on a workflow to clean them up afterward.",
       severity: "medium", category: "architecture", icon: "⚑",
     });
   }
 
-  // Layout Rules — real per-module counts when getLayoutRules is connected.
+  // Layout Rules - real per-module counts when getLayoutRules is connected.
   const layoutEntries = ruleCoverage ? Object.entries(ruleCoverage.layout) : [];
   if (layoutEntries.length > 0) {
     const zeroLayout = layoutEntries.filter(([, count]) => count === 0).map(([name]) => name);
@@ -659,14 +659,14 @@ function generateRecommendations(
       recs.push({
         id: "layout-rules",
         title: `${zeroLayout.length} of ${layoutEntries.length} Core Modules Have No Layout Rules`,
-        description: `${zeroLayout.join(", ")} ${zeroLayout.length > 1 ? "have" : "has"} no layout rules. They dynamically show, hide, or require fields based on other field values — e.g. only showing "Reason for Loss" once Stage is set to Closed Lost — so forms stay focused instead of showing every field to every rep.`,
+        description: `${zeroLayout.join(", ")} ${zeroLayout.length > 1 ? "have" : "has"} no layout rules. They dynamically show, hide, or require fields based on other field values - e.g. only showing "Reason for Loss" once Stage is set to Closed Lost - so forms stay focused instead of showing every field to every rep.`,
         severity: "low", category: "architecture", icon: "⊡",
       });
     } else {
       recs.push({
         id: "layout-rules",
         title: "Layout Rules Are Configured Across Core Modules",
-        description: `All ${layoutEntries.length} core modules have at least one layout rule (${layoutEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Nice — reps only see fields relevant to the record they're on.`,
+        description: `All ${layoutEntries.length} core modules have at least one layout rule (${layoutEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Nice - reps only see fields relevant to the record they're on.`,
         severity: "low", category: "architecture", icon: "⊡",
       });
     }
@@ -674,19 +674,19 @@ function generateRecommendations(
     recs.push({
       id: "layout-rules",
       title: "Use Layout Rules to Show Only Relevant Fields",
-      description: "Layout rules dynamically show, hide, or require fields based on other field values — e.g. only showing \"Reason for Loss\" once Stage is set to Closed Lost. This keeps forms focused instead of showing every field to every rep regardless of context.",
+      description: "Layout rules dynamically show, hide, or require fields based on other field values - e.g. only showing \"Reason for Loss\" once Stage is set to Closed Lost. This keeps forms focused instead of showing every field to every rep regardless of context.",
       severity: "low", category: "architecture", icon: "⊡",
     });
   }
 
   // Schedules have no dedicated listing tool anywhere in Zoho's real MCP
-  // catalogue (see isScheduleTool in useRuleCoverage.ts) — this can never be
+  // catalogue (see isScheduleTool in useRuleCoverage.ts) - this can never be
   // confirmed one way or the other, so it's a generic suggestion rather than
   // a number-backed claim.
   recs.push({
     id: "schedules",
     title: "Use Schedules to Automate Recurring Tasks",
-    description: "Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence — e.g. nightly data cleanup or a weekly digest email — without needing a person to trigger them by hand.",
+    description: "Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence - e.g. nightly data cleanup or a weekly digest email - without needing a person to trigger them by hand.",
     severity: "low", category: "architecture", icon: "◷",
   });
 
@@ -711,12 +711,12 @@ interface ModuleBreakdownRow {
   custom: boolean;
 }
 
-// A module can technically be both hidden and empty at once — hidden takes
+// A module can technically be both hidden and empty at once - hidden takes
 // priority since visibility is the more prominent state, so each module
 // gets exactly one category for filtering rather than overlapping tags.
 const MODULE_CATEGORY_ORDER: Record<ModuleCategory, number> = { hidden: 0, empty: 1, active: 2 };
 
-// Sorted actionable-first (hidden, then empty, then active) — same
+// Sorted actionable-first (hidden, then empty, then active) - same
 // convention as the blueprint/workflow breakdowns elsewhere in this file.
 function computeModuleBreakdown(entityData: Record<CrmEntityType, EntityState>): ModuleBreakdownRow[] {
   return entityData.modules.items
@@ -743,30 +743,80 @@ interface WorkflowBreakdownRow {
   lastTriggered: string | null;
   duplicate: boolean;
   overlapping: boolean;
+  // Human-readable explanation of *why* duplicate/overlapping fired: the
+  // matched condition (module/trigger/criteria/actions), which other
+  // workflow(s) it matched, and how many times that exact condition repeats
+  // - a bare "duplicate" badge can't answer any of those on its own.
+  duplicateDetail: string | null;
+  overlappingDetail: string | null;
 }
 
-// Sorted inactive-first, then never-triggered-first within active — same
+// Describes the exact signature two-or-more workflows share: module +
+// trigger event, plus (for a true content duplicate) the criteria field
+// names and action count - spelled out instead of just asserting "identical"
+// or "overlapping", since two rules with empty criteria and no actions look
+// suspicious grouped together unless it's clear *that emptiness itself* is
+// the shared condition.
+function workflowMatchCondition(w: unknown, includeCriteriaActions: boolean): string {
+  const parts = [`Module: ${workflowModuleLabel(w) || "-"}`, `Trigger: ${workflowTriggerLabel(w) || "-"}`];
+  if (includeCriteriaActions) {
+    const fields = workflowCriteriaFieldNames(w);
+    parts.push(fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: none set");
+  }
+  return parts.join(" · ");
+}
+
+function workflowMatchDetail(w: unknown, group: unknown[], includeCriteriaActions: boolean): string {
+  const others = group.filter(o => o !== w);
+  const names = others.map((o, i) => getItemName(o, i)).join(", ") || "-";
+  return `Matched on - ${workflowMatchCondition(w, includeCriteriaActions)}. Same as ${others.length} other workflow${others.length !== 1 ? "s" : ""}: ${names}. Detected ${group.length} times total.`;
+}
+
+// Every badge in the Workflows drilldown - duplicate/overlapping included -
+// explains itself the same way: what the badge means, and (where relevant)
+// the specific evidence behind it for *this* row, not just the label.
+const WORKFLOW_ACTIVE_TOOLTIP = "This workflow rule is enabled - it will fire automatically the next time its trigger event occurs.";
+const WORKFLOW_INACTIVE_TOOLTIP = "This workflow rule is disabled - it will not fire until it's re-enabled.";
+function workflowLastTriggeredTooltip(row: WorkflowBreakdownRow): string {
+  return row.lastTriggered
+    ? `Last executed ${formatLastTriggered(row.lastTriggered)}.`
+    : "No execution recorded for this workflow yet - it has never matched its trigger criteria, or this MCP connection doesn't expose execution history.";
+}
+
+// Sorted inactive-first, then never-triggered-first within active - same
 // "surface the actionable ones" convention as the other breakdowns here.
 function computeWorkflowBreakdown(entityData: Record<CrmEntityType, EntityState>): WorkflowBreakdownRow[] {
   const items = entityData.workflows.items;
   const duplicateSet = new Set(identicalWorkflows(items));
   const overlappingSet = new Set(overlappingWorkflows(items));
+  const duplicateGroupByItem = new Map<unknown, unknown[]>();
+  identicalWorkflowGroups(items).forEach(group => group.forEach(w => duplicateGroupByItem.set(w, group)));
+  const overlappingGroupByItem = new Map<unknown, unknown[]>();
+  overlappingWorkflowGroups(items).forEach(group => group.forEach(w => overlappingGroupByItem.set(w, group)));
   return items
-    .map((w, i) => ({
-      id: String((w as Record<string, unknown> | null)?.id ?? i),
-      name: getItemName(w, i),
-      module: workflowModuleLabel(w) || "—",
-      active: isActiveWorkflow(w),
-      lastTriggered: workflowLastTriggered(w),
-      duplicate: duplicateSet.has(w),
-      overlapping: overlappingSet.has(w),
-    }))
+    .map((w, i) => {
+      const duplicate = duplicateSet.has(w);
+      const overlapping = overlappingSet.has(w);
+      const duplicateGroup = duplicateGroupByItem.get(w);
+      const overlappingGroup = overlappingGroupByItem.get(w);
+      return {
+        id: String((w as Record<string, unknown> | null)?.id ?? i),
+        name: getItemName(w, i),
+        module: workflowModuleLabel(w) || "-",
+        active: isActiveWorkflow(w),
+        lastTriggered: workflowLastTriggered(w),
+        duplicate,
+        overlapping,
+        duplicateDetail: duplicate && duplicateGroup ? workflowMatchDetail(w, duplicateGroup, true) : null,
+        overlappingDetail: overlapping && overlappingGroup ? workflowMatchDetail(w, overlappingGroup, false) : null,
+      };
+    })
     .sort((a, b) => Number(a.active) - Number(b.active) || Number(!!a.lastTriggered) - Number(!!b.lastTriggered));
 }
 
 // "never" isn't mutually exclusive with active/inactive (an active workflow
 // can genuinely have never fired yet), and duplicate/overlapping are their own
-// independent flags too — so each toggle applies its own predicate rather than
+// independent flags too - so each toggle applies its own predicate rather than
 // assigning one category per row.
 function matchesWorkflowFilter(row: WorkflowBreakdownRow, filter: "all" | "active" | "inactive" | "never" | "duplicate" | "overlapping"): boolean {
   if (filter === "all") return true;
@@ -787,7 +837,7 @@ function formatLastTriggered(iso: string | null): string {
 // Same "flag the stale ones, praise the healthy ones" synthesis as
 // buildZiaActivityInsight below, applied to the workflow breakdown instead.
 function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): { summary: string } {
-  if (rows.length === 0) return { summary: "No workflows found — nothing to evaluate yet." };
+  if (rows.length === 0) return { summary: "No workflows found - nothing to evaluate yet." };
   const inactive = rows.filter(r => !r.active).length;
   const neverTriggered = rows.filter(r => r.active && !r.lastTriggered).length;
   const duplicate = rows.filter(r => r.duplicate).length;
@@ -797,13 +847,13 @@ function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): { summary: strin
   if (overlapping > 0) flags.push(`${overlapping} workflow${overlapping !== 1 ? "s share" : " shares"} a trigger event with another active rule`);
   if (inactive > 0) flags.push(`${inactive} workflow${inactive !== 1 ? "s are" : " is"} inactive`);
   if (neverTriggered > 0) flags.push(`${neverTriggered} active workflow${neverTriggered !== 1 ? "s have" : " has"} never fired`);
-  if (flags.length === 0) return { summary: "All workflows are active, unique, and have fired at least once — automation looks healthy." };
+  if (flags.length === 0) return { summary: "All workflows are active, unique, and have fired at least once - automation looks healthy." };
   return { summary: `Zia flags: ${flags.join("; ")}. Merge or remove duplicates, reactivate what's still needed, and fix or remove the rest.` };
 }
 
 // ─── Activity (Email / Task / Call) drill-down ─────────────────────────────────
 // Tasks already ride along in entityData (the "tasks" entity), but Calls and
-// Emails aren't fetched anywhere else in this app — pulled in lazily here,
+// Emails aren't fetched anywhere else in this app - pulled in lazily here,
 // only once the Activity tile is opened, so a dashboard load that never
 // opens this panel never pays for two extra API calls' worth of pagination.
 interface ActivityFetchState {
@@ -901,22 +951,22 @@ function buildActivityStats(
   const taskTotal = taskItems.length;
   const taskOverdue = taskItems.filter(isOverdueTask).length;
   const taskSuggestion = !tasksResolved ? "Fetching…"
-    : taskTotal === 0 ? "No tasks logged in this CRM — reps may not be tracking follow-ups here at all."
-    : taskOverdue > 0 ? `${taskOverdue} of ${taskTotal} tasks (${Math.round((taskOverdue / taskTotal) * 100)}%) are overdue — assign owners or set due-date reminders so leads don't go cold.`
-    : "Tasks are being kept current — no overdue items right now.";
+    : taskTotal === 0 ? "No tasks logged in this CRM - reps may not be tracking follow-ups here at all."
+    : taskOverdue > 0 ? `${taskOverdue} of ${taskTotal} tasks (${Math.round((taskOverdue / taskTotal) * 100)}%) are overdue - assign owners or set due-date reminders so leads don't go cold.`
+    : "Tasks are being kept current - no overdue items right now.";
 
   const callTotal = calls.items.length;
   const callMissed = calls.items.filter(isMissedCall).length;
-  const callSuggestion = calls.unavailable ? "No call-logging tool is connected — call activity can't be measured from here."
+  const callSuggestion = calls.unavailable ? "No call-logging tool is connected - call activity can't be measured from here."
     : calls.loading ? "Fetching…"
-    : callTotal === 0 ? "No calls logged against records — outreach may be happening outside the CRM, so you can't measure it."
-    : callMissed > 0 ? `${callMissed} of ${callTotal} calls are logged as missed, no-answer, or cancelled — follow up before these leads go cold.`
-    : "Calls are being logged consistently — no missed calls outstanding.";
+    : callTotal === 0 ? "No calls logged against records - outreach may be happening outside the CRM, so you can't measure it."
+    : callMissed > 0 ? `${callMissed} of ${callTotal} calls are logged as missed, no-answer, or cancelled - follow up before these leads go cold.`
+    : "Calls are being logged consistently - no missed calls outstanding.";
 
   const emailTotal = emails.items.length;
-  const emailSuggestion = emails.unavailable ? "No email-logging tool is connected — email activity can't be measured from here."
+  const emailSuggestion = emails.unavailable ? "No email-logging tool is connected - email activity can't be measured from here."
     : emails.loading ? "Fetching…"
-    : emailTotal === 0 ? "No emails logged against records — you can't verify follow-up actually happened."
+    : emailTotal === 0 ? "No emails logged against records - you can't verify follow-up actually happened."
     : "Email activity is being tracked against records.";
 
   return [
@@ -932,7 +982,7 @@ interface LatestActivity {
 }
 
 // Scans for whichever date field the item actually carries (varies by MCP
-// server/API version — same defensive fallback-chain pattern as the rest of
+// server/API version - same defensive fallback-chain pattern as the rest of
 // this file) and keeps the most recent one found.
 function latestActivity(items: unknown[], dateFields: string[], titleFields: string[]): LatestActivity {
   let best: { date: string; label: string } | null = null;
@@ -973,7 +1023,7 @@ interface ZiaActivityInsight {
   summary: string;
 }
 
-// Synthesizes the three freshest-activity signals into one Zia-style verdict —
+// Synthesizes the three freshest-activity signals into one Zia-style verdict -
 // same "flag the stale ones, praise the healthy ones" tone as the rest of the
 // dashboard's recommendation copy.
 function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState, emails: ActivityFetchState): ZiaActivityInsight {
@@ -998,7 +1048,7 @@ function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState
   if (taskDays !== null && taskDays > 0) flags.push(`the most recently due task is now ${taskDays} day${taskDays !== 1 ? "s" : ""} overdue`);
 
   const summary = flags.length === 0
-    ? "Recent activity looks healthy across email, calls, and tasks — no gaps flagged."
+    ? "Recent activity looks healthy across email, calls, and tasks - no gaps flagged."
     : `Zia flags: ${flags.join("; ")}. Re-engage before this account goes cold.`;
 
   return { lastEmail, lastCall, lastTaskDue, summary };
@@ -1006,7 +1056,7 @@ function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState
 
 // ─── Schedules drill-down ───────────────────────────────────────────────────────
 // useRuleCoverage.ts already fetches a flat schedule *count* for the KPI's
-// collapsed state, but discards the actual items — active/inactive and last-run
+// collapsed state, but discards the actual items - active/inactive and last-run
 // need the real records, fetched lazily here only once the tile is clicked, same
 // on-demand pattern as useActivityRecords above.
 function scheduleStatusText(item: unknown): string {
@@ -1041,7 +1091,7 @@ function useScheduleRecords(config: McpConfig | null, tools: McpTool[], active: 
 
     const scheduleTool = tools.find(t => isScheduleTool(t.name));
     if (!scheduleTool) {
-      // Surfaces in the Audit Logs panel so it's visible without DevTools —
+      // Surfaces in the Audit Logs panel so it's visible without DevTools -
       // either the near-miss candidates the regex almost matched (fix the
       // pattern to include them), or confirmation the server truly has no
       // schedule-listing tool under any name containing "sched"/"cron"/"recur".
@@ -1050,7 +1100,7 @@ function useScheduleRecords(config: McpConfig | null, tools: McpTool[], active: 
         id: crypto.randomUUID(), tool: "schedule-tool-lookup", input: {},
         output: { totalToolsConnected: tools.length, possibleScheduleTools: candidates },
         status: candidates.length > 0 ? "success" : "error",
-        errorMessage: candidates.length > 0 ? undefined : "No connected tool name contains 'sched', 'cron', or 'recur' — this MCP server may not expose schedule data at all.",
+        errorMessage: candidates.length > 0 ? undefined : "No connected tool name contains 'sched', 'cron', or 'recur' - this MCP server may not expose schedule data at all.",
         durationMs: 0, timestamp: new Date(),
       });
       setState(prev => ({ ...prev, unavailable: true }));
@@ -1101,26 +1151,26 @@ function computeScheduleBreakdown(items: unknown[]): ScheduleBreakdownRow[] {
     .sort((a, b) => Number(a.active) - Number(b.active) || Number(!!a.lastRun) - Number(!!b.lastRun));
 }
 
-// "Not used" = inactive, or active but has never actually run — both read as
+// "Not used" = inactive, or active but has never actually run - both read as
 // automation nobody would notice if it disappeared.
 function buildZiaScheduleInsight(rows: ScheduleBreakdownRow[]): { summary: string } {
-  if (rows.length === 0) return { summary: "No schedules found — nothing to evaluate yet." };
+  if (rows.length === 0) return { summary: "No schedules found - nothing to evaluate yet." };
   const inactive = rows.filter(r => !r.active).length;
   const neverRun = rows.filter(r => r.active && !r.lastRun).length;
   const flags: string[] = [];
   if (inactive > 0) flags.push(`${inactive} schedule${inactive !== 1 ? "s are" : " is"} inactive`);
   if (neverRun > 0) flags.push(`${neverRun} active schedule${neverRun !== 1 ? "s have" : " has"} never actually run`);
-  if (flags.length === 0) return { summary: "Every schedule is active and has run at least once — nothing sitting unused." };
-  return { summary: `Zia flags: ${flags.join("; ")}. These schedules aren't doing anything right now — reactivate what's still needed, or delete the rest so it's not mistaken for working automation.` };
+  if (flags.length === 0) return { summary: "Every schedule is active and has run at least once - nothing sitting unused." };
+  return { summary: `Zia flags: ${flags.join("; ")}. These schedules aren't doing anything right now - reactivate what's still needed, or delete the rest so it's not mistaken for working automation.` };
 }
 
 // ─── Functions: list, duplicates, active/inactive, code fetch + analysis ──────
 // Verified against a live org via ZohoCRM_getFunctions/getFunctionCode: the
 // modern Functions API has no module scoping (only "category": Standalone /
 // Button / Automation / etc.) and exposes a flat "state" field for active/
-// inactive — a different, more reliable shape than the older workflow-linked
+// inactive - a different, more reliable shape than the older workflow-linked
 // "associated" concept FunctionAudit.tsx uses. Code is fetched fresh per
-// function from the MCP server and held only in React state for the session —
+// function from the MCP server and held only in React state for the session -
 // never persisted to localStorage.
 
 interface FunctionItem {
@@ -1141,7 +1191,7 @@ function getFunctionActive(item: unknown): boolean {
   if (typeof r.active === "boolean") return r.active;
   if (typeof r.enabled === "boolean") return r.enabled;
   const state = String(r.state ?? "").toLowerCase();
-  if (!state) return true; // no signal at all — default active, same fallback isActiveWorkflow uses
+  if (!state) return true; // no signal at all - default active, same fallback isActiveWorkflow uses
   return !(state === "inactive" || state === "disabled" || state === "draft" || state === "false");
 }
 
@@ -1159,7 +1209,7 @@ function computeFunctionDuplicates(items: FunctionItem[]): FunctionDuplicateGrou
 
 // getFunctionCode's response is the raw Deluge/runtime source text itself
 // (confirmed via a live call), not a JSON envelope like the other entity
-// fetches — so this reads structuredContent.data.text / content[0].text
+// fetches - so this reads structuredContent.data.text / content[0].text
 // directly instead of running it through the generic JSON-array extractor.
 function extractFunctionCode(output: unknown): string | null {
   if (!output || typeof output !== "object") return null;
@@ -1191,7 +1241,7 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
   const scanFetchedRef = useRef(false);
   const detailToolRef = useRef<McpTool | null | undefined>(undefined);
 
-  // List + failures — eager (bounded to ~1000 functions), same eagerness as
+  // List + failures - eager (bounded to ~1000 functions), same eagerness as
   // the metadata-only fetch this replaces, so duplicate/naming recommendations
   // stay populated without requiring a click.
   useEffect(() => {
@@ -1229,7 +1279,7 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
           id: String(r.id ?? i),
           apiName: String(r.api_name ?? ""),
           name: String(r.name ?? r.api_name ?? `Function ${i + 1}`),
-          category: String(r.category ?? "—"),
+          category: String(r.category ?? "-"),
           active: getFunctionActive(f),
         };
       });
@@ -1275,7 +1325,7 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
     return findParam(findParamLocations(tool), /^fxIdentifier$|^functionId$|^id$/i) ?? { group: "path_variables", key: "fxIdentifier" };
   }
 
-  // On-demand single-function code fetch (preview) — downloaded fresh from the
+  // On-demand single-function code fetch (preview) - downloaded fresh from the
   // MCP server every time it's requested, kept only in this hook's React state.
   async function fetchCode(fnId: string) {
     if (!config || !fnId) return;
@@ -1299,7 +1349,7 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
     }
   }
 
-  // Capped batch scan for the aggregate "% of functions with issues" stat —
+  // Capped batch scan for the aggregate "% of functions with issues" stat -
   // gated behind scanActive (the Functions KPI being opened) since this is
   // one API call per function and shouldn't fire on every dashboard load.
   useEffect(() => {
@@ -1345,14 +1395,14 @@ function buildFunctionZiaSummary(
   functionsWithIssuesPct: number, scannedCount: number, duplicates: FunctionDuplicateGroup[],
   suspiciousCount: number, failureCount: number | null,
 ): string {
-  if (scannedCount === 0) return "Open this card to scan function code for issues — nothing analyzed yet.";
+  if (scannedCount === 0) return "Open this card to scan function code for issues - nothing analyzed yet.";
   const parts: string[] = [];
   if (functionsWithIssuesPct > 0) {
-    parts.push(`${functionsWithIssuesPct}% of the ${scannedCount} functions scanned have at least one flagged issue — mostly missing error handling and API calls made inside loops`);
+    parts.push(`${functionsWithIssuesPct}% of the ${scannedCount} functions scanned have at least one flagged issue - mostly missing error handling and API calls made inside loops`);
   }
   if (duplicates.length > 0) {
     const dupItemCount = duplicates.reduce((s, g) => s + g.items.length, 0);
-    parts.push(`${duplicates.length} function name${duplicates.length !== 1 ? "s are" : " is"} duplicated across ${dupItemCount} functions total — rename or delete the unused copies so workflows/buttons unambiguously call the right one`);
+    parts.push(`${duplicates.length} function name${duplicates.length !== 1 ? "s are" : " is"} duplicated across ${dupItemCount} functions total - rename or delete the unused copies so workflows/buttons unambiguously call the right one`);
   }
   if (suspiciousCount > 0) {
     parts.push(`${suspiciousCount} function${suspiciousCount !== 1 ? "s" : ""} still carr${suspiciousCount !== 1 ? "y" : "ies"} a placeholder/test name`);
@@ -1360,16 +1410,16 @@ function buildFunctionZiaSummary(
   if (failureCount) {
     parts.push(`${failureCount} recent execution failure${failureCount !== 1 ? "s" : ""} logged`);
   }
-  if (parts.length === 0) return "No issues, duplicates, or placeholder names found in the functions scanned — code quality looks solid.";
+  if (parts.length === 0) return "No issues, duplicates, or placeholder names found in the functions scanned - code quality looks solid.";
   return `Zia flags: ${parts.join("; ")}.`;
 }
 
 interface FunctionKpiSummary { total: number; active: number; inactive: number; fetched: boolean; }
 
 // "Total CRM Items"/"total items across N sources" sums every entity's raw
-// item count — except modules, where the raw count includes Zoho's internal
+// item count - except modules, where the raw count includes Zoho's internal
 // pseudo-modules (a "module" record auto-generated per file-upload field,
-// subforms, etc. — see isInternalModule) and deleted ones. Applying the same
+// subforms, etc. - see isInternalModule) and deleted ones. Applying the same
 // exclusion the Modules KPI card uses keeps this total from disagreeing with
 // that card over what "how many modules" even means.
 function entityItemCount(type: CrmEntityType, items: unknown[]): number {
@@ -1377,11 +1427,11 @@ function entityItemCount(type: CrmEntityType, items: unknown[]): number {
   return items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m)).length;
 }
 
-// Source attribution shown on hover — names the tool the count came from and
+// Source attribution shown on hover - names the tool the count came from and
 // how many records it actually saw, so every number on the tile traces back
 // to a real fetch instead of being taken on faith.
 function kpiSource(state: EntityState, count: number): string {
-  return state.toolUsed ? `Source: ${state.toolUsed} — ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found for this data";
+  return state.toolUsed ? `Source: ${state.toolUsed} - ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found for this data";
 }
 
 function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null, functionSummary: FunctionKpiSummary): KpiItem[] {
@@ -1389,7 +1439,7 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
   const blueprints = entityData.blueprints.items;
   const users = entityData.users.items;
 
-  // A fetch that failed before returning any pages leaves items at [] — the
+  // A fetch that failed before returning any pages leaves items at [] - the
   // same shape as a genuinely empty org. Treating both alike would render a
   // false "0 found, all good" tile instead of an honest "couldn't verify"
   // one, so each entity's real error must gate its tile's severity/note.
@@ -1401,14 +1451,14 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
   const hiddenPct = modules.length ? Math.round((hiddenCount / modules.length) * 100) : 0;
   const activePct = modules.length ? 100 - hiddenPct : 0;
   // Blueprint status is a flat Active/Inactive/Draft string, not the nested
-  // workflow shape — blueprintStatus keeps Draft from silently counting as
+  // workflow shape - blueprintStatus keeps Draft from silently counting as
   // active the way isActiveWorkflow's default-true fallback used to (see
   // crmPredicates.ts).
   const bpStatuses = blueprints.map(blueprintStatus);
   const draftBps = bpStatuses.filter(s => s === "draft").length;
   const inactiveBps = bpStatuses.filter(s => s === "inactive").length;
   const activeUsers = users.filter(isActiveUser).length;
-  // Deleted accounts don't consume a Zoho license — excluded from the
+  // Deleted accounts don't consume a Zoho license - excluded from the
   // "total licensed" figure, unlike disabled-but-not-deleted users.
   const licensedUsers = users.filter(u => !isDeletedUser(u)).length;
 
@@ -1416,10 +1466,10 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
     {
       key: "modules", label: "Modules", value: modules.length,
       severity: modulesFailed ? "unknown" : hiddenPct >= 40 ? "critical" : hiddenPct >= 15 ? "warning" : "good",
-      note: modulesFailed ? `Couldn't verify — ${entityData.modules.error}` : modules.length ? `${activePct}% active · ${hiddenPct}% inactive — click to see which` : "No modules found",
+      note: modulesFailed ? `Couldn't verify - ${entityData.modules.error}` : modules.length ? `${activePct}% active · ${hiddenPct}% inactive - click to see which` : "No modules found",
       clickable: modules.length > 0 || modulesFailed,
       unknown: modulesFailed,
-      source: modulesFailed ? `Source: ${entityData.modules.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.modules, modules.length),
+      source: modulesFailed ? `Source: ${entityData.modules.toolUsed ?? "no matching tool found"} - fetch failed, count not confirmed` : kpiSource(entityData.modules, modules.length),
     },
     {
       key: "blueprints", label: "Blueprints", value: blueprints.length,
@@ -1432,14 +1482,14 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
     {
       key: "users", label: "Active Users", value: activeUsers,
       severity: usersFailed ? "unknown" : activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
-      note: usersFailed ? `Couldn't verify — ${entityData.users.error}` : `${licensedUsers} total licensed — click to see who's active/inactive`,
+      note: usersFailed ? `Couldn't verify - ${entityData.users.error}` : `${licensedUsers} total licensed - click to see who's active/inactive`,
       clickable: users.length > 0 || usersFailed,
       unknown: usersFailed,
-      source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} — fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
+      source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} - fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
     },
     {
       // No MCP tool exists for listing schedules at all (not in Zoho's real
-      // catalogue) — this must read the same as any other "couldn't verify"
+      // catalogue) - this must read the same as any other "couldn't verify"
       // tile (a dash, not a number), never a fake "0"/"1" from a
       // spuriously-loose tool-name match.
       key: "schedules", label: "Schedules", value: 0,
@@ -1454,9 +1504,9 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
       severity: !functionSummary.fetched ? "warning" : functionSummary.total === 0 ? "critical" : functionSummary.inactive > 0 ? "warning" : "good",
       note: !functionSummary.fetched ? "Loading…"
         : functionSummary.total === 0 ? "No functions found"
-        : `${functionSummary.inactive} inactive of ${functionSummary.total} — click for issues, duplicates & code`,
+        : `${functionSummary.inactive} inactive of ${functionSummary.total} - click for issues, duplicates & code`,
       clickable: functionSummary.total > 0,
-      source: `Source: function list — ${functionSummary.total} record${functionSummary.total !== 1 ? "s" : ""}`,
+      source: `Source: function list - ${functionSummary.total} record${functionSummary.total !== 1 ? "s" : ""}`,
     },
   ];
 }
@@ -1475,7 +1525,7 @@ const BP_STATUS_ORDER: Record<BlueprintStatus, number> = { inactive: 0, draft: 1
 
 // Real Zoho blueprint list responses very often carry NO top-level "name" at
 // all (blueprints are usually anonymous processes identified only by their
-// module + driving field) — so getItemName's generic fallback chain lands on
+// module + driving field) - so getItemName's generic fallback chain lands on
 // "Item N" far more often here than for named entities like workflows. Build
 // a real label from the module + the field the blueprint actually drives
 // (process_info.field_label / field.name, the same shape BlueprintAudit.tsx
@@ -1516,10 +1566,10 @@ interface UserBreakdownRow {
 
 const USER_BREAKDOWN_SORT_RANK: Record<UserStatusBucket, number> = { inactive: 0, deleted: 1, active: 2 };
 
-// Disabled-but-licensed users surface first — they're the actionable ones (a
+// Disabled-but-licensed users surface first - they're the actionable ones (a
 // licensed seat with nobody using it), active last, same "flag the useless
 // ones first" convention as the blueprint/module breakdowns above. Deleted
-// accounts are excluded entirely — they're gone from the org and hold no
+// accounts are excluded entirely - they're gone from the org and hold no
 // license, so there's nothing actionable to show here.
 function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): UserBreakdownRow[] {
   return entityData.users.items
@@ -1527,8 +1577,8 @@ function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): U
     .map((u, i) => {
       const r = (u ?? {}) as Record<string, unknown>;
       const profile = typeof r.profile === "object" && r.profile
-        ? String((r.profile as Record<string, unknown>).name ?? "—")
-        : String(r.role ?? "—");
+        ? String((r.profile as Record<string, unknown>).name ?? "-")
+        : String(r.role ?? "-");
       return {
         id: String(r.id ?? i),
         name: getItemName(u, i),
@@ -1564,18 +1614,18 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOf
     }
     // The generic zero-param getPipelines() call this entity state comes from
     // has no layout_id to scope by, so it can undercount an org with more
-    // than one pipeline on the Deals layout — pipelineCount (from the real
+    // than one pipeline on the Deals layout - pipelineCount (from the real
     // getLayouts -> getPipelines chain in usePipelineStages.ts) is the
     // authoritative number once it's resolved.
     const count = def.type === "pipelines" && pipelineCount !== null ? pipelineCount : st.items.length;
-    const source = st.toolUsed ? `Source: ${st.toolUsed} — ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found";
+    const source = st.toolUsed ? `Source: ${st.toolUsed} - ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found";
     if (count === 0) {
-      // A fetch error and a genuinely empty CRM both leave items at [] — only
+      // A fetch error and a genuinely empty CRM both leave items at [] - only
       // the former means "couldn't verify". Conflating them into the same
       // critical "Not found" reads as a confirmed gap when it might just be
       // a broken connection.
       if (st.error) {
-        return { key: def.type, label: def.label, value: "—", status: `Couldn't verify — ${st.error}`, severity: "unknown" as const, targetSection: def.targetSection, source: `Source: ${st.toolUsed ?? "no matching tool found"} — fetch failed` };
+        return { key: def.type, label: def.label, value: "-", status: `Couldn't verify - ${st.error}`, severity: "unknown" as const, targetSection: def.targetSection, source: `Source: ${st.toolUsed ?? "no matching tool found"} - fetch failed` };
       }
       return { key: def.type, label: def.label, value: "N/A", status: "Not found", severity: "critical" as const, targetSection: def.targetSection, source };
     }
@@ -1597,7 +1647,7 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOf
       case "pipelines":
         // outOfOrderStageCount comes from a separate getLayouts -> getPipelines
         // fetch (usePipelineStages.ts) that can still be mid-flight even after
-        // this generic pipelines entity has resolved — reporting "Configured"
+        // this generic pipelines entity has resolved - reporting "Configured"
         // before that settles is what caused this row to flip between
         // "Configured" and "N stages out of order" on identical data.
         if (!pipelineStagesResolved) {
@@ -1627,7 +1677,7 @@ function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label:
   if (state.error) {
     return (
       <div className="panel-empty-error">
-        <p className="business-view-hint">⚠ {state.error}{state.toolUsed ? ` (via ${state.toolUsed})` : " — no matching tool found"}</p>
+        <p className="business-view-hint">⚠ {state.error}{state.toolUsed ? ` (via ${state.toolUsed})` : " - no matching tool found"}</p>
         <button className="btn-secondary" onClick={onRetry}>Retry</button>
       </div>
     );
@@ -1658,7 +1708,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // Single source of truth for the master-detail layout below: the one card
   // (out of the 6 KPI tiles + 4 CRM Configuration tiles) currently selected
   // in the left-hand list, whose detail renders in the right-hand panel.
-  // Replaces the old expandedKpi + pipelinesOpen pair — those two used to
+  // Replaces the old expandedKpi + pipelinesOpen pair - those two used to
   // gate two visually-separate "expand below" sections; now there's only one
   // selection driving one detail slot.
   type CardKey = "modules" | "blueprints" | "users" | "schedules" | "functions"
@@ -1670,7 +1720,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     // Cards further down the left-hand list can sit well below the fold;
     // without this, selecting one pops the detail panel in at the top of
     // the grid row, off-screen from where the user just clicked. Skip the
-    // very first render though — "modules" is preselected by default, and
+    // very first render though - "modules" is preselected by default, and
     // scrolling then would auto-scroll the page the instant it connects,
     // before the user has clicked anything.
     if (isFirstCardRender.current) { isFirstCardRender.current = false; return; }
@@ -1686,7 +1736,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [functionsListExpanded, setFunctionsListExpanded] = useState(false);
   type FunctionsSubTab = "issues" | "duplicates" | "all";
   const [functionsSubTab, setFunctionsSubTab] = useState<FunctionsSubTab>("issues");
-  // One search box per drill-down panel — cleared whenever a different card
+  // One search box per drill-down panel - cleared whenever a different card
   // (or function sub-tab) is opened so a stale query from "Modules" doesn't
   // silently hide everything the next time "Blueprints" is opened.
   const [drilldownSearch, setDrilldownSearch] = useState("");
@@ -1704,7 +1754,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     });
   }
   // Deliberately kept eager (fetches as soon as tools are ready) rather than
-  // gated on selectedCard === "activity" like the on-demand hooks above —
+  // gated on selectedCard === "activity" like the on-demand hooks above -
   // this is existing behavior preserved as-is; only where its result renders
   // changed (now behind the Activity card's selection instead of always-on).
   const activityRecords = useActivityRecords(config, tools, true, onLog);
@@ -1743,7 +1793,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
 
   // Fills every property the tool's schema exposes (not just a free-text query
   // field) so structural tools like a "ZiaRecommendation" create/action tool
-  // can still be called — e.g. a "recommendations" array field gets [{id}].
+  // can still be called - e.g. a "recommendations" array field gets [{id}].
   function buildZiaParams(tool: McpTool, question: string, recId?: string, recName?: string): Record<string, unknown> {
     const props = tool.inputSchema?.properties ?? {};
     const required: string[] = tool.inputSchema?.required ?? [];
@@ -1775,7 +1825,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
 
   // Runs a question against the best available Zia-ish tool. Prefers a tool
   // with genuine free-text input, but falls back to whatever Zia/recommend
-  // tool is connected — filling its full schema generically — rather than
+  // tool is connected - filling its full schema generically - rather than
   // refusing to use it. Returns the formatted answer, or throws on failure.
   async function runZiaQuery(question: string, recId?: string, recName?: string): Promise<string> {
     const tool = findZiaTool(tools) ?? tools[0];
@@ -1820,14 +1870,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   }
 
   useEffect(() => {
-    // Scroll only within the chat's own message list — never the page —
+    // Scroll only within the chat's own message list - never the page -
     // and only once there's actually something to show (skip the empty initial mount).
     if (ziaMessages.length === 0) return;
     const el = chatMessagesRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [ziaMessages]);
 
-  // Remediation answers render inline on the recommendation card itself —
+  // Remediation answers render inline on the recommendation card itself -
   // routing them into the shared Ask Zia chat (further down the page) meant
   // clicking the button either forced an unwanted scroll or landed the user
   // among unrelated Reports/Feedback content instead of the actual answer.
@@ -1861,7 +1911,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const functionInactiveCount = functionRecords.items.length - functionActiveCount;
   const functionSuspiciousNames = functionRecords.items.filter(f => SUSPICIOUS_FUNCTION_NAME.test(f.name.trim())).map(f => f.name);
   // Adapter so generateRecommendations (unchanged below) keeps reading the
-  // same FunctionHealth shape it always has — now sourced from the new hook's
+  // same FunctionHealth shape it always has - now sourced from the new hook's
   // full items instead of the old names-only fetch, so duplicate/suspicious
   // counts here always match what the Functions KPI drilldown shows.
   const functionHealth: FunctionHealth | null = functionRecords.listState.fetched ? {
@@ -1913,7 +1963,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const profileItems = entityData.profiles.items;
-  // Deleted accounts are gone from the org and hold no license — excluded
+  // Deleted accounts are gone from the org and hold no license - excluded
   // from this list entirely, same as computeUserBreakdown above it.
   const userItemsForPanel = entityData.users.items.filter(u => !isDeletedUser(u));
 
@@ -2011,7 +2061,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     }
 
     // autoTable adds its own pages independently of ensureSpace below, so the
-    // page number must always be read live rather than tracked in a variable —
+    // page number must always be read live rather than tracked in a variable -
     // a manual counter would drift out of sync the moment a table spans pages.
     function drawFooter() {
       doc.setDrawColor(BORDER);
@@ -2033,7 +2083,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     }
 
     function prettyStatus(s: string | null): string {
-      if (!s) return "—";
+      if (!s) return "-";
       return s.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
     }
 
@@ -2099,7 +2149,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       const isError = !!state.error;
 
       // Tool name is measured first (fixed at the right edge) so the status/error
-      // column below can be wrapped to whatever width is actually left over —
+      // column below can be wrapped to whatever width is actually left over -
       // drawing both at a fixed x with unbounded text is what let a long error
       // message run straight into the "via <tool>" label.
       doc.setFont("helvetica", "normal");
@@ -2110,7 +2160,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9.5);
       const statusRaw = isError
-        ? `Error — ${state.error}`
+        ? `Error - ${state.error}`
         : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
       const availStatusWidth = pageWidth - margin - 8 - statusColX - (toolWidth ? toolWidth + 14 : 0);
       const statusLines = doc.splitTextToSize(statusRaw, Math.max(availStatusWidth, 90)) as string[];
@@ -2141,7 +2191,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
 
       y += headerHeight;
 
-      // Actual item list (not just the count) rendered as a real table — large
+      // Actual item list (not just the count) rendered as a real table - large
       // entities (300+ modules/fields on a real org) read as an unscannable
       // wall of comma-separated text otherwise, and a table paginates itself.
       if (!isError && state.items.length > 0) {
@@ -2184,7 +2234,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             }
           },
           // autoTable paginates a big table on its own, invisibly to our manual
-          // ensureSpace()/drawFooter() calls — without these hooks, every page
+          // ensureSpace()/drawFooter() calls - without these hooks, every page
           // it adds mid-table would be missing the banner and/or footer.
           willDrawPage: () => drawHeader(),
           didDrawPage: () => drawFooter(),
@@ -2331,7 +2381,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             data-tooltip={k.source}
           >
             <span className="kpi-tile-label">{k.label}</span>
-            <span className="kpi-tile-value">{k.unknown ? "—" : k.value.toLocaleString()}</span>
+            <span className="kpi-tile-value">{k.unknown ? "-" : k.value.toLocaleString()}</span>
             <span className="kpi-tile-note">{k.note}</span>
           </button>
         ))}
@@ -2363,7 +2413,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "modules" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Modules — Active / Hidden / Empty</h4>
+            <h4>Modules - Active / Hidden / Empty</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {entityData.modules.error && entityData.modules.items.length === 0 ? (
@@ -2479,7 +2529,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "users" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Active Users — Active vs Inactive</h4>
+            <h4>Active Users - Active vs Inactive</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {entityData.users.error && entityData.users.items.length === 0 ? (
@@ -2518,7 +2568,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {scheduleRecords.unavailable && (
-            <p className="business-view-hint">No schedule-listing tool is connected — schedule activity can't be checked from here.</p>
+            <p className="business-view-hint">No schedule-listing tool is connected - schedule activity can't be checked from here.</p>
           )}
           {scheduleRecords.loading && (
             <p className="kpi-drilldown-progress"><span className="spinner" /> Fetching schedules…</p>
@@ -2550,7 +2600,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 <div className="zia-rec zia-rec-medium activity-zia-rec">
                   <div className="zia-rec-header">
                     <span className="zia-rec-icon">✦</span>
-                    <span className="zia-rec-title">Zia Recommendation — Unused Schedules</span>
+                    <span className="zia-rec-title">Zia Recommendation - Unused Schedules</span>
                   </div>
                   <p className="zia-rec-desc">{ziaScheduleInsight.summary}</p>
                 </div>
@@ -2563,7 +2613,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "functions" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Functions — Issues, Duplicates &amp; Code</h4>
+            <h4>Functions - Issues, Duplicates &amp; Code</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <div className="kpi-drilldown-summary">
@@ -2577,7 +2627,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           <div className="zia-rec zia-rec-medium activity-zia-rec">
             <div className="zia-rec-header">
               <span className="zia-rec-icon">✦</span>
-              <span className="zia-rec-title">Zia Recommendation — Functions</span>
+              <span className="zia-rec-title">Zia Recommendation - Functions</span>
             </div>
             <p className="zia-rec-desc">{functionZiaSummary}</p>
           </div>
@@ -2620,7 +2670,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 <p className="kpi-drilldown-note">
                   Scanned {scannedFnCount} of {functionRecords.items.length} functions
                   {scannedFnCount >= FUNCTION_CODE_SCAN_CAP && scannedFnCount < functionRecords.items.length ? ` (capped at ${FUNCTION_CODE_SCAN_CAP})` : ""}
-                  {scannedFnCount > 0 ? ` — ${functionsWithIssuesPct}% have at least one flagged issue.` : "."}
+                  {scannedFnCount > 0 ? ` - ${functionsWithIssuesPct}% have at least one flagged issue.` : "."}
                 </p>
               )}
               {!functionRecords.scanProgress.loading && sortedFunctionIssueRows.length === 0 && scannedFnCount > 0 && (
@@ -2657,7 +2707,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                               <div className="zia-rec zia-rec-low activity-zia-rec">
                                 <div className="zia-rec-header">
                                   <span className="zia-rec-icon">✦</span>
-                                  <span className="zia-rec-title">Zia Recommendation — Formatting &amp; Comments</span>
+                                  <span className="zia-rec-title">Zia Recommendation - Formatting &amp; Comments</span>
                                 </div>
                                 <p className="zia-rec-desc">{reviewCodeQuality(functionRecords.codeByFnId[row.id]!.code!).summary}</p>
                               </div>
@@ -2734,7 +2784,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                             <div className="zia-rec zia-rec-low activity-zia-rec">
                               <div className="zia-rec-header">
                                 <span className="zia-rec-icon">✦</span>
-                                <span className="zia-rec-title">Zia Recommendation — Formatting &amp; Comments</span>
+                                <span className="zia-rec-title">Zia Recommendation - Formatting &amp; Comments</span>
                               </div>
                               <p className="zia-rec-desc">{reviewCodeQuality(functionRecords.codeByFnId[fn.id]!.code!).summary}</p>
                             </div>
@@ -2827,7 +2877,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "workflows" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Workflows — Active / Inactive / Duplicate / Overlapping</h4>
+            <h4>Workflows - Active / Inactive / Duplicate / Overlapping</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <input
@@ -2841,32 +2891,35 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${workflowFilter === "active" ? "selected" : ""}`}
               onClick={() => setWorkflowFilter(prev => (prev === "active" ? "all" : "active"))}
+              data-tooltip={WORKFLOW_ACTIVE_TOOLTIP}
             >
               {workflowBreakdown.filter(r => r.active).length} Active
             </button>
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "inactive" ? "selected" : ""}`}
               onClick={() => setWorkflowFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+              data-tooltip={WORKFLOW_INACTIVE_TOOLTIP}
             >
               {workflowBreakdown.filter(r => !r.active).length} Inactive
             </button>
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter === "never" ? "selected" : ""}`}
               onClick={() => setWorkflowFilter(prev => (prev === "never" ? "all" : "never"))}
+              data-tooltip="Active or inactive workflows with no recorded execution yet - never matched their trigger criteria, or this MCP connection doesn't expose execution history."
             >
               {workflowBreakdown.filter(r => !r.lastTriggered).length} Never Triggered
             </button>
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "duplicate" ? "selected" : ""}`}
               onClick={() => setWorkflowFilter(prev => (prev === "duplicate" ? "all" : "duplicate"))}
-              title="Same module, trigger, criteria and actions as another rule — regardless of name"
+              data-tooltip="Same module, trigger, criteria and actions as another rule - regardless of name"
             >
               {workflowBreakdown.filter(r => r.duplicate).length} Duplicate
             </button>
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter === "overlapping" ? "selected" : ""}`}
               onClick={() => setWorkflowFilter(prev => (prev === "overlapping" ? "all" : "overlapping"))}
-              title="Shares a module + trigger event with another active rule"
+              data-tooltip="Shares a module + trigger event with another active rule"
             >
               {workflowBreakdown.filter(r => r.overlapping).length} Overlapping
             </button>
@@ -2884,17 +2937,17 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <div key={row.id} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module">{row.module}</span>
-                <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : ""}`}>{formatLastTriggered(row.lastTriggered)}</span>
-                {row.duplicate && <span className="kpi-drilldown-badge status-inactive" title="Identical module, trigger, criteria and actions as another rule">duplicate</span>}
-                {row.overlapping && <span className="kpi-drilldown-badge status-inactive" title="Shares a module + trigger event with another active rule">overlapping</span>}
-                <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+                <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : ""}`} data-tooltip={workflowLastTriggeredTooltip(row)}>{formatLastTriggered(row.lastTriggered)}</span>
+                {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.duplicateDetail ?? "Identical module, trigger, criteria and actions as another rule"}>duplicate</span>}
+                {row.overlapping && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.overlappingDetail ?? "Shares a module + trigger event with another active rule"}>overlapping</span>}
+                <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`} data-tooltip={row.active ? WORKFLOW_ACTIVE_TOOLTIP : WORKFLOW_INACTIVE_TOOLTIP}>{row.active ? "active" : "inactive"}</span>
               </div>
             ))}
           </div>
           <div className="zia-rec zia-rec-medium activity-zia-rec">
             <div className="zia-rec-header">
               <span className="zia-rec-icon">✦</span>
-              <span className="zia-rec-title">Zia Recommendation — Workflows</span>
+              <span className="zia-rec-title">Zia Recommendation - Workflows</span>
             </div>
             <p className="zia-rec-desc">{ziaWorkflowInsight.summary}</p>
           </div>
@@ -2904,7 +2957,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "activity" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Activity — Email / Task / Call</h4>
+            <h4>Activity - Email / Task / Call</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           <div className="activity-subkpi-grid">
@@ -2920,7 +2973,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           <div className="zia-rec zia-rec-medium activity-zia-rec">
             <div className="zia-rec-header">
               <span className="zia-rec-icon">✦</span>
-              <span className="zia-rec-title">Zia Recommendation — Recent Activity</span>
+              <span className="zia-rec-title">Zia Recommendation - Recent Activity</span>
             </div>
             <div className="activity-zia-grid">
               <div className="activity-zia-item">
@@ -2995,8 +3048,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   const name = getItemName(item, idx);
                   const r = (item ?? {}) as Record<string, unknown>;
                   const profileName = typeof r.profile === "object" && r.profile
-                    ? String((r.profile as Record<string, unknown>).name ?? "—")
-                    : String(r.role ?? "—");
+                    ? String((r.profile as Record<string, unknown>).name ?? "-")
+                    : String(r.role ?? "-");
                   return { item, idx, name, profileName };
                 })
                 .filter(({ name, profileName }) => matchesSearch(name, profileName))
@@ -3127,7 +3180,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <div className="zia-chat-messages" ref={chatMessagesRef}>
               {ziaMessages.length === 0 ? (
                 <div className="zia-chat-empty">
-                  Ask Zia anything about your CRM — process gaps, optimization ideas, or specific entities.
+                  Ask Zia anything about your CRM - process gaps, optimization ideas, or specific entities.
                 </div>
               ) : (
                 ziaMessages.map((msg, i) => (
@@ -3293,7 +3346,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
 
           {/* Right column: what this app is, plus any submitted feedback below it.
               Kept as a single grid child (alongside the form) so the entries
-              list — which only renders once feedback exists — doesn't wrap
+              list - which only renders once feedback exists - doesn't wrap
               onto its own row instead of staying in the right column. */}
           <div className="crm-feedback-side">
             <div className="crm-feedback-about">

@@ -37,13 +37,13 @@ export const CRM_ENTITIES: { type: CrmEntityType; label: string; icon: string; p
 export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns: RegExp[] }> = {
   blueprints: {
     preferred: ["getBlueprints", "getAllBlueprints", "listBlueprints", "getBlueprintList", "getBlueprintProcesses"],
-    // Anchored to end-of-name — same fix as the workflows patterns below.
+    // Anchored to end-of-name - same fix as the workflows patterns below.
     // The old unanchored "getblueprint(?!byid|id|record|stage)" negative
     // lookahead only excludes those words when they sit immediately after
     // "getblueprint", so it still matched getBlueprintStateById (followed by
     // "state", not "byid") and getBlueprintProcessConfigurationMeta. Both
     // sort ahead of the real getBlueprint list tool in some servers' tool
-    // order and get picked by .find() first — calling getBlueprintStateById
+    // order and get picked by .find() first - calling getBlueprintStateById
     // with no blueprintId/stateId returns a plain-text "missing parameter"
     // error, which the generic array-extraction fallback then wraps into a
     // single fake blueprint with no name field, showing as "Item 1".
@@ -75,7 +75,7 @@ export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns
     // skip the exact-name `preferred` list above and fall through to these
     // patterns. An unanchored "getworkflowrule" also matches sibling tools
     // like getWorkflowRuleUsage/getWorkflowRulesCount, which sort earlier in
-    // the tool list and get picked by .find() first — calling them with no
+    // the tool list and get picked by .find() first - calling them with no
     // rule ID fails, and the failure text was misread as a fake "workflow"
     // matching zero modules, making every module look automation-free.
     patterns: [/getworkflowrules$/i, /listworkflow/i, /allworkflow/i, /getworkflows?$/i],
@@ -99,13 +99,13 @@ export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns
 };
 
 // Zoho's fields endpoint is scoped to one module per call, with no "all
-// modules" mode — unlike every other entity here. Calling it with no module
+// modules" mode - unlike every other entity here. Calling it with no module
 // param (what the generic single-call path below does for every other type)
 // just fails or returns nothing, and firing one call per module in the org
 // isn't practical either (a real CRM can have hundreds). So "fields" is
 // special-cased to the same core lead-to-deal lifecycle modules the flow map
 // and Automation Coverage already treat as the CRM's backbone (see
-// STAGE_DEFINITIONS in flowMapModel.ts) — a small, honest, representative
+// STAGE_DEFINITIONS in flowMapModel.ts) - a small, honest, representative
 // sample instead of either an always-empty result or an unbounded fan-out.
 const CORE_LIFECYCLE_MODULE_MATCHERS: RegExp[] = [/lead/i, /contact/i, /deal|opportunit/i, /account/i];
 
@@ -158,13 +158,13 @@ export function extractArray(output: unknown): unknown[] {
   for (const val of Object.values(r)) {
     if (Array.isArray(val) && val.length > 0) return val;
   }
-  // Single-object responses (e.g. getProfile / getUser returning one record) — wrap in array
+  // Single-object responses (e.g. getProfile / getUser returning one record) - wrap in array
   const hasId = "id" in r || "userId" in r || "profileId" in r || "name" in r;
   if (hasId) return [r];
   return [];
 }
 
-// Zoho list APIs page at up to 200 records and signal more via info.more_records —
+// Zoho list APIs page at up to 200 records and signal more via info.more_records -
 // without checking this, fetchEntity would silently only ever see page 1, making
 // anything past record #200 (e.g. a workflow rule for a specific module) invisible
 // to the whole app even though it exists in the org.
@@ -195,7 +195,7 @@ function nestedName(val: unknown): string | undefined {
 
 export function getItemName(item: unknown, idx: number): string {
   // Some list endpoints (e.g. pipelines/stages on certain MCP servers) return
-  // plain string/number entries rather than objects — without this, every
+  // plain string/number entries rather than objects - without this, every
   // such entry silently fell through to the "Item N" placeholder regardless
   // of its actual value.
   if (typeof item === "string") return item || `Item ${idx + 1}`;
@@ -205,7 +205,7 @@ export function getItemName(item: unknown, idx: number): string {
   // Zoho module records (Deals/Leads/Contacts/etc, fetched via COQL/getRecords)
   // use Capitalized_With_Underscores field names, unlike the flatter entity
   // list endpoints (workflows/blueprints/pipelines/users) this function also
-  // serves — without checking both casings, every record from a module whose
+  // serves - without checking both casings, every record from a module whose
   // primary field isn't literally "name" (e.g. Deals' "Deal_Name") fell
   // through to the "Item N" placeholder regardless of having a real name.
   const fullName = [r.First_Name ?? r.first_name, r.Last_Name ?? r.last_name].filter(Boolean).join(" ").trim();
@@ -216,7 +216,7 @@ export function getItemName(item: unknown, idx: number): string {
     r.rule_name ?? r.process_name ??
     r.stage_name ?? r.title ?? r.full_name ?? (fullName || undefined) ??
     r.email ?? r.Email ??
-    // Zoho Blueprint list responses don't always carry a top-level name —
+    // Zoho Blueprint list responses don't always carry a top-level name -
     // fall back to the driving field/layout/process label before giving up.
     nestedName(r.process_info) ?? nestedName(r.field) ?? nestedName(r.layout) ??
     `Item ${idx + 1}`
@@ -278,13 +278,13 @@ export function useCrmEntities(
   // fetchEntity("fields") needs the current module list to know which modules
   // to scope its per-module calls to, but reading entityData.modules.items
   // directly would close over a stale value from whenever the callback was
-  // created — this ref always has the latest, for callers that don't pass
+  // created - this ref always has the latest, for callers that don't pass
   // moduleItemsOverride explicitly (e.g. a future per-entity retry button).
   const entityDataRef = useRef(entityData);
   entityDataRef.current = entityData;
 
   // Fetches a module-scoped entity (currently just "fields") by calling the
-  // tool once per resolved core module and concatenating the results — Zoho's
+  // tool once per resolved core module and concatenating the results - Zoho's
   // fields endpoint has no "all modules" mode, unlike every other entity here.
   const fetchScopedFields = useCallback(async (tool: McpTool, moduleItems: unknown[]) => {
     const coreApiNames = resolveCoreModuleApiNames(moduleItems);
@@ -325,7 +325,7 @@ export function useCrmEntities(
     setEntityData(prev => ({
       ...prev,
       // Partial results (some core modules succeeded, one failed) still count
-      // as resolved data, not an error state — same "keep what worked" stance
+      // as resolved data, not an error state - same "keep what worked" stance
       // as the generic path's mid-pagination failure handling below.
       fields: { ...prev.fields, loading: false, items, error: items.length === 0 ? lastError : null, toolUsed: tool.name, lastFetched: Date.now() },
     }));
@@ -353,16 +353,16 @@ export function useCrmEntities(
       return fetchScopedFields(tool, moduleItemsOverride ?? entityDataRef.current.modules.items);
     }
 
-    const MAX_PAGES = 10; // safety cap — 10 * 200 = up to 2000 records
+    const MAX_PAGES = 10; // safety cap - 10 * 200 = up to 2000 records
     const outerStart = Date.now();
     // Declared outside the try so a mid-pagination failure (page 2+ throwing)
     // can still report whatever pages already succeeded, instead of losing
-    // real page-1 data and reporting a false "zero records" resolved state —
+    // real page-1 data and reporting a false "zero records" resolved state -
     // that previously made every module look automation-free on the flow map.
     let items: unknown[] = [];
     try {
       // Tool schemas vary by server (flat "page" vs. grouped under query_params,
-      // or no pagination support at all) — resolve the real location instead of
+      // or no pagination support at all) - resolve the real location instead of
       // guessing a flat "page" key, same as useCrmRecordSamples.ts does.
       const pageLoc = findParam(findParamLocations(tool), /^page$/i);
 
@@ -406,7 +406,7 @@ export function useCrmEntities(
       });
       setEntityData(prev => ({
         ...prev,
-        // Keep whatever pages were already fetched — partial real data beats
+        // Keep whatever pages were already fetched - partial real data beats
         // a false "resolved with zero records" state for downstream consumers
         // like the flow map's automation-coverage check.
         [type]: { ...prev[type], loading: false, items, error: msg, toolUsed: tool.name, lastFetched: items.length > 0 ? Date.now() : prev[type].lastFetched },
@@ -420,7 +420,7 @@ export function useCrmEntities(
     hasFetched.current = true;
     setLastRefresh(new Date());
     // "fields" needs the resolved module list to know which modules to scope
-    // its per-module calls to — chained after modules resolves instead of
+    // its per-module calls to - chained after modules resolves instead of
     // firing in the same immediate parallel batch as everything else, since
     // it'd otherwise always see an empty module list on this first fetch.
     const modulesPromise = fetchEntity("modules");
@@ -432,7 +432,7 @@ export function useCrmEntities(
   }, [config, fetchEntity]);
 
   // A new/different MCP connection (org switch, reconnect) must not keep
-  // showing the previous org's cached items and score — reset so the
+  // showing the previous org's cached items and score - reset so the
   // auto-fetch effect below re-runs against the new connection.
   useEffect(() => {
     if (configKey !== lastConfigKey.current) {

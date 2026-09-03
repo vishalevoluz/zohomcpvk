@@ -15,7 +15,7 @@ interface Props {
   allTools: McpTool[];
 }
 
-// Connected Tools is grouped the same way as the Audit nav, plus Fields —
+// Connected Tools is grouped the same way as the Audit nav, plus Fields -
 // which has tools but no nav entry of its own (see lib/sections.ts).
 const TOOL_GROUPS: { id: Section; label: string; icon: string }[] = [
   ...SECTIONS,
@@ -23,7 +23,7 @@ const TOOL_GROUPS: { id: Section; label: string; icon: string }[] = [
 ];
 
 export default function Sidebar({ connected, activeSection, onSelectSection, categorized, logCount, onDisconnect, allTools }: Props) {
-  // Starts narrow (icons only) — the toggle button below expands/collapses it.
+  // Starts narrow (icons only) - the toggle button below expands/collapses it.
   const [collapsed, setCollapsed] = useState(true);
   const [toolsOpen, setToolsOpen] = useState(true);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
@@ -34,7 +34,7 @@ export default function Sidebar({ connected, activeSection, onSelectSection, cat
 
   // Radix Dialog portals to document.body, outside this component's DOM
   // subtree, so a fixed/centered modal has no way to know how much width the
-  // sidebar is currently eating on the left — without this, "centered"
+  // sidebar is currently eating on the left - without this, "centered"
   // dialogs sit visibly left-of-center relative to the actual visible
   // workspace. Publishing the width on the root element lets globals.css
   // shift centered overlays by half of it (see .jc-dialog).

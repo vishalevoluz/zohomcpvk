@@ -8,7 +8,7 @@ import { isEntityResolved } from "@/lib/useCrmEntities";
 import { moduleApiName, unreferencedModules, isDeletedModule, isInternalModule, isSystemHiddenModule } from "@/lib/crmPredicates";
 
 const RECORD_COUNT_TOOL_PATTERNS = [/getrecordcount$/i, /recordcount$/i];
-// Bounds how many getRecordCount calls one refresh makes — the shortlist
+// Bounds how many getRecordCount calls one refresh makes - the shortlist
 // (modules already unreferenced by any workflow/blueprint) is normally small,
 // but this caps it regardless so a large org can't trigger dozens of calls.
 const MAX_MODULES_TO_CHECK = 12;
@@ -44,11 +44,11 @@ const INIT_STATE: ModuleRecordCountsState = { counts: {}, toolAvailable: false, 
 
 // Best-effort confirmation of "this module really has 0 records" for the
 // short heuristic shortlist of modules already unreferenced by any workflow
-// or blueprint (see unreferencedModules in crmPredicates.ts) — the
+// or blueprint (see unreferencedModules in crmPredicates.ts) - the
 // empty-modules finding uses this to say "confirmed 0 records" instead of
 // just "not referenced by automation" wherever the server supports it.
 // Gracefully no-ops (toolAvailable: false) if no getRecordCount-style tool
-// exists on this MCP server — same pattern as useRuleCoverage.ts.
+// exists on this MCP server - same pattern as useRuleCoverage.ts.
 export function useModuleRecordCounts(
   config: McpConfig | null,
   tools: McpTool[],

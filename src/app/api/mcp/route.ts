@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import https from "https";
 import http from "http";
 
-// Agent that skips TLS cert verification — needed for MCP servers with self-signed certs
+// Agent that skips TLS cert verification - needed for MCP servers with self-signed certs
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 function proxyFetch(

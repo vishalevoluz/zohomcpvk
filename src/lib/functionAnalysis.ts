@@ -1,10 +1,10 @@
 // Best-effort static analysis over Deluge function source text. This is a
-// pattern-matching scanner, not a real Deluge compiler/interpreter — findings
+// pattern-matching scanner, not a real Deluge compiler/interpreter - findings
 // are phrased as "likely"/"may"/"possible" rather than certainties, same
 // heuristic tone the rest of this app's predicates already use (see
 // crmPredicates.ts). Verified against real Deluge source pulled from a live
-// org via ZohoCRM_getFunctionCode: API calls take two shapes — zoho.crm.*(...)
-// parenthesized calls, and invokeurl [ ... ] bracket blocks (no parens) — both
+// org via ZohoCRM_getFunctionCode: API calls take two shapes - zoho.crm.*(...)
+// parenthesized calls, and invokeurl [ ... ] bracket blocks (no parens) - both
 // are matched below.
 
 export type FunctionIssueCategory =
@@ -44,7 +44,7 @@ export function sortIssuesBySeverity(issues: FunctionIssue[]): FunctionIssue[] {
 }
 
 // zoho.crm.*(...) and sendmail(...) are parenthesized; invokeurl is a bracket
-// block with no parens at all ("invokeurl\n[ ... ]") — matched as a bare
+// block with no parens at all ("invokeurl\n[ ... ]") - matched as a bare
 // keyword rather than requiring a "(" after it.
 const API_CALL_PATTERN = /\bzoho\.crm\.[a-zA-Z]+\s*\(|\binvokeurl\b|\bsendmail\s*\(|\bzoho\.crm\.bulk\.[a-zA-Z]+\s*\(/gi;
 const LOOP_START_PATTERN = /\b(for\s+each\s+\w+\s+in\s+[\w.\[\]"']+|while\s*\([^)]*\))\s*\{/gi;
@@ -76,7 +76,7 @@ function loopBodies(script: string): string[] {
 }
 
 // Extracts each full zoho.crm.*(...) invocation (via paren-balance, so nested
-// parens/commas inside arguments don't truncate the match early) — used both
+// parens/commas inside arguments don't truncate the match early) - used both
 // for the repeated-call check and for the duplicate-record heuristic below.
 function extractApiCallInvocations(script: string): string[] {
   const calls: string[] = [];
@@ -128,7 +128,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
   if (!hasBalancedDelimiters(script)) {
     issues.push({
       category: "compile-time", severity: "high",
-      message: "Unbalanced braces, parentheses, brackets, or an unterminated string — this function likely fails to save or compile in Zoho.",
+      message: "Unbalanced braces, parentheses, brackets, or an unterminated string - this function likely fails to save or compile in Zoho.",
     });
   }
 
@@ -141,7 +141,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
   if (apiCallCount > 0 && !hasTry) {
     issues.push({
       category: "error-handling", severity: "medium",
-      message: `${apiCallCount} API call${apiCallCount !== 1 ? "s" : ""} (zoho.crm.*, invokeurl, or sendmail) with no try/catch anywhere in the function — one failed call crashes the whole run instead of failing gracefully.`,
+      message: `${apiCallCount} API call${apiCallCount !== 1 ? "s" : ""} (zoho.crm.*, invokeurl, or sendmail) with no try/catch anywhere in the function - one failed call crashes the whole run instead of failing gracefully.`,
     });
   }
 
@@ -154,34 +154,34 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
     if (/[^=!<>]=(?!=)/.test(inner)) {
       issues.push({
         category: "logic", severity: "high",
-        message: `Possible assignment (=) instead of comparison (==) inside an if condition: "if(${inner.trim()})" — this always evaluates truthy and silently skips the intended check.`,
+        message: `Possible assignment (=) instead of comparison (==) inside an if condition: "if(${inner.trim()})" - this always evaluates truthy and silently skips the intended check.`,
       });
       break; // one flag is enough context; avoid spamming near-duplicate hits
     }
   }
 
   // Performance / unoptimized logic: an API call inside a loop body means
-  // every iteration burns a separate round-trip — the classic N+1 pattern
+  // every iteration burns a separate round-trip - the classic N+1 pattern
   // that both slows the function down and burns through Zoho's API rate limit.
   const foundLoopBodies = loopBodies(script);
   for (const body of foundLoopBodies) {
     if (countOccurrences(API_CALL_PATTERN, body) > 0) {
       issues.push({
         category: "performance", severity: "high",
-        message: "API call inside a loop — this fires once per iteration instead of batching. For any real record volume this both slows the function down and can exhaust Zoho's per-minute API limit.",
+        message: "API call inside a loop - this fires once per iteration instead of batching. For any real record volume this both slows the function down and can exhaust Zoho's per-minute API limit.",
       });
       break; // report the pattern once, not once per loop found
     }
   }
 
   // Nested loops: a loop body that itself contains another loop start is
-  // O(n²)-or-worse iteration — often masking a lookup that should be indexed
+  // O(n²)-or-worse iteration - often masking a lookup that should be indexed
   // (e.g. a map keyed by ID) instead of scanned per-outer-iteration.
   for (const body of foundLoopBodies) {
     if (new RegExp(LOOP_START_PATTERN.source, "i").test(body)) {
       issues.push({
         category: "performance", severity: "medium",
-        message: "Nested loop detected — a loop running inside another loop multiplies the iteration count. Consider building a lookup map before the outer loop instead of re-scanning the inner list every time.",
+        message: "Nested loop detected - a loop running inside another loop multiplies the iteration count. Consider building a lookup map before the outer loop instead of re-scanning the inner list every time.",
       });
       break;
     }
@@ -199,7 +199,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
       const shown = call.length > 140 ? `${call.slice(0, 140)}…` : call;
       issues.push({
         category: "api-consumption", severity: "medium",
-        message: `The exact same API call appears ${count} times: "${shown}" — cache the result in a variable the first time instead of calling it again with identical arguments.`,
+        message: `The exact same API call appears ${count} times: "${shown}" - cache the result in a variable the first time instead of calling it again with identical arguments.`,
       });
       break; // one flag is enough context; avoid spamming near-duplicate hits
     }
@@ -207,7 +207,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
 
   // Missing API response/error handling: a call result assigned to a variable
   // should be checked (e.g. response.get("status") / .get("code")) before
-  // being used — otherwise a failed call silently continues with bad or
+  // being used - otherwise a failed call silently continues with bad or
   // empty data instead of being caught.
   const apiAssignRe = /(\w+)\s*=\s*(?=zoho\.crm\.[a-zA-Z]+\s*\()/gi;
   let assignMatch: RegExpExecArray | null;
@@ -219,17 +219,24 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
     if (!checkRe.test(window)) {
       issues.push({
         category: "error-handling", severity: "medium",
-        message: `The response from an API call assigned to "${varName}" doesn't appear to be checked (e.g. ${varName}.get("status") or .get("code")) before use — a failed call would silently continue with bad or empty data.`,
+        message: `The response from an API call assigned to "${varName}" doesn't appear to be checked (e.g. ${varName}.get("status") or .get("code")) before use - a failed call would silently continue with bad or empty data.`,
       });
       break; // one flag is enough context; avoid spamming every call site
     }
   }
 
   // Hardcoded record/user IDs: Zoho record and user IDs are 15-19 digit
-  // numeric strings — a literal one baked into the script only works for the
+  // numeric strings - a literal one baked into the script only works for the
   // exact org/record it was copied from and breaks in any other org, sandbox,
-  // or once that record is deleted/recreated.
-  const hardcodedIdRe = /["'](\d{15,19})["']/g;
+  // or once that record is deleted/recreated. Deluge accepts these both
+  // quoted ("4876876000000123456") and as bare numeric literals
+  // (zoho.crm.getRecordById("Deals", 4876876000000123456)) - the unquoted
+  // form is actually the more common way an ID gets passed as a function
+  // argument, so both shapes must be matched or a static ID silently passes
+  // this check. The lookbehind/lookahead exclude a match that's part of a
+  // longer digit run or a decimal (e.g. a 20+-digit number or "123.456...")
+  // so this doesn't misfire on unrelated long numbers.
+  const hardcodedIdRe = /["']?(?<![\d.])(\d{15,19})(?![\d.])["']?/g;
   const hardcodedIds = new Set<string>();
   let idMatch: RegExpExecArray | null;
   while ((idMatch = hardcodedIdRe.exec(script))) hardcodedIds.add(idMatch[1]);
@@ -237,17 +244,17 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
     const shown = [...hardcodedIds].slice(0, 3).join(", ");
     issues.push({
       category: "hardcoded", severity: "medium",
-      message: `Hardcoded record/user ID${hardcodedIds.size !== 1 ? "s" : ""} found (${shown}${hardcodedIds.size > 3 ? ", …" : ""}) — this only works in the org it was copied from. Pass IDs in as function arguments or look them up dynamically instead.`,
+      message: `Hardcoded record/user ID${hardcodedIds.size !== 1 ? "s" : ""} found (${shown}${hardcodedIds.size > 3 ? ", …" : ""}) - this only works in the org it was copied from. Pass IDs in as function arguments or look them up dynamically instead.`,
     });
   }
 
   // Hardcoded values: a literal email address baked into the script (most
   // often a sendmail "to") only ever notifies one inbox, in every org this
-  // function runs in — it should come from a field, parameter, or config record.
+  // function runs in - it should come from a field, parameter, or config record.
   if (/["'][\w.+-]+@[\w-]+\.[\w.-]+["']/.test(script)) {
     issues.push({
       category: "hardcoded", severity: "low",
-      message: "Hardcoded email address found in the function — recipients should typically come from a field, parameter, or config record so this works correctly across every org/environment, not just the one it was written for.",
+      message: "Hardcoded email address found in the function - recipients should typically come from a field, parameter, or config record so this works correctly across every org/environment, not just the one it was written for.",
     });
   }
 
@@ -262,7 +269,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
     if (!/searchrecords|searchbycriteria|search_record|getrecords|zoho\.crm\.search/i.test(before)) {
       issues.push({
         category: "duplicate-risk", severity: "medium",
-        message: `A record is created in "${createMatch[1]}" with no search/lookup beforehand — if this function runs more than once for the same input (a retry, a re-fired workflow, a bulk re-import) it can create a duplicate record instead of updating the existing one.`,
+        message: `A record is created in "${createMatch[1]}" with no search/lookup beforehand - if this function runs more than once for the same input (a retry, a re-fired workflow, a bulk re-import) it can create a duplicate record instead of updating the existing one.`,
       });
       break; // one flag is enough context; avoid spamming every create call
     }
@@ -270,20 +277,20 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
 
   // Invalid/unknown CRM field API names: this is a static scanner, not a
   // connection to the org's actual field metadata, so it can only catch the
-  // unambiguous case — a field key containing a space is always a display
+  // unambiguous case - a field key containing a space is always a display
   // label, never a real Zoho API name (API names use underscores).
   const spacedFieldRe = /\.get\(\s*["']([A-Za-z][\w]*\s[\w ]*)["']\s*\)/;
   const spacedFieldMatch = spacedFieldRe.exec(script);
   if (spacedFieldMatch) {
     issues.push({
       category: "field-validity", severity: "medium",
-      message: `Field key "${spacedFieldMatch[1]}" contains a space — Zoho API names never do (e.g. "First_Name", not "First Name"). This looks like a display label used by mistake and will return null instead of the intended field value.`,
+      message: `Field key "${spacedFieldMatch[1]}" contains a space - Zoho API names never do (e.g. "First_Name", not "First Name"). This looks like a display label used by mistake and will return null instead of the intended field value.`,
     });
   }
 
   // Excessive/unnecessary info statements: fine for one-off debugging, but
   // left in production they add execution overhead and clutter function logs
-  // — especially costly when one fires on every iteration of a loop.
+  // - especially costly when one fires on every iteration of a loop.
   const INFO_STATEMENT_RE = /\binfo\s+[^;]+;/gi;
   const infoCount = countOccurrences(INFO_STATEMENT_RE, script);
   const infoInLoop = foundLoopBodies.some(body => new RegExp(INFO_STATEMENT_RE.source, "i").test(body));
@@ -291,7 +298,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
   if (infoCount > INFO_STATEMENT_THRESHOLD || infoInLoop) {
     issues.push({
       category: "code-noise", severity: "low",
-      message: `${infoCount} info statement${infoCount !== 1 ? "s" : ""} found${infoInLoop ? ", including at least one inside a loop" : ""} — keep these for active debugging only; left in place they add overhead and clutter the function's execution log.`,
+      message: `${infoCount} info statement${infoCount !== 1 ? "s" : ""} found${infoInLoop ? ", including at least one inside a loop" : ""} - keep these for active debugging only; left in place they add overhead and clutter the function's execution log.`,
     });
   }
 
@@ -300,7 +307,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
   if (apiCallCount > API_CONSUMPTION_THRESHOLD) {
     issues.push({
       category: "api-consumption", severity: "medium",
-      message: `${apiCallCount} separate API calls in one function — consider batching with zoho.crm.bulk.* or combining requests to reduce round-trips.`,
+      message: `${apiCallCount} separate API calls in one function - consider batching with zoho.crm.bulk.* or combining requests to reduce round-trips.`,
     });
   }
 
@@ -311,7 +318,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
   if (lineCount > LONG_FUNCTION_LINE_THRESHOLD && hasLoop) {
     issues.push({
       category: "performance", severity: "low",
-      message: `Long function (${lineCount} lines) containing loops — likely to run slowly as record volume grows. Consider splitting into smaller functions or moving heavy logic to a scheduled batch job.`,
+      message: `Long function (${lineCount} lines) containing loops - likely to run slowly as record volume grows. Consider splitting into smaller functions or moving heavy logic to a scheduled batch job.`,
     });
   }
 
@@ -327,7 +334,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
     if (!/containskey|!=\s*null|isnull|==\s*null/i.test(nearby)) {
       issues.push({
         category: "runtime", severity: "low",
-        message: `"${getMatch[1]}.get(${getMatch[2].trim()})" is read with no nearby null/containsKey check — if the key or record is missing this throws at runtime instead of failing gracefully.`,
+        message: `"${getMatch[1]}.get(${getMatch[2].trim()})" is read with no nearby null/containsKey check - if the key or record is missing this throws at runtime instead of failing gracefully.`,
       });
       break; // one flag is enough context; avoid spamming every .get() call
     }
@@ -337,7 +344,7 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
 }
 
 // ─── Code quality / style review ───────────────────────────────────────────────
-// A separate, lighter pass from analyzeFunctionScript above — this one is about
+// A separate, lighter pass from analyzeFunctionScript above - this one is about
 // readability and maintainability (formatting, comments), not correctness or
 // performance risk, so it's surfaced as its own "Zia" recommendation rather
 // than mixed into the issues list.
@@ -363,7 +370,7 @@ export function reviewCodeQuality(script: string): CodeQualityInsight {
 
   const longLines = lines.filter(l => l.length > LONG_LINE_THRESHOLD).length;
   // Leading-whitespace shape only, not a full indent-width/nesting-depth
-  // check — good enough to catch the common "tabs in some lines, spaces in
+  // check - good enough to catch the common "tabs in some lines, spaces in
   // others" inconsistency without a real Deluge parser.
   const usesTabs = lines.some(l => /^\t/.test(l));
   const usesSpaces = lines.some(l => /^ {2,}/.test(l));
@@ -373,25 +380,25 @@ export function reviewCodeQuality(script: string): CodeQualityInsight {
   const parts: string[] = [];
 
   if (commentSignal === 0 && codeLines.length > 10) {
-    parts.push("no comments anywhere in the function — add a few lines explaining what it does and why, especially around any non-obvious business logic");
+    parts.push("no comments anywhere in the function - add a few lines explaining what it does and why, especially around any non-obvious business logic");
   } else if (commentRatioPct < 5 && codeLines.length > 20) {
-    parts.push(`only ${commentRatioPct}% of lines are commented — a function this size benefits from more explanation of why, not just what`);
+    parts.push(`only ${commentRatioPct}% of lines are commented - a function this size benefits from more explanation of why, not just what`);
   } else if (commentSignal > 0) {
     parts.push(`comments cover roughly ${commentRatioPct}% of the code`);
   }
 
   if (mixedIndentation) {
-    parts.push("mixes tabs and spaces for indentation — pick one so it reads consistently in every editor");
+    parts.push("mixes tabs and spaces for indentation - pick one so it reads consistently in every editor");
   }
   if (longLines > 0) {
-    parts.push(`${longLines} line${longLines !== 1 ? "s" : ""} over ${LONG_LINE_THRESHOLD} characters — consider breaking these up for readability`);
+    parts.push(`${longLines} line${longLines !== 1 ? "s" : ""} over ${LONG_LINE_THRESHOLD} characters - consider breaking these up for readability`);
   }
   if (hasLongBlankRun) {
-    parts.push("has stretches of 3+ blank lines in a row — trim these for a tighter, more readable function");
+    parts.push("has stretches of 3+ blank lines in a row - trim these for a tighter, more readable function");
   }
 
   if (parts.length === 0) {
-    return { commentRatioPct, summary: "Formatting and commenting look solid — no readability issues flagged." };
+    return { commentRatioPct, summary: "Formatting and commenting look solid - no readability issues flagged." };
   }
   return { commentRatioPct, summary: `Zia's formatting review: ${parts.join("; ")}.` };
 }

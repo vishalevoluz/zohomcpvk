@@ -134,20 +134,20 @@ function extractList(result: unknown): Record<string, unknown>[] {
 
 function getName(w: ZohoWorkflow): string { return String(w.name ?? w.workflow_name ?? w.id ?? "Unknown"); }
 function getModule(w: ZohoWorkflow): string {
-  if (!w.module) return "—";
+  if (!w.module) return "-";
   if (typeof w.module === "string") return w.module;
   const m = w.module as Record<string, unknown>;
-  return String(m.plural_label ?? m.name ?? m.api_name ?? "—");
+  return String(m.plural_label ?? m.name ?? m.api_name ?? "-");
 }
 function getTriggerEvents(w: ZohoWorkflow): string {
   if (w.execute_when?.type) return String(w.execute_when.type).replace(/_/g, " ");
   const t = w.trigger_on ?? w.trigger ?? w.triggers;
-  if (!t) return "—";
+  if (!t) return "-";
   return Array.isArray(t) ? t.join(", ") : String(t);
 }
 function getRepeat(w: ZohoWorkflow): string {
   const r = w.execute_when?.details?.repeat;
-  return r === undefined ? "—" : r ? "Yes" : "No";
+  return r === undefined ? "-" : r ? "Yes" : "No";
 }
 function getActionsCount(w: ZohoWorkflow): number {
   const a = w.actions ?? w.action_list ?? w.workflow_actions;
@@ -155,7 +155,7 @@ function getActionsCount(w: ZohoWorkflow): number {
 }
 function getCriteria(w: ZohoWorkflow): string {
   const c = w.criteria ?? w.conditions;
-  if (!c) return "—";
+  if (!c) return "-";
   if (typeof c === "string") return c;
   if (Array.isArray(c)) return `${c.length} condition${c.length !== 1 ? "s" : ""}`;
   if (typeof c === "object") {
@@ -191,7 +191,7 @@ function normalizeConditionList(list: unknown[]): string[] {
   }).sort();
 }
 
-// Flattened, order-independent list of "field|comparator|value" strings — used for exact-match comparison.
+// Flattened, order-independent list of "field|comparator|value" strings - used for exact-match comparison.
 function getCriteriaConditions(w: ZohoWorkflow): string[] {
   const c = w.criteria ?? w.conditions;
   if (!c) return [];
@@ -204,7 +204,7 @@ function getCriteriaConditions(w: ZohoWorkflow): string[] {
   return [];
 }
 
-// Just the field names referenced by criteria — used for loose overlap detection.
+// Just the field names referenced by criteria - used for loose overlap detection.
 function getCriteriaFields(w: ZohoWorkflow): Set<string> {
   return new Set(getCriteriaConditions(w).map(c => c.split("|")[0]).filter(Boolean));
 }
@@ -223,7 +223,7 @@ function getActionsSignatureList(w: ZohoWorkflow): string[] {
   }).sort();
 }
 
-// Just the action types (e.g. "field_update", "email_notification") — used for loose overlap detection.
+// Just the action types (e.g. "field_update", "email_notification") - used for loose overlap detection.
 function getActionTypes(w: ZohoWorkflow): Set<string> {
   return new Set(getActionsSignatureList(w).map(s => s.split("|")[0]).filter(Boolean));
 }
@@ -240,9 +240,9 @@ function workflowContentKey(w: ZohoWorkflow): string {
 }
 
 // True when two workflows target the same module and share at least one criteria field AND one action type,
-// without being fully content-identical — i.e. their behavior overlaps but isn't a clean duplicate.
+// without being fully content-identical - i.e. their behavior overlaps but isn't a clean duplicate.
 function workflowsOverlap(a: ZohoWorkflow, b: ZohoWorkflow): boolean {
-  if (getModule(a) === "—" || getModule(a) !== getModule(b)) return false;
+  if (getModule(a) === "-" || getModule(a) !== getModule(b)) return false;
   const fieldsA = getCriteriaFields(a), fieldsB = getCriteriaFields(b);
   const criteriaOverlap = fieldsA.size > 0 && fieldsB.size > 0 && [...fieldsA].some(f => fieldsB.has(f));
   if (!criteriaOverlap) return false;
@@ -256,10 +256,10 @@ function isActive(w: ZohoWorkflow): boolean {
   return !(s === "inactive" || s === "disabled" || s === "false");
 }
 function isLocked(w: ZohoWorkflow): boolean { return w.lock?.status === true; }
-function getCreatedBy(w: ZohoWorkflow): string { return String(w.created_by?.name ?? "—"); }
-function getModifiedBy(w: ZohoWorkflow): string { return String(w.modified_by?.name ?? "—"); }
+function getCreatedBy(w: ZohoWorkflow): string { return String(w.created_by?.name ?? "-"); }
+function getModifiedBy(w: ZohoWorkflow): string { return String(w.modified_by?.name ?? "-"); }
 function formatDateTime(iso?: string | null): string {
-  if (!iso) return "—";
+  if (!iso) return "-";
   try { return new Date(iso).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
   catch { return String(iso); }
 }
@@ -402,7 +402,7 @@ function WorkflowDetailModal({
     const start = Date.now();
     try {
       const mod = getModule(displayWf);
-      const input = mod !== "—" ? { module: mod } : {};
+      const input = mod !== "-" ? { module: mod } : {};
       const result = await executeTool(config, "getWorkflowConfigurations", input);
       const parsed = parseJsonFromMcp(result);
       if (parsed) setConfigs(parsed);
@@ -472,7 +472,7 @@ function WorkflowDetailModal({
             <span className="pane-icon" style={{ fontSize: 20 }}>⟳</span>
             <div>
               <div className="bp-detail-title">{getName(displayWf)}</div>
-              <div className="bp-detail-sub">ID: {String(displayWf.id ?? "—")} · {getModule(displayWf)}</div>
+              <div className="bp-detail-sub">ID: {String(displayWf.id ?? "-")} · {getModule(displayWf)}</div>
             </div>
           </div>
           <div className="bp-detail-header-actions">
@@ -536,11 +536,11 @@ function WorkflowDetailModal({
                 <div className="bp-info-row">
                   <span className="bp-info-label">Actions</span>
                   <span className="bp-info-value" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {getActionsCount(displayWf) > 0 ? String(getActionsCount(displayWf)) : "—"}
+                    {getActionsCount(displayWf) > 0 ? String(getActionsCount(displayWf)) : "-"}
                     {actionsCount && <span className="bp-meta-chip">{JSON.stringify(actionsCount)}</span>}
                   </span>
                 </div>
-                <div className="bp-info-row"><span className="bp-info-label">Description</span><span className="bp-info-value">{String(displayWf.description ?? "—")}</span></div>
+                <div className="bp-info-row"><span className="bp-info-label">Description</span><span className="bp-info-value">{String(displayWf.description ?? "-")}</span></div>
                 <div className="bp-info-row"><span className="bp-info-label">Locked</span><span className={`bool-badge ${wfLocked ? "no" : "yes"}`}>{wfLocked ? "Locked" : "No"}</span></div>
                 <div className="bp-info-row"><span className="bp-info-label">Editable</span><span className={`bool-badge ${displayWf.editable === false ? "no" : "yes"}`}>{displayWf.editable === false ? "No" : "Yes"}</span></div>
                 <div className="bp-info-row"><span className="bp-info-label">Created By</span><span className="bp-info-value">{getCreatedBy(displayWf)}</span></div>
@@ -597,7 +597,7 @@ function WorkflowDetailModal({
               ) : (
                 <>
                   <p className="bp-manage-desc" style={{ marginBottom: 12 }}>
-                    Edit the JSON. Only include fields to change — existing actions are preserved unless explicitly listed. Add <code style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>_delete: null</code> to remove an action. Locked rules cannot be updated.
+                    Edit the JSON. Only include fields to change - existing actions are preserved unless explicitly listed. Add <code style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>_delete: null</code> to remove an action. Locked rules cannot be updated.
                   </p>
                   {updateMsg && <div className={updateMsg.ok ? "form-success" : "form-error"} style={{ marginBottom: 12 }}>{updateMsg.ok ? "✓" : "⚠"} {updateMsg.text}</div>}
                   <textarea className="bp-json-editor" value={updateJson} onChange={e => setUpdateJson(e.target.value)} rows={16} />
@@ -605,7 +605,7 @@ function WorkflowDetailModal({
                     <button className="btn-connect" disabled={!updateJson.trim() || updateLoading || wfLocked} onClick={() => void handleUpdate()}>
                       {updateLoading ? <><span className="spinner" /> Updating…</> : "Save Changes"}
                     </button>
-                    {wfLocked && <span className="form-error" style={{ display: "inline-flex", padding: "5px 12px" }}>Rule is locked — cannot update</span>}
+                    {wfLocked && <span className="form-error" style={{ display: "inline-flex", padding: "5px 12px" }}>Rule is locked - cannot update</span>}
                   </div>
                 </>
               )}
@@ -682,6 +682,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   const [rulesCount, setRulesCount] = useState<Record<string, unknown> | null>(null);
   const [rulesCountLoading, setRulesCountLoading] = useState(false);
   const [rulesCountExpanded, setRulesCountExpanded] = useState(false);
+  const [duplicateDetailsExpanded, setDuplicateDetailsExpanded] = useState(true);
 
   const [activeTab, setActiveTab] = useState<WFMainTab>("workflows");
 
@@ -814,10 +815,54 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   workflows.forEach(w => { const k = workflowContentKey(w); contentCounts.set(k, (contentCounts.get(k) ?? 0) + 1); });
   const duplicate = workflows.filter(w => (contentCounts.get(workflowContentKey(w)) ?? 0) > 1);
 
+  // Grouped by the same content key, so the UI can show *which* other
+  // workflow(s) triggered the match and how many times the exact condition
+  // repeats - a bare "duplicate" tag on each row doesn't answer either
+  // question on its own.
+  const duplicateGroupsByKey = new Map<string, ZohoWorkflow[]>();
+  duplicate.forEach(w => {
+    const k = workflowContentKey(w);
+    const arr = duplicateGroupsByKey.get(k) ?? [];
+    arr.push(w);
+    duplicateGroupsByKey.set(k, arr);
+  });
+  const duplicateGroups = [...duplicateGroupsByKey.values()];
+
+  // Human-readable statement of the exact condition that was matched on:
+  // module + trigger event + the criteria field names (Name/Email/Phone/etc,
+  // whichever the rule's criteria actually reference) + action types - this
+  // is the full signature workflowContentKey hashes, spelled out instead of
+  // just asserting "identical".
+  function duplicateMatchCriteria(w: ZohoWorkflow): string {
+    const fields = [...getCriteriaFields(w)];
+    const actionTypes = [...getActionTypes(w)];
+    const parts = [
+      `Module: ${getModule(w)}`,
+      `Trigger: ${getTriggerEvents(w)}`,
+      fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: none set",
+      actionTypes.length > 0 ? `Actions: ${actionTypes.join(", ")}` : "Actions: none set",
+    ];
+    return parts.join(" · ");
+  }
+
+  // Full detection detail for one duplicate row: the matching condition, the
+  // other workflow(s) that share it, and how many times that exact condition
+  // was detected/repeated across the org.
+  function duplicateMatchDetail(w: ZohoWorkflow): { criteria: string; matches: ZohoWorkflow[]; occurrences: number } {
+    const group = duplicateGroupsByKey.get(workflowContentKey(w)) ?? [w];
+    return { criteria: duplicateMatchCriteria(w), matches: group.filter(o => o !== w), occurrences: group.length };
+  }
+
+  function duplicateMatchTooltip(w: ZohoWorkflow): string {
+    const { criteria, matches, occurrences } = duplicateMatchDetail(w);
+    const names = matches.map(getName).join(", ") || "-";
+    return `Matched on - ${criteria}. Same as ${matches.length} other workflow${matches.length !== 1 ? "s" : ""}: ${names}. Detected ${occurrences} time${occurrences !== 1 ? "s" : ""} total.`;
+  }
+
   const triggerKey = (w: ZohoWorkflow) => `${getModule(w)}::${getTriggerEvents(w)}`;
   const triggerCounts = new Map<string, number>();
-  workflows.forEach(w => { const k = triggerKey(w); if (k !== "—::—") triggerCounts.set(k, (triggerCounts.get(k) ?? 0) + 1); });
-  const conflicting = workflows.filter(w => { const k = triggerKey(w); return k !== "—::—" && (triggerCounts.get(k) ?? 0) > 1 && !duplicate.includes(w); });
+  workflows.forEach(w => { const k = triggerKey(w); if (k !== "-::-") triggerCounts.set(k, (triggerCounts.get(k) ?? 0) + 1); });
+  const conflicting = workflows.filter(w => { const k = triggerKey(w); return k !== "-::-" && (triggerCounts.get(k) ?? 0) > 1 && !duplicate.includes(w); });
 
   // Overlapping: not fully identical, but share module + at least one criteria field + one action type with another rule.
   const overlapping = workflows.filter((w, i) => {
@@ -848,7 +893,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
 
   const findings: { key: WFFilterKey; label: string; count: number; severity: string; tip: string }[] = [
     { key: "disabled",    label: "Disabled Workflows",    count: disabled.length,    severity: disabled.length > 0 ? "warn" : "ok",                                 tip: "Workflow rules that are currently turned off." },
-    { key: "duplicate",   label: "Duplicate Workflows",   count: duplicate.length,   severity: duplicate.length > 0 ? "warn" : "ok",                                tip: "Workflow rules with identical module, trigger, criteria and actions — regardless of name." },
+    { key: "duplicate",   label: "Duplicate Workflows",   count: duplicate.length,   severity: duplicate.length > 0 ? "warn" : "ok",                                tip: "Workflow rules with identical module, trigger, criteria and actions - regardless of name." },
     { key: "conflicting", label: "Conflicting Workflows", count: conflicting.length, severity: conflicting.length > 0 ? "danger" : "ok",                            tip: "Multiple active workflows on the same module and trigger event." },
     { key: "overlapping", label: "Overlapping Conditions", count: overlapping.length, severity: overlapping.length > 0 ? "warn" : "ok",                             tip: "Workflows on the same module that share criteria fields and action types without being fully identical." },
     { key: "complex",     label: "Excessive Complexity",  count: complex.length,     severity: complex.length > 3 ? "danger" : complex.length > 0 ? "warn" : "ok", tip: "Workflows with more than 5 actions or criteria conditions." },
@@ -868,7 +913,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
         </div>
         <div className="audit-toolbar">
           {tools.length === 0 && (
-            <span className="no-tools-hint">No workflow tools found — check connection</span>
+            <span className="no-tools-hint">No workflow tools found - check connection</span>
           )}
           <button onClick={() => void loadWorkflows()} disabled={loading || selectedTools.length === 0} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : "↺ Reload"}
@@ -885,7 +930,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
       {rulesCount && (
         <div className="bp-meta-banner">
           <div className="bp-meta-banner-header" onClick={() => setRulesCountExpanded(v => !v)}>
-            <span className="bp-meta-banner-title">Workflow Rules — Limits &amp; Usage</span>
+            <span className="bp-meta-banner-title">Workflow Rules - Limits &amp; Usage</span>
             <span className="bp-meta-banner-toggle">{rulesCountExpanded ? "▲" : "▼"}</span>
           </div>
           {rulesCountExpanded ? (
@@ -955,6 +1000,30 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
                   </button>
                 ))}
               </div>
+
+              {filter === "duplicate" && duplicateGroups.length > 0 && (
+                <div className="bp-meta-banner">
+                  <div className="bp-meta-banner-header" onClick={() => setDuplicateDetailsExpanded(v => !v)}>
+                    <span className="bp-meta-banner-title">
+                      Duplicate Match Details - {duplicateGroups.length} distinct condition{duplicateGroups.length !== 1 ? "s" : ""} detected
+                    </span>
+                    <span className="bp-meta-banner-toggle">{duplicateDetailsExpanded ? "▲" : "▼"}</span>
+                  </div>
+                  {duplicateDetailsExpanded && (
+                    <div className="bp-meta-body">
+                      {duplicateGroups.map((group, gi) => (
+                        <div key={gi} className="bp-meta-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                          <span className="bp-meta-key">{duplicateMatchCriteria(group[0])}</span>
+                          <span className="bp-meta-val">
+                            Detected {group.length} time{group.length !== 1 ? "s" : ""} - workflows: {group.map(getName).join(", ")}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="modules-table-wrap">
                 <div className="table-toolbar">
                   <span className="table-info">
@@ -980,7 +1049,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
 
                 {displayed.length === 0 ? (
                   <div className="empty-state">
-                    {search.trim() ? `No workflows match "${search.trim()}".` : `No ${filter} workflows found — good!`}
+                    {search.trim() ? `No workflows match "${search.trim()}".` : `No ${filter} workflows found - good!`}
                   </div>
                 ) : (
                   <div className="table-scroll">
@@ -1014,13 +1083,13 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
                             <React.Fragment key={rowKey}>
                               <tr className={tags.length ? "row-flagged" : ""}>
                                 <td className="cell-name">{getName(w)}</td>
-                                <td className="cell-mono fn-id">{String(w.id ?? "—")}</td>
+                                <td className="cell-mono fn-id">{String(w.id ?? "-")}</td>
                                 <td><span className={`bool-badge ${active ? "yes" : "no"}`}>{active ? "Active" : "Inactive"}</span></td>
                                 <td className="cell-mono">{getModule(w)}</td>
                                 <td className="cell-trigger">{getTriggerEvents(w)}</td>
                                 <td><span className={`bool-badge ${getRepeat(w) === "Yes" ? "no" : getRepeat(w) === "No" ? "yes" : ""}`}>{getRepeat(w)}</span></td>
                                 <td className="cell-criteria">{getCriteria(w)}</td>
-                                <td>{getActionsCount(w) > 0 ? <span className={getActionsCount(w) > 5 ? "count-badge danger" : "count-badge"}>{getActionsCount(w)}</span> : <span className="cell-mono">—</span>}</td>
+                                <td>{getActionsCount(w) > 0 ? <span className={getActionsCount(w) > 5 ? "count-badge danger" : "count-badge"}>{getActionsCount(w)}</span> : <span className="cell-mono">-</span>}</td>
                                 <td><span className={`bool-badge ${isLocked(w) ? "no" : "yes"}`}>{isLocked(w) ? "Locked" : "No"}</span></td>
                                 <td className="cell-mono" style={{ fontSize: 12 }}>{getCreatedBy(w)}</td>
                                 <td className="cell-datetime">{formatDateTime(w.created_time as string)}</td>
@@ -1032,9 +1101,9 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
                                     {tags.length === 0
                                       ? <span className="audit-tag tag-ok">clean</span>
                                       : tags.map(tag => (
-                                          <span key={tag} className={`audit-tag tag-wf-${tag}`} title={
+                                          <span key={tag} className={`audit-tag tag-wf-${tag}`} data-tooltip={
                                             tag === "disabled"    ? "This workflow is currently inactive." :
-                                            tag === "duplicate"   ? "Another workflow has identical module, trigger, criteria and actions." :
+                                            tag === "duplicate"   ? duplicateMatchTooltip(w) :
                                             tag === "conflicting" ? "Another active workflow targets the same module and trigger." :
                                             tag === "overlapping" ? "Another workflow on this module shares criteria fields and action types." :
                                             tag === "complex"     ? "More than 5 actions or conditions." : tag

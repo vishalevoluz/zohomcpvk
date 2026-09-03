@@ -19,9 +19,9 @@ function extractCurrencySymbol(orgRecords: unknown[]): string | null {
 
 // Best-effort org currency lookup so quantified cost figures ("₹4,50,000 of
 // stale pipeline") use the connected org's real currency instead of assuming
-// one — this tool audits Zoho orgs in any country. Falls back to null
+// one - this tool audits Zoho orgs in any country. Falls back to null
 // (callers show a plain number, see money.ts) when no matching tool exists
-// or the response carries no recognizable currency field — same graceful-
+// or the response carries no recognizable currency field - same graceful-
 // degradation pattern as useRuleCoverage.ts / usePipelineStages.ts.
 export function useOrgCurrency(config: McpConfig | null, tools: McpTool[], onLog: (log: ExecutionLog) => void) {
   const [symbol, setSymbol] = useState<string | null>(null);

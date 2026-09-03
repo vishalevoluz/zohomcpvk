@@ -66,12 +66,12 @@ export default function DashboardPage() {
 
   // HealthScoreDashboard (the "CRM Health Score" panel at the top of the CRM
   // Dashboard) computes its own "resolved" flag from pipelineStages and
-  // mandatoryFields too, not just crm.entityData — see buildHealthAuditModel's
+  // mandatoryFields too, not just crm.entityData - see buildHealthAuditModel's
   // `resolved` line and BusinessView's `pipelineStagesResolved`. Those two ride
   // separate fetch chains (getLayouts -> getPipelines, getLayouts -> mandatory
   // field scan) that don't always land inside the old fixed 1200ms hold below,
   // so the full-page loader used to hand off before they were actually done,
-  // exposing HealthScoreDashboard's own "Checking…" / "—" skeleton state under
+  // exposing HealthScoreDashboard's own "Checking…" / "-" skeleton state under
   // the sidebar instead of a finished dashboard. Folding both into the same
   // gate the loader watches means it now only clears once the panel it's
   // covering has real content to show.
@@ -83,7 +83,7 @@ export default function DashboardPage() {
 
   // Even with the stricter gate above, a few other secondary hooks (record
   // samples, rule coverage, org currency) still ride the same MCP round-trip
-  // and can swap in real content a beat after coreResolved flips — this short
+  // and can swap in real content a beat after coreResolved flips - this short
   // hold lets that settle before reveal instead of the user watching it shift.
   // Resets whenever coreResolved goes false again (a manual refresh re-triggers
   // the full loader, same as before).
@@ -102,7 +102,7 @@ export default function DashboardPage() {
   // The connect wizard can be scrolled well down its own (much taller) page;
   // swapping it out for the dashboard doesn't reset that scroll position on
   // its own, so without this the dashboard can render already scrolled past
-  // its own top and land wherever that pixel offset happens to fall — e.g.
+  // its own top and land wherever that pixel offset happens to fall - e.g.
   // partway down the CRM Overview section. Fires once per connect, right as
   // the full-page loader hands off to the real dashboard, not on every
   // render and not on a later manual refresh (isPrefetching flipping back
@@ -165,12 +165,12 @@ export default function DashboardPage() {
   }
 
   // Gates the entire app shell behind a single full-page loading screen
-  // whenever core CRM data isn't resolved yet — both on the initial connect
+  // whenever core CRM data isn't resolved yet - both on the initial connect
   // and on every later manual refresh, so refreshing shows the same loader
   // instead of a slim inline bar under an already-rendered dashboard.
   if (isPrefetching) {
     // Held at 99% (never a false-looking 100%) until loaderHoldElapsed
-    // actually flips isPrefetching to false — coreResolved alone means every
+    // actually flips isPrefetching to false - coreResolved alone means every
     // entity call returned, not that the secondary hooks riding along with
     // them have settled yet (see the isPrefetching comment above).
     const loaderPct = coreResolved ? 99 : Math.min(99, Math.round((resolvedLoadSteps / TOTAL_LOAD_STEPS) * 100));
@@ -209,7 +209,7 @@ export default function DashboardPage() {
         <ConnectedStatus config={config} onDisconnect={onDisconnect} />
 
         {/* Keep audit panels mounted so loaded data survives section switches.
-            No loading fallback needed here — isPrefetching is guaranteed false
+            No loading fallback needed here - isPrefetching is guaranteed false
             by the time this renders (see the full-page loader early-return above). */}
         <div style={{ display: activeSection === "crm-dashboard" ? undefined : "none" }}>
           <BusinessView

@@ -18,7 +18,7 @@ import { formatMoney } from "@/lib/money";
 // surface. "What Is Costing You" and "Top Priority Actions" are two different
 // PRESENTATIONS of this same list (business-consequence framing vs.
 // actionable-fix framing) rather than two independently maintained rule
-// tables — this is what guarantees a cost card and its matching action can
+// tables - this is what guarantees a cost card and its matching action can
 // never drift apart or contradict each other.
 
 export type FindingSeverity = "CRITICAL" | "WARNING" | "REVIEW";
@@ -27,7 +27,7 @@ export type FindingEffort = "Easy" | "Medium" | "Hard";
 
 export interface Finding {
   id: string;
-  /** Real, named offenders — module/workflow/user/deal names. Never "several". */
+  /** Real, named offenders - module/workflow/user/deal names. Never "several". */
   offenders: string[];
   count: number;
   /** Pre-formatted quantified stake, e.g. "₹4,50,000 of pipeline value" or "12 seats". */
@@ -36,7 +36,7 @@ export interface Finding {
   note?: string;
   /** Set when this finding is derived from a capped record sample, not full CRM data. */
   sampleSize?: number;
-  /** Always shown — confirmed-from-config vs. sample-based vs. "couldn't check X". */
+  /** Always shown - confirmed-from-config vs. sample-based vs. "couldn't check X". */
   honesty: string;
   severity: FindingSeverity;
   impact: FindingImpact;
@@ -52,7 +52,7 @@ interface FindingContext {
   moduleRecordCounts: ModuleRecordCountsState;
   currencySymbol: string | null;
   // Real per-core-module mandatory field count, from useMandatoryFields.ts's
-  // layout-based fetch — not entityData.fields, whose flat Fields API can't
+  // layout-based fetch - not entityData.fields, whose flat Fields API can't
   // represent an admin-configured required field at all.
   mandatoryFields: MandatoryFieldsState;
 }
@@ -89,7 +89,7 @@ function recordEmail(r: unknown): string | null {
 const STALE_LOGIN_THRESHOLD_DAYS = 90;
 
 // Zoho's getRecords sample is a single, unpaginated per_page=RECORDS_SAMPLE_SIZE
-// fetch — fewer records coming back than were asked for is the sample's own
+// fetch - fewer records coming back than were asked for is the sample's own
 // proof that this IS the full population, not a partial slice of a much
 // bigger table (e.g. 25-of-25 deals). Only ever call it "a sample" when the
 // cap was actually hit and there could genuinely be more beyond it.
@@ -100,7 +100,7 @@ function isFullPopulation(itemsLength: number): boolean {
 function sampleHonesty(itemsLength: number, label: string): string {
   return isFullPopulation(itemsLength)
     ? `Confirmed from all ${itemsLength} ${label}${itemsLength !== 1 ? "s" : ""} in your CRM.`
-    : `Based on a sample of ${itemsLength} ${label}s — treat this as indicative, not exhaustive.`;
+    : `Based on a sample of ${itemsLength} ${label}s - treat this as indicative, not exhaustive.`;
 }
 
 function formatShortDate(d: Date): string {
@@ -130,8 +130,8 @@ const FINDING_DEFS: FindingDef[] = [
       return {
         offenders: [], count: wfs.length,
         honesty: wfs.length > 0
-          ? `Confirmed from all ${wfs.length} workflow${wfs.length !== 1 ? "s" : ""} in your CRM — none reference email.`
-          : "Confirmed — no workflows exist in this CRM at all.",
+          ? `Confirmed from all ${wfs.length} workflow${wfs.length !== 1 ? "s" : ""} in your CRM - none reference email.`
+          : "Confirmed - no workflows exist in this CRM at all.",
       };
     },
   },
@@ -158,7 +158,7 @@ const FINDING_DEFS: FindingDef[] = [
     requires: [], requiresPipelineStages: true,
     build: ({ pipelineStages }) => {
       if (pipelineStages.items.length > 0) return null;
-      return { offenders: [], count: 0, honesty: "Confirmed directly from your Deals module's layout — not a sample." };
+      return { offenders: [], count: 0, honesty: "Confirmed directly from your Deals module's layout - not a sample." };
     },
   },
   {
@@ -184,7 +184,7 @@ const FINDING_DEFS: FindingDef[] = [
     requires: ["blueprints"],
     build: ({ entityData }) => {
       if (entityData.blueprints.items.length > 0) return null;
-      return { offenders: [], count: 0, honesty: "Confirmed — no blueprints exist in this CRM." };
+      return { offenders: [], count: 0, honesty: "Confirmed - no blueprints exist in this CRM." };
     },
   },
   {
@@ -207,8 +207,8 @@ const FINDING_DEFS: FindingDef[] = [
         count: evidenceCount,
         note: isUniform ? "uniform-access" : "too-many-admins",
         honesty: singleProfile
-          ? "Only 1 profile exists in your CRM, so every user shares the same access level — we can see profile names but not their exact permissions, so confirm the actual permission set in Setup."
-          : `${evidenceCount} of ${profiles.length} profile${profiles.length !== 1 ? "s" : ""} ${evidenceCount !== 1 ? "are" : "is"} named like admin roles — we can see profile names but not their exact permissions, so confirm each one's real access in Setup.`,
+          ? "Only 1 profile exists in your CRM, so every user shares the same access level - we can see profile names but not their exact permissions, so confirm the actual permission set in Setup."
+          : `${evidenceCount} of ${profiles.length} profile${profiles.length !== 1 ? "s" : ""} ${evidenceCount !== 1 ? "are" : "is"} named like admin roles - we can see profile names but not their exact permissions, so confirm each one's real access in Setup.`,
       };
     },
   },
@@ -233,7 +233,7 @@ const FINDING_DEFS: FindingDef[] = [
       return {
         offenders: candidates.map(moduleLabelOf).filter(Boolean).slice(0, 5),
         count: candidates.length,
-        honesty: `${candidates.length} modules aren't referenced by any workflow or blueprint — record counts couldn't be confirmed on this CRM connection, so this is based on configuration only, not confirmed emptiness.`,
+        honesty: `${candidates.length} modules aren't referenced by any workflow or blueprint - record counts couldn't be confirmed on this CRM connection, so this is based on configuration only, not confirmed emptiness.`,
       };
     },
   },
@@ -250,7 +250,7 @@ const FINDING_DEFS: FindingDef[] = [
       // (every record has one) over the org-level lookup, which depends on
       // getOrganizations being authorized on this MCP connection at all.
       const symbol = stale.map(dealCurrencySymbol).find(Boolean) ?? currencySymbol;
-      // Per-deal amount alongside each name — the total above is a sum a
+      // Per-deal amount alongside each name - the total above is a sum a
       // reader can't otherwise verify, so "Where this shows up" needs to
       // show the actual numbers being added, not just which deals they came from.
       return {
@@ -291,11 +291,11 @@ const FINDING_DEFS: FindingDef[] = [
     severity: "WARNING", impact: "Medium", effort: "Easy", targetSection: "crm-dashboard",
     requires: ["users"],
     build: ({ entityData }) => {
-      // Literally active, not just "not flagged inactive" — a deleted user
+      // Literally active, not just "not flagged inactive" - a deleted user
       // is neither active nor inactive-but-licensed, and must not be counted
       // as a "paid seat" nobody's using.
       const activeUsers = entityData.users.items.filter(isActiveUser);
-      if (!userLoginFieldPresent(activeUsers)) return null; // this MCP server/org doesn't expose login activity — don't guess
+      if (!userLoginFieldPresent(activeUsers)) return null; // this MCP server/org doesn't expose login activity - don't guess
       const stale = activeUsers.filter(u => { const age = userLoginAgeDays(u); return age !== null && age > STALE_LOGIN_THRESHOLD_DAYS; });
       if (stale.length === 0) return null;
       const offenders = stale.slice(0, 5).map((u, i) => {
@@ -307,7 +307,7 @@ const FINDING_DEFS: FindingDef[] = [
         offenders,
         count: stale.length,
         stakeLabel: `${stale.length} paid seat${stale.length !== 1 ? "s" : ""}`,
-        honesty: `Confirmed from login activity on all ${activeUsers.length} active users in your CRM — flagged when no login in over ${STALE_LOGIN_THRESHOLD_DAYS} days.`,
+        honesty: `Confirmed from login activity on all ${activeUsers.length} active users in your CRM - flagged when no login in over ${STALE_LOGIN_THRESHOLD_DAYS} days.`,
       };
     },
   },
@@ -329,7 +329,7 @@ const FINDING_DEFS: FindingDef[] = [
         sampleSize: fullyConfirmed ? undefined : all.length,
         honesty: fullyConfirmed
           ? `Confirmed from all ${all.length} leads and contacts combined in your CRM.`
-          : `Based on a sample of ${all.length} leads and contacts combined — the real duplicate count across your full database is likely higher.`,
+          : `Based on a sample of ${all.length} leads and contacts combined - the real duplicate count across your full database is likely higher.`,
       };
     },
   },
@@ -356,11 +356,11 @@ export const FINDING_IDS: string[] = FINDING_DEFS.map(d => d.id);
 
 // A finding that returned "no issue" while one of its required entities
 // actually failed to fetch (rather than confirming a real zero) is not
-// verified clean — it just couldn't be checked. Callers must show "couldn't
+// verified clean - it just couldn't be checked. Callers must show "couldn't
 // verify" for these instead of folding them into a silent, false "all clear".
 export interface UncertainFinding {
   id: string;
-  /** Which required data source(s) failed, and why — e.g. "profiles: Failed to fetch". */
+  /** Which required data source(s) failed, and why - e.g. "profiles: Failed to fetch". */
   reason: string;
 }
 
@@ -387,7 +387,7 @@ export function evaluateFindings(ctx: FindingContext): { findings: Finding[]; lo
     }
 
     // Entities that resolved via a fetch error (not real data) can't confirm
-    // a clean result — items defaults to [] on both a real empty org and a
+    // a clean result - items defaults to [] on both a real empty org and a
     // failed fetch, so a build() that returns null here means "couldn't
     // check", not "checked, and it's fine".
     const erroredReasons = def.requires

@@ -29,7 +29,7 @@ function findStageModule(modules: unknown[], stageId: RecordSampleStageId): stri
   return mod ? moduleApiName(mod) : null;
 }
 
-// Zoho's "get all records" call requires an explicit `fields` param — there's no
+// Zoho's "get all records" call requires an explicit `fields` param - there's no
 // wildcard, so every stage needs its own base list. These cover each stage's
 // name/email field plus whatever we need for conversion detection (Leads) or
 // lookup cross-referencing (Deals/Invoices/Contacts). Lookup fields discovered
@@ -40,7 +40,7 @@ const STAGE_EXTRA_FIELDS: Record<RecordSampleStageId, string[]> = {
   leads: ["Last_Name", "Email", "Lead_Source", "Record_Status__s", "Converted__s", "Converted_Date_Time", "Converted_Contact_Id", "Converted_Account_Id", "Converted_Deal_Id"],
   contacts: ["Last_Name", "Email", "Account_Name"],
   // Amount/Closing_Date/Modified_Time/Stage power the "What Is Costing You" /
-  // "Top Priority Actions" stale-pipeline and unforecastable-deal findings —
+  // "Top Priority Actions" stale-pipeline and unforecastable-deal findings -
   // see isDealStale/isDealUnforecastable in crmPredicates.ts.
   deals: ["Deal_Name", "Contact_Name", "Account_Name", "Amount", "Closing_Date", "Modified_Time", "Stage"],
   accounts: ["Account_Name"],
@@ -48,7 +48,7 @@ const STAGE_EXTRA_FIELDS: Record<RecordSampleStageId, string[]> = {
 };
 
 // Zoho's `fields` query param is capped (the tool schema puts maxLength at 1024
-// chars) — keep dropping the lowest-priority (last) names until the joined list
+// chars) - keep dropping the lowest-priority (last) names until the joined list
 // fits rather than letting the call fail outright.
 const MAX_FIELDS_PARAM_LENGTH = 1024;
 
@@ -63,7 +63,7 @@ function capFieldsToLength(fieldNames: string[]): string {
 }
 
 // The tool's own inputSchema is the source of truth for parameter names and
-// locations — servers vary (module / module_name, flat / path_variables /
+// locations - servers vary (module / module_name, flat / path_variables /
 // query_params grouping), so read it instead of hardcoding a guess.
 function buildRecordsInput(tool: McpTool | undefined, apiName: string, fieldNames: string[]): Record<string, unknown> {
   const locations = findParamLocations(tool);
@@ -78,7 +78,7 @@ function buildRecordsInput(tool: McpTool | undefined, apiName: string, fieldName
   return input;
 }
 
-// Zoho's Leads endpoint supports filtering directly by conversion status — when
+// Zoho's Leads endpoint supports filtering directly by conversion status - when
 // the tool exposes that, use it to pull confirmed-converted leads instead of
 // hoping a generic sample happens to include one. Far more reliable evidence.
 function applyConvertedFilter(tool: McpTool | undefined, input: Record<string, unknown>) {
@@ -91,7 +91,7 @@ function applyConvertedFilter(tool: McpTool | undefined, input: Record<string, u
 }
 
 // Discovers this module's lookup-type fields via getFields so the record sample
-// can request them by name (Zoho's fields param has no wildcard) — this is what
+// can request them by name (Zoho's fields param has no wildcard) - this is what
 // lets the flow map surface "lookups if present" instead of only the hand-picked
 // STAGE_EXTRA_FIELDS. Best-effort: any failure here just means fewer fields get
 // requested, not a broken sample.
@@ -141,7 +141,7 @@ async function fetchModuleLookupFieldNames(
 }
 
 // Some MCP servers return HTTP 200 / isError:false for the JSON-RPC call itself
-// but wrap an underlying failure (e.g. the Zoho API call failed) in the payload —
+// but wrap an underlying failure (e.g. the Zoho API call failed) in the payload -
 // surface that as a real error instead of silently reading it as zero records.
 function extractToolFailureMessage(output: unknown): string | null {
   if (!output || typeof output !== "object") return null;
@@ -210,7 +210,7 @@ export function useCrmRecordSamples(
 
     RECORD_SAMPLE_STAGE_IDS.forEach(async stageId => {
       const apiName = findStageModule(modules, stageId);
-      if (!apiName) return; // this business module doesn't exist in this CRM — nothing to sample
+      if (!apiName) return; // this business module doesn't exist in this CRM - nothing to sample
 
       setData(prev => ({ ...prev, [stageId]: { ...prev[stageId], loading: true, error: null, toolUsed: RECORDS_SAMPLE_TOOL } }));
 

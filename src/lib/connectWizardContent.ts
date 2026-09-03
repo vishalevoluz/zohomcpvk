@@ -2,7 +2,7 @@ export const CONNECT_WIZARD_STEP_LABELS = ["Create MCP server", "Enable tools", 
 
 // The MCP server prefixes every tool name with "ZohoCRM_", but the Zoho MCP
 // Console's own tool search only matches the un-prefixed name (e.g.
-// "getModules") — so strip it for anything the user reads or searches with,
+// "getModules") - so strip it for anything the user reads or searches with,
 // while CONNECT_WIZARD_TOOL_GROUPS itself keeps the real prefixed names for
 // matching against the live tools/list response.
 export function displayToolName(tool: string): string {
@@ -21,7 +21,7 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     ],
   },
   {
-    // executeCOQLQuery and getRecordCount were removed from this list —
+    // executeCOQLQuery and getRecordCount were removed from this list -
     // neither exists in Zoho's real MCP tool catalogue (verified against a
     // live server's tools/list), so they showed red forever. getRecordCount
     // is still used opportunistically if a server ever exposes a
@@ -32,12 +32,12 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
   },
   {
     // getApprovalProcess, getScheduledJobs, getEmailTemplates,
-    // getAssignmentRules, and getConnections were removed from this list —
+    // getAssignmentRules, and getConnections were removed from this list -
     // none exist in Zoho's real MCP tool catalogue, so they showed red
     // forever and sent users hunting for a checkbox the console never had.
     // Approvals/schedules/assignment rules are treated as manual-review
     // items instead (assignment-rule coverage still lights up automatically
-    // if a getAssignmentRules-style tool ever appears — see
+    // if a getAssignmentRules-style tool ever appears - see
     // useRuleCoverage.ts). getOrganization was also corrected to the real
     // plural name, getOrganizations.
     label: "Extended coverage (nice to have)",

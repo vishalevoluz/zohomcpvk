@@ -122,7 +122,7 @@ function getName(m: ZohoModule): string {
 }
 
 function getProfiles(m: ZohoModule): string {
-  if (!m.profiles) return "—";
+  if (!m.profiles) return "-";
   if (Array.isArray(m.profiles)) {
     const names = (m.profiles as Record<string, unknown>[])
       .map(p => (p.name ?? p) as string)
@@ -135,8 +135,8 @@ function getProfiles(m: ZohoModule): string {
 type FilterKey = "all" | "hidden" | "unused" | "custom" | "deprecated";
 
 const MODULE_COLUMNS: ColumnFilterDef<ZohoModule>[] = [
-  { key: "generated_type", label: "Generated Type", getValue: m => String(m.generated_type ?? "—") },
-  { key: "status",         label: "Status",         getValue: m => String(m.status ?? "—") },
+  { key: "generated_type", label: "Generated Type", getValue: m => String(m.generated_type ?? "-") },
+  { key: "status",         label: "Status",         getValue: m => String(m.status ?? "-") },
   { key: "viewable",       label: "Viewable",        getValue: m => (m.viewable ?? m.visible) !== false ? "Yes" : "No" },
   { key: "show_as_tab",    label: "Show as Tab",     getValue: m => m.show_as_tab ? "Yes" : "No" },
   { key: "creatable",      label: "Creatable",       getValue: m => m.creatable ? "Yes" : "No" },
@@ -200,8 +200,8 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
         // Deleted modules and Zoho's own internal pseudo-modules (a
         // standalone "module" record auto-generated per file/image-upload
         // field, plus bookkeeping entries like Locking_Information__s,
-        // Functions__s, subforms — see isInternalModule) aren't modules a
-        // user would ever recognize or need to audit — verified against a
+        // Functions__s, subforms - see isInternalModule) aren't modules a
+        // user would ever recognize or need to audit - verified against a
         // live org where these inflated the raw count by 100+ entries.
         // system_hidden modules are Zoho-computed, not a real admin choice
         // (see isSystemHiddenModule), so they're excluded here too rather
@@ -216,7 +216,7 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
     }
   }
 
-  // Audit categorization — real Zoho API uses "viewable", visibility number, and status string
+  // Audit categorization - real Zoho API uses "viewable", visibility number, and status string
   const hidden = modules.filter(m =>
     m.viewable === false ||
     m.visible === false ||
@@ -239,7 +239,7 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
     String(m.status ?? "").toLowerCase() === "deleted"
   );
 
-  // "Active"/"inactive" isn't a real status value on this API — verified
+  // "Active"/"inactive" isn't a real status value on this API - verified
   // live against a connected org: status here is "visible" / "system_hidden"
   // / "user_hidden", not "active"/"inactive". So "active" is defined as "not
   // hidden", reusing the exact same check as the Hidden Modules finding
@@ -296,7 +296,7 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
         </div>
         <div className="audit-toolbar">
           {tools.length === 0 && (
-            <span className="no-tools-hint">No module tools found — check connection</span>
+            <span className="no-tools-hint">No module tools found - check connection</span>
           )}
           <button onClick={() => void loadModules()} disabled={loading || selectedTools.length === 0} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : modules.length ? "Reload" : "Load Modules"}
@@ -366,7 +366,7 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
 
             {displayed.length === 0 ? (
               <div className="empty-state">
-                {search.trim() ? `No modules match "${search.trim()}".` : `No ${filter} modules found — this is a good sign!`}
+                {search.trim() ? `No modules match "${search.trim()}".` : `No ${filter} modules found - this is a good sign!`}
               </div>
             ) : (
               <div className="table-scroll">
@@ -388,10 +388,10 @@ export default function ModulesAudit({ config, tools, onLog }: Props) {
                       return (
                         <tr key={i} className={tags.length ? "row-flagged" : ""}>
                           <td className="cell-name">{getName(m)}</td>
-                          <td className="cell-mono">{String(m.id ?? "—")}</td>
-                          <td className="cell-mono">{String(m.api_name ?? "—")}</td>
-                          <td className="cell-mono">{String(m.module_name ?? "—")}</td>
-                          <td><span className="arg-badge">{String(m.status ?? "—")}</span></td>
+                          <td className="cell-mono">{String(m.id ?? "-")}</td>
+                          <td className="cell-mono">{String(m.api_name ?? "-")}</td>
+                          <td className="cell-mono">{String(m.module_name ?? "-")}</td>
+                          <td><span className="arg-badge">{String(m.status ?? "-")}</span></td>
                           <td className="cell-profiles">{getProfiles(m)}</td>
                           <td>
                             <div className="tag-list">

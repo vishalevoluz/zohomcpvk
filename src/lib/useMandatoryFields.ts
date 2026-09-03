@@ -7,9 +7,9 @@ import { extractArray, findToolForEntity, resolveCoreModuleApiNames } from "@/li
 
 export interface MandatoryFieldsState {
   count: number;
-  /** Real field labels, one entry per mandatory field per core module — not deduped across modules, since the same label (e.g. "Description") being required on both Leads and Deals is two distinct configurations, not a duplicate. */
+  /** Real field labels, one entry per mandatory field per core module - not deduped across modules, since the same label (e.g. "Description") being required on both Leads and Deals is two distinct configurations, not a duplicate. */
   fieldLabels: string[];
-  /** Mandatory-field count (and the real field labels) per core module, only for modules the fetch actually resolved — lets a consumer name which module(s) are driving a high total, or list its actual required fields. */
+  /** Mandatory-field count (and the real field labels) per core module, only for modules the fetch actually resolved - lets a consumer name which module(s) are driving a high total, or list its actual required fields. */
   perModule: { apiName: string; count: number; labels: string[] }[];
   loading: boolean;
   error: string | null;
@@ -19,7 +19,7 @@ export interface MandatoryFieldsState {
 const INIT_STATE: MandatoryFieldsState = { count: 0, fieldLabels: [], perModule: [], loading: false, error: null, lastFetched: null };
 
 // Same active-layout-or-first pick usePipelineStages.ts uses for the Deals
-// layout — reused here per core module rather than imported, since that
+// layout - reused here per core module rather than imported, since that
 // module's version is tied to its own single-module fetch flow.
 function pickLayout(layouts: unknown[]): Record<string, unknown> | null {
   if (layouts.length === 0) return null;
@@ -33,11 +33,11 @@ function pickLayout(layouts: unknown[]): Record<string, unknown> | null {
 // The flat Fields API has no reliable per-org "is this field required"
 // signal: its "mandatory" key never appears as a boolean on a field (only
 // inside editable_properties, a list of which properties an admin may edit).
-// Each LAYOUT's own field config is the one real source for it — but it
+// Each LAYOUT's own field config is the one real source for it - but it
 // splits "required" across two separate booleans: "mandatory" (an admin
 // explicitly required this field on the layout) and "system_mandatory"
 // (one of Zoho's own hardcoded required fields, e.g. Deal Name, Last Name,
-// Email, Stage — required regardless of layout config). A rep can't save
+// Email, Stage - required regardless of layout config). A rep can't save
 // the record without filling in either kind, so both count here; missing
 // system_mandatory undercounts every module, since its built-in required
 // fields exist on virtually every layout.
@@ -60,7 +60,7 @@ function mandatoryFieldLabelsFromLayout(layout: Record<string, unknown> | null):
 
 // Fetches the real mandatory-field count for Leads/Contacts/Deals/Accounts
 // via getLayouts (module -> layout -> sections -> fields[].mandatory), one
-// call per core module — same per-module fan-out shape as fetchScopedFields
+// call per core module - same per-module fan-out shape as fetchScopedFields
 // in useCrmEntities.ts (the flat Fields endpoint), because Zoho's layouts
 // endpoint is equally module-scoped with no "all modules" mode.
 export function useMandatoryFields(
