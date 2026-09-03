@@ -17,7 +17,10 @@ export type FunctionIssueCategory =
   | "hardcoded"
   | "duplicate-risk"
   | "field-validity"
-  | "code-noise";
+  | "code-noise"
+  | "naming"
+  | "documentation"
+  | "scan-error";
 
 export interface FunctionIssue {
   category: FunctionIssueCategory;
@@ -36,6 +39,9 @@ export const ISSUE_CATEGORY_LABELS: Record<FunctionIssueCategory, string> = {
   "duplicate-risk": "Possible Duplicate-Record Risk",
   "field-validity": "Unverified Field API Name",
   "code-noise": "Excessive Info Statements",
+  "naming": "Vague Variable Naming",
+  "documentation": "Missing Description",
+  "scan-error": "Code Could Not Be Checked",
 };
 
 const SEVERITY_ORDER: Record<FunctionIssue["severity"], number> = { high: 0, medium: 1, low: 2 };
@@ -340,6 +346,43 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
     }
   }
 
+  // Vague/generic variable naming: a first assignment (Deluge has no var/let
+  // keyword - the first "name = value;" at statement level is the
+  // declaration) whose name is a meaningless filler word ("abc", "temp",
+  // "data1") or a single letter tells a future reader nothing about what it
+  // holds, unlike a real Deluge idiom like "leadRec" or "resp".
+  const GENERIC_VAR_NAME_RE = /^(?:abc|xyz|foo|bar|baz|qux|asdf|blah|dummy|sample|temp|tmp|test|data|val|value|var|obj|item|thing|stuff|[a-z])\d*$/i;
+  const assignmentRe = /(?:^|[;{}\n])\s*([a-zA-Z_]\w*)\s*=(?!=)/g;
+  const genericVarNames = new Set<string>();
+  let assignMatch2: RegExpExecArray | null;
+  while ((assignMatch2 = assignmentRe.exec(script))) {
+    const name = assignMatch2[1];
+    if (GENERIC_VAR_NAME_RE.test(name)) genericVarNames.add(name);
+  }
+  if (genericVarNames.size > 0) {
+    const shown = [...genericVarNames].slice(0, 3).join(", ");
+    issues.push({
+      category: "naming", severity: "low",
+      message: `Vague variable name${genericVarNames.size !== 1 ? "s" : ""} found (${shown}${genericVarNames.size > 3 ? ", …" : ""}) - a name like this tells a future reader nothing about what it holds. Use a descriptive name instead (e.g. "leadRec" or "dealAmount", not "abc" or "temp").`,
+    });
+  }
+
+  return issues;
+}
+
+// Metadata-level check, separate from analyzeFunctionScript above since it
+// reads the function's own name/description (from the function list) rather
+// than its Deluge source - a function with no description at all is easy to
+// mis-identify or misuse later, especially once several similarly-named
+// functions exist (see the Duplicate Function Names check).
+export function checkFunctionMetadata(fn: { name?: string; description?: string | null }): FunctionIssue[] {
+  const issues: FunctionIssue[] = [];
+  if (!fn.description || !fn.description.trim()) {
+    issues.push({
+      category: "documentation", severity: "low",
+      message: `"${fn.name ?? "This function"}" has no description set - add one explaining what it does and why, so it isn't a guess for the next person (or you, in six months) who has to figure out whether it's safe to change or delete.`,
+    });
+  }
   return issues;
 }
 

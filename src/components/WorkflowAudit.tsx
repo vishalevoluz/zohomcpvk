@@ -839,7 +839,7 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
     const parts = [
       `Module: ${getModule(w)}`,
       `Trigger: ${getTriggerEvents(w)}`,
-      fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: none set",
+      fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: same (none set)",
       actionTypes.length > 0 ? `Actions: ${actionTypes.join(", ")}` : "Actions: none set",
     ];
     return parts.join(" · ");

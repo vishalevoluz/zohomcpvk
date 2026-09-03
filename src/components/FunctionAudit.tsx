@@ -164,9 +164,16 @@ function hasInvalidBinding(f: ZohoFunction): boolean {
   return isLocked(f);
 }
 
+// No description: the function's own description field is empty/whitespace -
+// easy to mis-identify or misuse later, especially once several
+// similarly-named functions exist.
+function hasNoDescription(f: ZohoFunction): boolean {
+  return !f.description || !f.description.trim();
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type FnFilterKey = "all" | "unused" | "missing_ref" | "locked";
+type FnFilterKey = "all" | "unused" | "missing_ref" | "locked" | "no_description";
 
 const FUNCTION_COLUMNS: ColumnFilterDef<ZohoFunction>[] = [
   { key: "module",       label: "Module",       getValue: f => getModule(f) },
@@ -247,12 +254,14 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
   const unused = functions.filter(isUnused);
   const missingRef = functions.filter(hasMissingFunctionRef);
   const locked = functions.filter(hasInvalidBinding);
+  const noDescription = functions.filter(hasNoDescription);
 
   const filterMap: Record<FnFilterKey, ZohoFunction[]> = {
     all: functions,
     unused,
     missing_ref: missingRef,
     locked,
+    no_description: noDescription,
   };
   const bySeverity = filterMap[filter];
   const bySearch = search.trim()
@@ -265,6 +274,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
     if (isUnused(f)) tags.push("unused");
     if (hasMissingFunctionRef(f)) tags.push("missing_ref");
     if (hasInvalidBinding(f)) tags.push("locked");
+    if (hasNoDescription(f)) tags.push("no_description");
     return tags;
   }
 
@@ -272,6 +282,7 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
     { key: "unused",      label: "Unassociated Functions", count: unused.length,     severity: unused.length > 0 ? "warn" : "ok",    tip: "Custom functions not linked to any workflow rule - they exist in Zoho but are never triggered automatically." },
     { key: "missing_ref", label: "Missing Function Refs",  count: missingRef.length, severity: missingRef.length > 0 ? "danger" : "ok", tip: "The underlying Deluge function ID (function.id) is missing from this association - the link to the script may be broken." },
     { key: "locked",      label: "Locked Functions",       count: locked.length,     severity: locked.length > 0 ? "warn" : "ok",    tip: "Functions that are locked and cannot be edited or executed by the current user." },
+    { key: "no_description", label: "Missing Description", count: noDescription.length, severity: noDescription.length > 0 ? "warn" : "ok", tip: "This function has no description set - easy to mis-identify or misuse later, especially once several similarly-named functions exist." },
   ];
 
   return (
@@ -402,12 +413,13 @@ export default function FunctionAudit({ config, tools, allTools = [], onLog }: P
                             <td>
                               <div className="tag-list">
                                 {tags.length === 0 && !locked
-                                  ? <span className="audit-tag tag-ok" title="No issues detected for this function">clean</span>
+                                  ? <span className="audit-tag tag-ok" data-tooltip="No issues detected for this function">clean</span>
                                   : tags.map(tag => (
-                                      <span key={tag} className={`audit-tag tag-fn-${tag}`} title={
-                                        tag === "unused"      ? "This function is not associated with any workflow rule - it will never be triggered automatically." :
-                                        tag === "missing_ref" ? "The Deluge function ID is missing - this association may be broken or the underlying script deleted." :
-                                        tag === "locked"      ? "This function is locked and cannot be edited or executed by the current user." : tag
+                                      <span key={tag} className={`audit-tag tag-fn-${tag}`} data-tooltip={
+                                        tag === "unused"         ? "This function is not associated with any workflow rule - it will never be triggered automatically." :
+                                        tag === "missing_ref"    ? "The Deluge function ID is missing - this association may be broken or the underlying script deleted." :
+                                        tag === "locked"         ? "This function is locked and cannot be edited or executed by the current user." :
+                                        tag === "no_description" ? "This function has no description set - easy to mis-identify or misuse later, especially once several similarly-named functions exist." : tag
                                       }>{tag.replace(/_/g, " ")}</span>
                                     ))}
                               </div>

@@ -21,7 +21,7 @@ import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDel
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
-import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, ISSUE_CATEGORY_LABELS, type FunctionIssue } from "@/lib/functionAnalysis";
+import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, checkFunctionMetadata, ISSUE_CATEGORY_LABELS, type FunctionIssue } from "@/lib/functionAnalysis";
 
 function parseMcpJson(result: unknown): Record<string, unknown> | null {
   if (!result || typeof result !== "object") return null;
@@ -761,7 +761,7 @@ function workflowMatchCondition(w: unknown, includeCriteriaActions: boolean): st
   const parts = [`Module: ${workflowModuleLabel(w) || "-"}`, `Trigger: ${workflowTriggerLabel(w) || "-"}`];
   if (includeCriteriaActions) {
     const fields = workflowCriteriaFieldNames(w);
-    parts.push(fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: none set");
+    parts.push(fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: same (none set)");
   }
   return parts.join(" · ");
 }
@@ -1199,6 +1199,7 @@ interface FunctionItem {
   name: string;
   category: string;
   active: boolean;
+  description: string;
 }
 
 interface FunctionDuplicateGroup {
@@ -1237,10 +1238,53 @@ function functionDuplicateTooltip(group: FunctionDuplicateGroup): string {
   return `Matched on - Function display name: "${group.name}" (case-insensitive), regardless of API name. ${group.items.length} functions share this name: ${names}. Detected ${group.items.length} times total.`;
 }
 
+// A few known code-bearing field names across the tool variants
+// resolveDetailTool can match (getFunctionCode/getFunctionScript return raw
+// text; getFunctionById/getFunctionDetail on other MCP servers return the
+// full function object instead, with the Deluge source nested under one of
+// these keys - the same "_code" key Zoho's own create/update function API
+// uses) - checked in order, first non-empty match wins.
+const CODE_FIELD_NAMES = ["_code", "code", "script", "source_code", "sourceCode", "deluge_code", "function_code", "content"];
+
+// Best-effort recursive search for a Deluge source string inside a parsed
+// JSON value - depth-capped since function-object responses only nest a
+// couple of levels (e.g. { functions: [{ _code: "..." }] }), not to protect
+// against a pathological payload.
+function findCodeField(value: unknown, depth = 0): string | null {
+  if (depth > 4 || value === null || value === undefined) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findCodeField(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof value !== "object") return null;
+  const r = value as Record<string, unknown>;
+  for (const key of CODE_FIELD_NAMES) {
+    const v = r[key];
+    // A real Deluge script is a decent chunk of text containing at least one
+    // of the syntax characters every function has - guards against a field
+    // that just happens to share a name (e.g. an API error "code" string
+    // like "INVALID_MODULE") being mistaken for the function's source.
+    if (typeof v === "string" && v.trim().length > 20 && /[;{(]/.test(v)) return v;
+  }
+  for (const v of Object.values(r)) {
+    if (v && typeof v === "object") {
+      const found = findCodeField(v, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 // getFunctionCode's response is the raw Deluge/runtime source text itself
 // (confirmed via a live call), not a JSON envelope like the other entity
 // fetches - so this reads structuredContent.data.text / content[0].text
-// directly instead of running it through the generic JSON-array extractor.
+// first. Other tool names resolveDetailTool can match (getFunctionById,
+// getFunctionDetail) return a structured function object instead, so this
+// falls back to searching that object for a "_code"/"code"/"script" field
+// when the plain-text shape isn't there.
 function extractFunctionCode(output: unknown): string | null {
   if (!output || typeof output !== "object") return null;
   const r = output as Record<string, unknown>;
@@ -1249,14 +1293,47 @@ function extractFunctionCode(output: unknown): string | null {
   if (typeof data?.text === "string" && data.text.trim()) return data.text;
   if (Array.isArray(r.content)) {
     for (const item of r.content as Record<string, unknown>[]) {
-      if (item.type === "text" && typeof item.text === "string" && item.text.trim()) return item.text;
+      if (item.type === "text" && typeof item.text === "string" && item.text.trim()) {
+        // Some servers wrap the structured function object - or an unrelated
+        // error payload - as a JSON string inside content[].text rather than
+        // returning real code as plain text. Only fall back to treating the
+        // raw text itself as the code when it *isn't* JSON at all - a JSON
+        // blob with no code field inside (e.g. an API error response) must
+        // never be handed to the analyzer as if it were the function's
+        // source.
+        let isJson = true;
+        try {
+          const parsed = JSON.parse(item.text);
+          const found = findCodeField(parsed);
+          if (found) return found;
+        } catch { isJson = false; }
+        if (!isJson) return item.text;
+      }
     }
   }
-  return null;
+  if (data) {
+    const found = findCodeField(data);
+    if (found) return found;
+  }
+  return findCodeField(r);
 }
 
 const FUNCTION_CODE_TOOL_PATTERNS = [/getfunctioncode$/i, /getfunctionscript$/i, /getfunctionbyid$/i, /getfunctiondetail/i];
 const FUNCTION_CODE_SCAN_CAP = 100;
+
+// A function whose Deluge source couldn't be pulled back (a failed/errored
+// call, or a response shape extractFunctionCode couldn't parse) must still
+// show up in the Issues tab - not silently disappear, which looks identical
+// to "this function has no issues" and hides the fact it was never actually
+// checked at all.
+function codeUnavailableIssue(reason?: string): FunctionIssue[] {
+  return [{
+    category: "scan-error", severity: "low",
+    message: reason
+      ? `This function's code couldn't be checked for issues - the fetch failed (${reason}). Open it and click "Preview Code" to retry, or verify the code-fetch tool has access to this function.`
+      : `This function's code couldn't be checked for issues - the connected MCP server didn't return a usable source. Open it and click "Preview Code" to see the raw response.`,
+  }];
+}
 
 interface FunctionCodeState { code: string | null; loading: boolean; unavailable: boolean; }
 
@@ -1311,6 +1388,7 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
           name: String(r.name ?? r.api_name ?? `Function ${i + 1}`),
           category: String(r.category ?? "-"),
           active: getFunctionActive(f),
+          description: typeof r.description === "string" ? r.description : "",
         };
       });
       setItems(parsed);
@@ -1371,10 +1449,15 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
       const output = await executeTool(config, tool.name, input);
       const code = extractFunctionCode(output);
       setCodeByFnId(prev => ({ ...prev, [fnId]: { code, loading: false, unavailable: code === null } }));
-      if (code) setIssuesByFnId(prev => ({ ...prev, [fnId]: analyzeFunctionScript(code) }));
+      // A function with a real error in it must still show up in the Issues
+      // tab even when its code couldn't be pulled back - silently dropping it
+      // from the list looks identical to "this function is clean," which is
+      // the opposite of true.
+      setIssuesByFnId(prev => ({ ...prev, [fnId]: code ? analyzeFunctionScript(code) : codeUnavailableIssue() }));
       onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
     } catch (e: unknown) {
       setCodeByFnId(prev => ({ ...prev, [fnId]: { code: null, loading: false, unavailable: true } }));
+      setIssuesByFnId(prev => ({ ...prev, [fnId]: codeUnavailableIssue(e instanceof Error ? e.message : undefined) }));
       onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
     }
   }
@@ -1403,9 +1486,17 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
           if (code) {
             setCodeByFnId(prev => ({ ...prev, [fn.id]: { code, loading: false, unavailable: false } }));
             setIssuesByFnId(prev => ({ ...prev, [fn.id]: analyzeFunctionScript(code) }));
+          } else {
+            // Same reasoning as fetchCode above - a function that couldn't be
+            // pulled back must still surface in Issues, not vanish as if it
+            // were clean.
+            setCodeByFnId(prev => ({ ...prev, [fn.id]: { code: null, loading: false, unavailable: true } }));
+            setIssuesByFnId(prev => ({ ...prev, [fn.id]: codeUnavailableIssue() }));
           }
-          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: code ? "success" : "error", errorMessage: code ? undefined : "Code fetch returned no usable source for this function", durationMs: Date.now() - start, timestamp: new Date() });
         } catch (e: unknown) {
+          setCodeByFnId(prev => ({ ...prev, [fn.id]: { code: null, loading: false, unavailable: true } }));
+          setIssuesByFnId(prev => ({ ...prev, [fn.id]: codeUnavailableIssue(e instanceof Error ? e.message : undefined) }));
           onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
         }
         setScanProgress(prev => ({ ...prev, done: prev.done + 1 }));
@@ -1980,8 +2071,15 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const ziaScheduleInsight = selectedCard === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
 
+  // Metadata issues (e.g. missing description) come straight from the
+  // function list, so they show for every function immediately - unlike the
+  // code-scan issues below, which only exist once that function's Deluge
+  // source has actually been downloaded and analyzed.
   const functionIssueRows: FunctionIssueRow[] = selectedCard === "functions"
-    ? functionRecords.items.flatMap(fn => (functionRecords.issuesByFnId[fn.id] ?? []).map((issue, i) => ({ key: `${fn.id}-${i}`, id: fn.id, functionName: fn.name, category: fn.category, issue })))
+    ? functionRecords.items.flatMap(fn => [
+        ...checkFunctionMetadata(fn).map((issue, i) => ({ key: `${fn.id}-meta-${i}`, id: fn.id, functionName: fn.name, category: fn.category, issue })),
+        ...(functionRecords.issuesByFnId[fn.id] ?? []).map((issue, i) => ({ key: `${fn.id}-${i}`, id: fn.id, functionName: fn.name, category: fn.category, issue })),
+      ])
     : [];
   const sortedFunctionIssueRows = [...functionIssueRows].sort((a, b) => FUNCTION_SEVERITY_ORDER[a.issue.severity] - FUNCTION_SEVERITY_ORDER[b.issue.severity]);
   const scannedFnIds = Object.keys(functionRecords.issuesByFnId);
