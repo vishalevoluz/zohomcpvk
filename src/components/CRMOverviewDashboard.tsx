@@ -1593,9 +1593,16 @@ function useWorkflowDetails(config: McpConfig | null, tools: McpTool[], items: u
   useEffect(() => {
     if (!active || scanFetchedRef.current) return;
     if (!config || items.length === 0) return;
-    const hasTool = tools.some(t => /getworkflowrulebyid$/i.test(t.name));
-    if (!hasTool) return;
+    const tool = tools.find(t => /getworkflowrulebyid$/i.test(t.name));
+    if (!tool) return;
     scanFetchedRef.current = true;
+
+    // "id" is documented as a path parameter, not necessarily a flat body
+    // key - resolved dynamically from the tool's own schema (same approach
+    // the Functions card uses for its fxIdentifier/functionId/id lookup)
+    // rather than hardcoding a flat { id } that silently fails if the real
+    // server expects it nested under path_variables.
+    const idLoc = findParam(findParamLocations(tool), /^id$|^workflowRuleId$|^ruleId$/i) ?? { group: "path_variables", key: "id" };
 
     const targets = items.slice(0, WORKFLOW_DETAIL_SCAN_CAP);
     setScanProgress({ done: 0, total: targets.length, loading: true });
@@ -1605,15 +1612,17 @@ function useWorkflowDetails(config: McpConfig | null, tools: McpTool[], items: u
         const id = String((item as Record<string, unknown> | null)?.id ?? "");
         if (!id) { setScanProgress(prev => ({ ...prev, done: prev.done + 1 })); continue; }
         const start = Date.now();
+        const input: Record<string, unknown> = {};
+        setParam(input, idLoc, id);
         try {
-          const output = await executeTool(config, "getWorkflowRuleById", { id });
+          const output = await executeTool(config, tool.name, input);
           const parsed = parseMcpJson(output);
           const detail = extractSingleWorkflowDetail(parsed);
           setDetailByWfId(prev => ({ ...prev, [id]: { criteria: detail?.criteria ?? null, actions: detail?.actions ?? null, unavailable: !detail } }));
-          onLog({ id: crypto.randomUUID(), tool: "getWorkflowRuleById", input: { id }, output, status: detail ? "success" : "error", errorMessage: detail ? undefined : "No workflow detail returned", durationMs: Date.now() - start, timestamp: new Date() });
+          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: detail ? "success" : "error", errorMessage: detail ? undefined : "No workflow detail returned", durationMs: Date.now() - start, timestamp: new Date() });
         } catch (e: unknown) {
           setDetailByWfId(prev => ({ ...prev, [id]: { criteria: null, actions: null, unavailable: true } }));
-          onLog({ id: crypto.randomUUID(), tool: "getWorkflowRuleById", input: { id }, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
         }
         setScanProgress(prev => ({ ...prev, done: prev.done + 1 }));
       }

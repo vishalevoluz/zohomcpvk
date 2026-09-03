@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
-import { executeTool } from "@/lib/zohoMcp";
+import { executeTool, findParamLocations, findParam, setParam } from "@/lib/zohoMcp";
 import ScopeHint from "@/components/ScopeHint";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
 import { normalizeWorkflowActionType, workflowCriteriaFieldConditions } from "@/lib/crmPredicates";
@@ -293,7 +293,18 @@ function formatDateTime(iso?: string | null): string {
   try { return new Date(iso).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
   catch { return String(iso); }
 }
-function findTool(allTools: McpTool[], name: string): McpTool | undefined { return allTools.find(t => t.name === name); }
+// Exact match first (fast path for servers with unprefixed tool names), then
+// a case-insensitive suffix match - MCP servers commonly prefix every tool
+// name (e.g. "ZohoCRM_getWorkflowRuleById"), and an exact match against the
+// bare name would never fire for those, silently disabling every feature
+// gated on it (View Detail, Usage Stats, Actions Count, canDelete/Update/
+// Create, the Connected tab, Load Limits...) despite the tool actually being
+// connected. The suffix check still can't cross-match a same-suffixed
+// sibling like "getConnectedWorkflowRuleById" - that string doesn't end
+// with the full "getWorkflowRuleById" (it ends in "...ectedWorkflowRuleById").
+function findTool(allTools: McpTool[], name: string): McpTool | undefined {
+  return allTools.find(t => t.name === name) ?? allTools.find(t => t.name.toLowerCase().endsWith(name.toLowerCase()));
+}
 
 // ─── Tool label map ───────────────────────────────────────────────────────────
 
@@ -391,14 +402,24 @@ function WorkflowDetailModal({
   async function loadFullDetail() {
     setLoadingDetail(true); setDetailError("");
     const start = Date.now();
+    const tool = findTool(allTools, "getWorkflowRuleById");
+    // "id" is documented as a path parameter, not necessarily a flat body
+    // key - resolved from the tool's own schema instead of assuming a flat
+    // { id } that silently fails if the real server expects it nested under
+    // path_variables (same fix as CRMOverviewDashboard.tsx's workflow-detail
+    // scan, which caught this exact call returning nothing for every
+    // workflow).
+    const idLoc = tool ? (findParam(findParamLocations(tool), /^id$|^workflowRuleId$|^ruleId$/i) ?? { group: "path_variables", key: "id" }) : { group: null, key: "id" };
+    const input: Record<string, unknown> = {};
+    setParam(input, idLoc, initialWf.id);
     try {
-      const result = await executeTool(config, "getWorkflowRuleById", { id: initialWf.id });
+      const result = await executeTool(config, tool?.name ?? "getWorkflowRuleById", input);
       const apiErr = detectApiError(result);
       if (apiErr) { setDetailError(apiErr); setFullWf(initialWf); return; }
       const detail = extractSingleWorkflow(result);
       setFullWf(detail ?? initialWf);
       if (detail) setUpdateJson(JSON.stringify(detail, null, 2));
-      onLog({ id: crypto.randomUUID(), tool: "getWorkflowRuleById", input: { id: initialWf.id }, output: result, status: detail ? "success" : "error", durationMs: Date.now() - start, timestamp: new Date() });
+      onLog({ id: crypto.randomUUID(), tool: tool?.name ?? "getWorkflowRuleById", input, output: result, status: detail ? "success" : "error", durationMs: Date.now() - start, timestamp: new Date() });
     } catch (e) { setDetailError(e instanceof Error ? e.message : "Failed"); setFullWf(initialWf); }
     finally { setLoadingDetail(false); }
   }
