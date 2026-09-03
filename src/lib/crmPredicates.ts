@@ -48,18 +48,23 @@ export function workflowModuleLabel(item: unknown): string {
   return String(mod);
 }
 
-// The specific field an "on field update" trigger watches - Zoho nests this
-// as execute_when.details.field ({api_name, id} or a bare string), separate
-// from execute_when.type ("field_update") itself. Without reading this, two
-// workflows watching two completely different fields both collapse to the
-// same "field update" trigger key and get wrongly flagged as duplicates or
-// as conflicting/overlapping with each other.
+// The specific field an "on field update" trigger watches - verified against
+// a live getWorkflowRules response: Zoho nests it as
+// execute_when.details.criteria.field ({api_name, id}), NOT
+// execute_when.details.field directly - the "criteria" here is the
+// field-watch configuration itself (comparator/value are often the literal
+// template tokens "${ANYVALUE}", not a real record-matching condition).
+// Without reading this, two workflows watching two completely different
+// fields (e.g. "State" vs "City") both collapse to the same "field update"
+// trigger key and get wrongly flagged as duplicates or as
+// conflicting/overlapping with each other.
 function workflowTriggerFieldLabel(item: unknown): string {
   if (!item || typeof item !== "object") return "";
   const r = item as Record<string, unknown>;
   const executeWhen = r.execute_when as Record<string, unknown> | undefined;
   const details = executeWhen?.details as Record<string, unknown> | undefined;
-  const field = details?.field;
+  const criteria = details?.criteria as Record<string, unknown> | undefined;
+  const field = criteria?.field ?? details?.field;
   if (!field) return "";
   if (typeof field === "string") return field;
   if (typeof field === "object") {

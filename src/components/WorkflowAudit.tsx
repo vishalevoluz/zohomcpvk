@@ -16,7 +16,7 @@ interface ZohoWorkflow {
   status?: string | { active?: boolean };
   active?: boolean;
   module?: string | { api_name?: string; name?: string; plural_label?: string };
-  execute_when?: { type?: string; details?: { trigger_module?: { api_name?: string; id?: string }; repeat?: boolean; field?: string | { api_name?: string; field_label?: string; name?: string } } };
+  execute_when?: { type?: string; details?: { trigger_module?: { api_name?: string; id?: string }; repeat?: boolean; field?: string | { api_name?: string; field_label?: string; name?: string }; criteria?: { field?: string | { api_name?: string; field_label?: string; name?: string } } } };
   trigger_on?: string | string[];
   trigger?: string | string[];
   triggers?: string | string[];
@@ -140,13 +140,16 @@ function getModule(w: ZohoWorkflow): string {
   const m = w.module as Record<string, unknown>;
   return String(m.plural_label ?? m.name ?? m.api_name ?? "-");
 }
-// The specific field an "on field update" trigger watches - without this,
-// two workflows watching different fields for updates both report the same
-// "field update" trigger text and get wrongly matched as duplicates or
-// conflicting/overlapping rules by workflowContentKey/triggerKey below,
-// which both derive their trigger signature from this function.
+// The specific field an "on field update" trigger watches - verified against
+// a live getWorkflowRules response: Zoho nests it as
+// execute_when.details.criteria.field, not execute_when.details.field
+// directly. Without this, two workflows watching different fields for
+// updates both report the same "field update" trigger text and get wrongly
+// matched as duplicates or conflicting/overlapping rules by
+// workflowContentKey/triggerKey below, which both derive their trigger
+// signature from this function.
 function getTriggerFieldLabel(w: ZohoWorkflow): string {
-  const field = w.execute_when?.details?.field;
+  const field = w.execute_when?.details?.criteria?.field ?? w.execute_when?.details?.field;
   if (!field) return "";
   if (typeof field === "string") return field;
   return String(field.api_name ?? field.field_label ?? field.name ?? "");

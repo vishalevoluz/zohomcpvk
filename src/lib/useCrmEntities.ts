@@ -365,11 +365,19 @@ export function useCrmEntities(
       // or no pagination support at all) - resolve the real location instead of
       // guessing a flat "page" key, same as useCrmRecordSamples.ts does.
       const pageLoc = findParam(findParamLocations(tool), /^page$/i);
+      // getWorkflowRules defaults to a summary shape with no criteria/actions
+      // at all - include_inner_details asks for the full condition/action
+      // configuration in the same list call, instead of needing a separate
+      // getWorkflowRuleById round-trip per workflow just to see what it
+      // actually does (see useWorkflowDetails in CRMOverviewDashboard.tsx,
+      // which still runs as a fallback/verification layer regardless).
+      const includeDetailsLoc = type === "workflows" ? findParam(findParamLocations(tool), /^include_inner_details$/i) : null;
 
       for (let page = 1; page <= MAX_PAGES; page++) {
         const start = Date.now();
         const input: Record<string, unknown> = {};
         if (page > 1 && pageLoc) setParam(input, pageLoc, page);
+        if (includeDetailsLoc) setParam(input, includeDetailsLoc, true);
         const output = await executeTool(config, tool.name, input);
         const pageItems = extractArray(output);
         items = items.concat(pageItems);

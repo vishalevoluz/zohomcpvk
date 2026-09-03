@@ -787,8 +787,7 @@ function workflowLastTriggeredTooltip(row: WorkflowBreakdownRow): string {
 
 // Sorted inactive-first, then never-triggered-first within active - same
 // "surface the actionable ones" convention as the other breakdowns here.
-function computeWorkflowBreakdown(entityData: Record<CrmEntityType, EntityState>): WorkflowBreakdownRow[] {
-  const items = entityData.workflows.items;
+function computeWorkflowBreakdown(items: unknown[]): WorkflowBreakdownRow[] {
   const duplicateSet = new Set(identicalWorkflows(items));
   const overlappingSet = new Set(overlappingWorkflows(items));
   const duplicateGroupByItem = new Map<unknown, unknown[]>();
@@ -826,8 +825,7 @@ interface WorkflowDuplicateGroupView {
 // as expandable match-condition cards - same "one row per group, count badge,
 // expandable member chips" shape as the Functions card's Duplicate Function
 // Names tab, instead of scattering each duplicate as its own flat row.
-function computeWorkflowDuplicateGroups(entityData: Record<CrmEntityType, EntityState>): WorkflowDuplicateGroupView[] {
-  const items = entityData.workflows.items;
+function computeWorkflowDuplicateGroups(items: unknown[]): WorkflowDuplicateGroupView[] {
   return identicalWorkflowGroups(items)
     .map(group => {
       const members = group.map((w, i) => ({ id: String((w as Record<string, unknown> | null)?.id ?? i), name: getItemName(w, i) }));
@@ -1546,6 +1544,99 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
   return { items, listState, failureCount, codeByFnId, issuesByFnId, scanProgress, fetchCode, rescan };
 }
 
+interface WorkflowDetailState { criteria: unknown; actions: unknown; unavailable: boolean; }
+const WORKFLOW_DETAIL_SCAN_CAP = 100;
+
+// getWorkflowRuleById's response wraps the single workflow the same way the
+// list endpoint wraps many - a workflow_rules/workflows array, or (some MCP
+// server versions) the bare object itself.
+function extractSingleWorkflowDetail(parsed: Record<string, unknown> | null): { criteria: unknown; actions: unknown } | null {
+  if (!parsed) return null;
+  const rules = parsed.workflow_rules ?? parsed.workflows;
+  const single = Array.isArray(rules) && rules.length > 0
+    ? (rules[0] as Record<string, unknown>)
+    : (parsed.id || parsed.name ? parsed : null);
+  if (!single) return null;
+  return {
+    criteria: single.criteria ?? single.conditions ?? null,
+    actions: single.actions ?? single.action_list ?? single.workflow_actions ?? null,
+  };
+}
+
+// getWorkflowRules (the list call feeding entityData.workflows) never
+// returns criteria or actions at all - verified against a live response.
+// Two workflows sharing nothing but module+trigger (e.g. five different
+// Deals automations all on "create or edit") looked identical purely
+// because there was no criteria/actions data to tell them apart, not
+// because they actually were duplicates. This fetches each workflow's real
+// criteria/actions via getWorkflowRuleById before any duplicate/overlap
+// match is trusted - same capped-batch-scan-behind-the-card-opening pattern
+// as useFunctionRecords' code scan above, including a manual rescan.
+function useWorkflowDetails(config: McpConfig | null, tools: McpTool[], items: unknown[], active: boolean, onLog: (log: ExecutionLog) => void) {
+  const [detailByWfId, setDetailByWfId] = useState<Record<string, WorkflowDetailState>>({});
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number; loading: boolean }>({ done: 0, total: 0, loading: false });
+  const scanFetchedRef = useRef(false);
+  const wasActiveRef = useRef(false);
+  const [scanGeneration, setScanGeneration] = useState(0);
+
+  useEffect(() => {
+    if (!active && wasActiveRef.current) scanFetchedRef.current = false;
+    wasActiveRef.current = active;
+  }, [active]);
+
+  function rescan() {
+    scanFetchedRef.current = false;
+    setDetailByWfId({});
+    setScanGeneration(g => g + 1);
+  }
+
+  useEffect(() => {
+    if (!active || scanFetchedRef.current) return;
+    if (!config || items.length === 0) return;
+    const hasTool = tools.some(t => /getworkflowrulebyid$/i.test(t.name));
+    if (!hasTool) return;
+    scanFetchedRef.current = true;
+
+    const targets = items.slice(0, WORKFLOW_DETAIL_SCAN_CAP);
+    setScanProgress({ done: 0, total: targets.length, loading: true });
+
+    void (async () => {
+      for (const item of targets) {
+        const id = String((item as Record<string, unknown> | null)?.id ?? "");
+        if (!id) { setScanProgress(prev => ({ ...prev, done: prev.done + 1 })); continue; }
+        const start = Date.now();
+        try {
+          const output = await executeTool(config, "getWorkflowRuleById", { id });
+          const parsed = parseMcpJson(output);
+          const detail = extractSingleWorkflowDetail(parsed);
+          setDetailByWfId(prev => ({ ...prev, [id]: { criteria: detail?.criteria ?? null, actions: detail?.actions ?? null, unavailable: !detail } }));
+          onLog({ id: crypto.randomUUID(), tool: "getWorkflowRuleById", input: { id }, output, status: detail ? "success" : "error", errorMessage: detail ? undefined : "No workflow detail returned", durationMs: Date.now() - start, timestamp: new Date() });
+        } catch (e: unknown) {
+          setDetailByWfId(prev => ({ ...prev, [id]: { criteria: null, actions: null, unavailable: true } }));
+          onLog({ id: crypto.randomUUID(), tool: "getWorkflowRuleById", input: { id }, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+        }
+        setScanProgress(prev => ({ ...prev, done: prev.done + 1 }));
+      }
+      setScanProgress(prev => ({ ...prev, loading: false }));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, items, config, tools, onLog, scanGeneration]);
+
+  return { detailByWfId, scanProgress, rescan };
+}
+
+// Overlays each workflow's real fetched criteria/actions (once available)
+// onto the raw list item, so downstream duplicate/overlap matching sees the
+// actual configuration instead of the list endpoint's incomplete shape.
+function enrichWorkflowsWithDetail(items: unknown[], detailByWfId: Record<string, WorkflowDetailState>): unknown[] {
+  return items.map(item => {
+    const r = (item ?? {}) as Record<string, unknown>;
+    const detail = detailByWfId[String(r.id ?? "")];
+    if (!detail || detail.unavailable) return item;
+    return { ...r, criteria: detail.criteria ?? r.criteria, actions: detail.actions ?? r.actions };
+  });
+}
+
 interface FunctionIssueRow { key: string; id: string; functionName: string; category: string; issue: FunctionIssue; }
 const FUNCTION_SEVERITY_ORDER: Record<FunctionIssue["severity"], number> = { high: 0, medium: 1, low: 2 };
 
@@ -1889,6 +1980,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
   const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
+  const workflowDetails = useWorkflowDetails(config, tools, entityData.workflows.items, selectedCard === "workflows", onLog);
   // Duplicate-name groups show their matched functions immediately, same as
   // the Workflow card's "Duplicate Match Details" panel (expanded by default)
   // - this tracks which groups a user has manually collapsed, rather than
@@ -2130,8 +2222,9 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null,
     !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null),
   );
-  const workflowBreakdown = computeWorkflowBreakdown(entityData);
-  const workflowDuplicateGroups = computeWorkflowDuplicateGroups(entityData);
+  const enrichedWorkflowItems = enrichWorkflowsWithDetail(entityData.workflows.items, workflowDetails.detailByWfId);
+  const workflowBreakdown = computeWorkflowBreakdown(enrichedWorkflowItems);
+  const workflowDuplicateGroups = computeWorkflowDuplicateGroups(enrichedWorkflowItems);
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
@@ -3070,8 +3163,29 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
             <h4>Workflows - Active / Inactive / Duplicate / Overlapping</h4>
-            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                className="btn-secondary"
+                onClick={() => workflowDetails.rescan()}
+                disabled={workflowDetails.scanProgress.loading}
+                data-tooltip="Re-fetch each workflow's real criteria and actions from scratch - the list view alone can't tell two workflows apart beyond module/trigger, so this verifies duplicate/overlap matches against the actual configuration."
+              >
+                {workflowDetails.scanProgress.loading ? <><span className="spinner" /> Verifying…</> : "↺ Rescan"}
+              </button>
+              <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+            </div>
           </div>
+          {workflowDetails.scanProgress.loading && (
+            <p className="kpi-drilldown-progress">
+              <span className="spinner" /> Verifying real criteria &amp; actions per workflow… {workflowDetails.scanProgress.done} of {workflowDetails.scanProgress.total}
+            </p>
+          )}
+          {!workflowDetails.scanProgress.loading && workflowDetails.scanProgress.total > 0 && (
+            <p className="kpi-drilldown-note">
+              Verified {Object.values(workflowDetails.detailByWfId).filter(d => !d.unavailable).length} of {workflowDetails.scanProgress.total} workflows
+              {workflowDetails.scanProgress.total < entityData.workflows.items.length ? ` (capped at ${WORKFLOW_DETAIL_SCAN_CAP})` : ""} against their real configuration - duplicate/overlap matches below reflect actual criteria and actions, not just module/trigger.
+            </p>
+          )}
           <input
             type="text"
             className="kpi-drilldown-search"
