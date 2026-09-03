@@ -48,6 +48,27 @@ export function workflowModuleLabel(item: unknown): string {
   return String(mod);
 }
 
+// The specific field an "on field update" trigger watches - Zoho nests this
+// as execute_when.details.field ({api_name, id} or a bare string), separate
+// from execute_when.type ("field_update") itself. Without reading this, two
+// workflows watching two completely different fields both collapse to the
+// same "field update" trigger key and get wrongly flagged as duplicates or
+// as conflicting/overlapping with each other.
+function workflowTriggerFieldLabel(item: unknown): string {
+  if (!item || typeof item !== "object") return "";
+  const r = item as Record<string, unknown>;
+  const executeWhen = r.execute_when as Record<string, unknown> | undefined;
+  const details = executeWhen?.details as Record<string, unknown> | undefined;
+  const field = details?.field;
+  if (!field) return "";
+  if (typeof field === "string") return field;
+  if (typeof field === "object") {
+    const f = field as Record<string, unknown>;
+    return String(f.api_name ?? f.field_label ?? f.name ?? "");
+  }
+  return String(field);
+}
+
 // module::trigger-event signature a workflow fires on - same shape
 // WorkflowAudit.tsx's "Conflicting Workflows" finding already groups by, kept
 // here so the Health Score's Workflow Health checklist can report the same
@@ -60,6 +81,8 @@ function workflowTriggerKey(item: unknown): string {
   let trigger: string;
   if (executeWhen?.type) {
     trigger = String(executeWhen.type).replace(/_/g, " ");
+    const fieldLabel = workflowTriggerFieldLabel(item);
+    if (fieldLabel) trigger += ` (${fieldLabel})`;
   } else {
     const t = r.trigger_on ?? r.trigger ?? r.triggers;
     trigger = !t ? "-" : Array.isArray(t) ? t.join(", ") : String(t);
@@ -127,6 +150,44 @@ function workflowActionsSignature(item: unknown): string[] {
   }).sort();
 }
 
+// Maps a raw internal workflow-action type keyword to the label Zoho's own
+// CRM UI uses for it, so a duplicate/overlap match is described as "Field
+// Update" / "Assign Owner" / "Tags" / "Email Notification" / "Activities" /
+// "Create Record" / "Create Connected Record" / "Webhook" - not a raw
+// internal string like "field_update". Matched by keyword rather than an
+// exact string since different MCP server versions haven't been consistent
+// about the literal type value (same reasoning as isActiveWorkflow's
+// case-insensitivity above). This is display-only - the actual duplicate
+// match (workflowContentKey) still hashes the full type+detail signature
+// above, so two actions of the same category but different configuration
+// (e.g. two different field updates) are correctly NOT treated as identical.
+export function normalizeWorkflowActionType(raw: string): string {
+  // Underscore counts as a word character, so \b boundaries never fire
+  // between e.g. "tag" and "_association" in the raw key - replacing
+  // underscores with spaces first makes those real boundaries.
+  const s = raw.toLowerCase().replace(/_/g, " ");
+  if (!s.trim()) return "-";
+  if (/field ?update/.test(s)) return "Field Update";
+  if (/(assign|change|transfer) ?owner|owner ?(assign|update|change)/.test(s)) return "Assign Owner";
+  if (/\btag/.test(s)) return "Tags";
+  if (/email/.test(s)) return "Email Notification";
+  if (/\btask\b|\bevent\b|\bcall\b|activit/.test(s)) return "Activities";
+  if (/connected ?record/.test(s)) return "Create Connected Record";
+  if (/create ?record|related ?record/.test(s)) return "Create Record";
+  if (/webhook/.test(s)) return "Webhook";
+  if (/function/.test(s)) return "Custom Function";
+  return s.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+// Human-readable, deduplicated action categories for a workflow (e.g.
+// ["Field Update", "Webhook"]) - the display-side counterpart to
+// workflowActionsSignature above, for surfacing *which* actions matched in a
+// duplicate/overlap description.
+export function workflowActionTypeNames(item: unknown): string[] {
+  const types = workflowActionsSignature(item).map(s => normalizeWorkflowActionType(s.split("|")[0]));
+  return [...new Set(types)].filter(t => t !== "-");
+}
+
 // Full functional identity: module + trigger + criteria + actions. Two rules
 // with this key equal behave identically regardless of name - name is
 // deliberately excluded since a cloned-and-relabeled rule is exactly the case
@@ -190,6 +251,24 @@ export function overlappingWorkflowGroups(workflows: unknown[]): unknown[][] {
 // rather than just asserting the rules are identical/overlapping.
 export function workflowCriteriaFieldNames(item: unknown): string[] {
   return [...new Set(workflowCriteriaSignature(item).map(c => c.split("|")[0]).filter(Boolean))];
+}
+
+// Field + comparator pairs (e.g. "Address (is empty)") - the same
+// workflowCriteriaSignature strings as above, but keeping the comparator
+// instead of dropping it, so a duplicate match reads as "same field AND
+// same condition on it" (e.g. "Address is not empty" on both rules) rather
+// than just "both reference Address," which could otherwise be true of two
+// rules with opposite conditions on that field.
+export function workflowCriteriaFieldConditions(item: unknown): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of workflowCriteriaSignature(item)) {
+    const [field, comparator] = c.split("|");
+    if (!field) continue;
+    const label = comparator ? `${field} (${comparator.replace(/_/g, " ")})` : field;
+    if (!seen.has(label)) { seen.add(label); out.push(label); }
+  }
+  return out;
 }
 
 // Just the trigger-event half of workflowTriggerKey's "module::trigger" join

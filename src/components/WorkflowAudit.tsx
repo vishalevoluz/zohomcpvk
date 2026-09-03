@@ -5,6 +5,7 @@ import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { executeTool } from "@/lib/zohoMcp";
 import ScopeHint from "@/components/ScopeHint";
 import ColumnFilterChips, { applyColumnFilters, type ColumnFilterDef } from "@/components/ColumnFilterChips";
+import { normalizeWorkflowActionType, workflowCriteriaFieldConditions } from "@/lib/crmPredicates";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -15,7 +16,7 @@ interface ZohoWorkflow {
   status?: string | { active?: boolean };
   active?: boolean;
   module?: string | { api_name?: string; name?: string; plural_label?: string };
-  execute_when?: { type?: string; details?: { trigger_module?: { api_name?: string; id?: string }; repeat?: boolean } };
+  execute_when?: { type?: string; details?: { trigger_module?: { api_name?: string; id?: string }; repeat?: boolean; field?: string | { api_name?: string; field_label?: string; name?: string } } };
   trigger_on?: string | string[];
   trigger?: string | string[];
   triggers?: string | string[];
@@ -139,8 +140,23 @@ function getModule(w: ZohoWorkflow): string {
   const m = w.module as Record<string, unknown>;
   return String(m.plural_label ?? m.name ?? m.api_name ?? "-");
 }
+// The specific field an "on field update" trigger watches - without this,
+// two workflows watching different fields for updates both report the same
+// "field update" trigger text and get wrongly matched as duplicates or
+// conflicting/overlapping rules by workflowContentKey/triggerKey below,
+// which both derive their trigger signature from this function.
+function getTriggerFieldLabel(w: ZohoWorkflow): string {
+  const field = w.execute_when?.details?.field;
+  if (!field) return "";
+  if (typeof field === "string") return field;
+  return String(field.api_name ?? field.field_label ?? field.name ?? "");
+}
 function getTriggerEvents(w: ZohoWorkflow): string {
-  if (w.execute_when?.type) return String(w.execute_when.type).replace(/_/g, " ");
+  if (w.execute_when?.type) {
+    const base = String(w.execute_when.type).replace(/_/g, " ");
+    const fieldLabel = getTriggerFieldLabel(w);
+    return fieldLabel ? `${base} (${fieldLabel})` : base;
+  }
   const t = w.trigger_on ?? w.trigger ?? w.triggers;
   if (!t) return "-";
   return Array.isArray(t) ? t.join(", ") : String(t);
@@ -223,9 +239,20 @@ function getActionsSignatureList(w: ZohoWorkflow): string[] {
   }).sort();
 }
 
-// Just the action types (e.g. "field_update", "email_notification") - used for loose overlap detection.
+// Raw action types (e.g. "field_update") - used for loose overlap detection,
+// where a false-collapse across two genuinely different Zoho action
+// categories would be wrong.
 function getActionTypes(w: ZohoWorkflow): Set<string> {
   return new Set(getActionsSignatureList(w).map(s => s.split("|")[0]).filter(Boolean));
+}
+
+// Human-readable action categories (Field Update, Assign Owner, Tags, Email
+// Notification, Activities, Create Record, Create Connected Record,
+// Webhook, ...) for display - the normalized counterpart to getActionTypes
+// above, shared with the Workflows drilldown card via crmPredicates.ts so
+// both places describe a match with the same vocabulary.
+function getActionTypeLabels(w: ZohoWorkflow): string[] {
+  return [...new Set([...getActionTypes(w)].map(normalizeWorkflowActionType))].filter(t => t !== "-");
 }
 
 // Full-content identity: two rules with this key equal are functionally the same workflow, regardless of name.
@@ -834,12 +861,12 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   // is the full signature workflowContentKey hashes, spelled out instead of
   // just asserting "identical".
   function duplicateMatchCriteria(w: ZohoWorkflow): string {
-    const fields = [...getCriteriaFields(w)];
-    const actionTypes = [...getActionTypes(w)];
+    const conditions = workflowCriteriaFieldConditions(w);
+    const actionTypes = getActionTypeLabels(w);
     const parts = [
       `Module: ${getModule(w)}`,
       `Trigger: ${getTriggerEvents(w)}`,
-      fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: same",
+      conditions.length > 0 ? `Criteria: ${conditions.join(", ")}` : "Criteria: same",
       actionTypes.length > 0 ? `Actions: ${actionTypes.join(", ")}` : "Actions: none set",
     ];
     return parts.join(" · ");

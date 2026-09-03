@@ -14,7 +14,8 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     label: "Core structure & automation (required)",
     tools: [
       "ZohoCRM_getModules", "ZohoCRM_getFields", "ZohoCRM_getLayouts", "ZohoCRM_getWorkflowRules",
-      "ZohoCRM_getWorkflowRuleUsage", "ZohoCRM_getFunctions", "ZohoCRM_getAutomationFunctionFailures",
+      "ZohoCRM_getWorkflowRuleUsage", "ZohoCRM_getFunctions", "ZohoCRM_getFunctionCode",
+      "ZohoCRM_getAutomationFunctionFailures",
       "ZohoCRM_getUsers", "ZohoCRM_getRoles", "ZohoCRM_getProfiles", "ZohoCRM_getPipelines",
       "ZohoCRM_getBlueprint", "ZohoCRM_getBlueprintId", "ZohoCRM_getBlueprintStateById",
       "ZohoCRM_getBlueprintProcessConfigurationMeta",

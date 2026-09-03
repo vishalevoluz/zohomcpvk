@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, identicalWorkflows, overlappingWorkflows, identicalWorkflowGroups, overlappingWorkflowGroups, workflowCriteriaFieldNames, workflowTriggerLabel } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, identicalWorkflows, overlappingWorkflows, identicalWorkflowGroups, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -760,8 +760,10 @@ interface WorkflowBreakdownRow {
 function workflowMatchCondition(w: unknown, includeCriteriaActions: boolean): string {
   const parts = [`Module: ${workflowModuleLabel(w) || "-"}`, `Trigger: ${workflowTriggerLabel(w) || "-"}`];
   if (includeCriteriaActions) {
-    const fields = workflowCriteriaFieldNames(w);
-    parts.push(fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: same");
+    const conditions = workflowCriteriaFieldConditions(w);
+    parts.push(conditions.length > 0 ? `Criteria: ${conditions.join(", ")}` : "Criteria: same");
+    const actionTypes = workflowActionTypeNames(w);
+    parts.push(actionTypes.length > 0 ? `Actions: ${actionTypes.join(", ")}` : "Actions: none set");
   }
   return parts.join(" · ");
 }
@@ -1321,17 +1323,30 @@ function extractFunctionCode(output: unknown): string | null {
 const FUNCTION_CODE_TOOL_PATTERNS = [/getfunctioncode$/i, /getfunctionscript$/i, /getfunctionbyid$/i, /getfunctiondetail/i];
 const FUNCTION_CODE_SCAN_CAP = 100;
 
+const RAW_RESPONSE_PREVIEW_LEN = 500;
+
 // A function whose Deluge source couldn't be pulled back (a failed/errored
 // call, or a response shape extractFunctionCode couldn't parse) must still
 // show up in the Issues tab - not silently disappear, which looks identical
 // to "this function has no issues" and hides the fact it was never actually
-// checked at all.
-function codeUnavailableIssue(reason?: string): FunctionIssue[] {
+// checked at all. rawOutput (when the call succeeded but extraction still
+// failed) is echoed straight into the issue message, truncated, so the raw
+// shape is visible right in the Issues tab instead of requiring a trip to
+// Audit Logs to diagnose.
+function codeUnavailableIssue(reason?: string, rawOutput?: unknown): FunctionIssue[] {
+  let preview = "";
+  if (rawOutput !== undefined) {
+    try {
+      const json = JSON.stringify(rawOutput);
+      preview = json.length > RAW_RESPONSE_PREVIEW_LEN ? `${json.slice(0, RAW_RESPONSE_PREVIEW_LEN)}…` : json;
+    } catch { /* unstringifiable - skip the preview */ }
+  }
+  const base = reason
+    ? `This function's code couldn't be checked for issues - the fetch failed (${reason}).`
+    : `This function's code couldn't be checked for issues - the connected MCP server didn't return a usable source.`;
   return [{
     category: "scan-error", severity: "low",
-    message: reason
-      ? `This function's code couldn't be checked for issues - the fetch failed (${reason}). Open it and click "Preview Code" to retry, or verify the code-fetch tool has access to this function.`
-      : `This function's code couldn't be checked for issues - the connected MCP server didn't return a usable source. Open it and click "Preview Code" to see the raw response.`,
+    message: preview ? `${base} Raw response: ${preview}` : `${base} Open it and click "Preview Code" to retry, or verify the code-fetch tool has access to this function.`,
   }];
 }
 
@@ -1464,7 +1479,7 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
       // tab even when its code couldn't be pulled back - silently dropping it
       // from the list looks identical to "this function is clean," which is
       // the opposite of true.
-      setIssuesByFnId(prev => ({ ...prev, [fnId]: code ? analyzeFunctionScript(code) : codeUnavailableIssue() }));
+      setIssuesByFnId(prev => ({ ...prev, [fnId]: code ? analyzeFunctionScript(code) : codeUnavailableIssue(undefined, output) }));
       onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
     } catch (e: unknown) {
       setCodeByFnId(prev => ({ ...prev, [fnId]: { code: null, loading: false, unavailable: true } }));
@@ -1513,7 +1528,7 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
             // pulled back must still surface in Issues, not vanish as if it
             // were clean.
             setCodeByFnId(prev => ({ ...prev, [fn.id]: { code: null, loading: false, unavailable: true } }));
-            setIssuesByFnId(prev => ({ ...prev, [fn.id]: codeUnavailableIssue() }));
+            setIssuesByFnId(prev => ({ ...prev, [fn.id]: codeUnavailableIssue(undefined, output) }));
           }
           onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: code ? "success" : "error", errorMessage: code ? undefined : "Code fetch returned no usable source for this function", durationMs: Date.now() - start, timestamp: new Date() });
         } catch (e: unknown) {

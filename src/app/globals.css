@@ -2156,6 +2156,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 /* ─── Function audit tags ────────────────────────────────────── */
 .tag-fn-unused          { background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
 .tag-fn-missing_ref     { background: var(--color-danger-bg); color: var(--color-danger); }
+.tag-fn-no_description  { background: var(--color-danger-bg); color: var(--color-danger); }
 .tag-fn-invalid_binding { background: var(--color-warning-bg); color: #854F0B; }
 
 /* ─── Function: argument badges ─────────────────────────────── */

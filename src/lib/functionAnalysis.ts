@@ -379,7 +379,7 @@ export function checkFunctionMetadata(fn: { name?: string; description?: string 
   const issues: FunctionIssue[] = [];
   if (!fn.description || !fn.description.trim()) {
     issues.push({
-      category: "documentation", severity: "low",
+      category: "documentation", severity: "high",
       message: `"${fn.name ?? "This function"}" has no description set - add one explaining what it does and why, so it isn't a guess for the next person (or you, in six months) who has to figure out whether it's safe to change or delete.`,
     });
   }
