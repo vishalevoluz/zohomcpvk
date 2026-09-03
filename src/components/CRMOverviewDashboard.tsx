@@ -761,7 +761,7 @@ function workflowMatchCondition(w: unknown, includeCriteriaActions: boolean): st
   const parts = [`Module: ${workflowModuleLabel(w) || "-"}`, `Trigger: ${workflowTriggerLabel(w) || "-"}`];
   if (includeCriteriaActions) {
     const fields = workflowCriteriaFieldNames(w);
-    parts.push(fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: same (none set)");
+    parts.push(fields.length > 0 ? `Criteria field${fields.length !== 1 ? "s" : ""}: ${fields.join(", ")}` : "Criteria: same");
   }
   return parts.join(" · ");
 }
