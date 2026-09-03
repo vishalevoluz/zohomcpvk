@@ -1346,7 +1346,18 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
   const [scanProgress, setScanProgress] = useState<{ done: number; total: number; loading: boolean }>({ done: 0, total: 0, loading: false });
   const listFetchedRef = useRef(false);
   const scanFetchedRef = useRef(false);
+  const wasScanActiveRef = useRef(false);
   const detailToolRef = useRef<McpTool | null | undefined>(undefined);
+
+  // scanFetchedRef used to latch permanently true after the first scan, so a
+  // scan that failed (bad tool match, every fetch erroring) stayed broken for
+  // the rest of the session - reopening the Functions card did nothing.
+  // Resetting it every time the card is closed means the *next* open runs a
+  // fresh scan instead of replaying whatever happened the first time.
+  useEffect(() => {
+    if (!scanActive && wasScanActiveRef.current) scanFetchedRef.current = false;
+    wasScanActiveRef.current = scanActive;
+  }, [scanActive]);
 
   // List + failures - eager (bounded to ~1000 functions), same eagerness as
   // the metadata-only fetch this replaces, so duplicate/naming recommendations
@@ -1462,6 +1473,17 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
     }
   }
 
+  // Manual retry: resets the "already scanned" latch and clears prior
+  // results, then bumps scanGeneration to re-run the scan effect below
+  // immediately, without needing to close and reopen the card.
+  const [scanGeneration, setScanGeneration] = useState(0);
+  function rescan() {
+    scanFetchedRef.current = false;
+    setCodeByFnId({});
+    setIssuesByFnId({});
+    setScanGeneration(g => g + 1);
+  }
+
   // Capped batch scan for the aggregate "% of functions with issues" stat -
   // gated behind scanActive (the Functions KPI being opened) since this is
   // one API call per function and shouldn't fire on every dashboard load.
@@ -1504,9 +1526,9 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
       setScanProgress(prev => ({ ...prev, loading: false }));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanActive, listState.fetched, items, config, tools, onLog]);
+  }, [scanActive, listState.fetched, items, config, tools, onLog, scanGeneration]);
 
-  return { items, listState, failureCount, codeByFnId, issuesByFnId, scanProgress, fetchCode };
+  return { items, listState, failureCount, codeByFnId, issuesByFnId, scanProgress, fetchCode, rescan };
 }
 
 interface FunctionIssueRow { key: string; id: string; functionName: string; category: string; issue: FunctionIssue; }
@@ -2750,7 +2772,17 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
             <h4>Functions - Issues, Duplicates &amp; Code</h4>
-            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                className="btn-secondary"
+                onClick={() => functionRecords.rescan()}
+                disabled={functionRecords.scanProgress.loading}
+                data-tooltip="Re-fetch and re-check every function's code from scratch - use this if a scan failed or you just fixed something in Zoho."
+              >
+                {functionRecords.scanProgress.loading ? <><span className="spinner" /> Rescanning…</> : "↺ Rescan"}
+              </button>
+              <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+            </div>
           </div>
           <div className="kpi-drilldown-summary">
             <span className="kpi-drilldown-stat good" data-tooltip="This function is enabled and can be triggered by its associated automation, button, or schedule.">{functionActiveCount} Active</span>
