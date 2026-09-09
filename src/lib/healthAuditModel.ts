@@ -9,7 +9,7 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
-  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser,
+  isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, unassignedRoles,
   workflowReferencesModule, ruleCoverageCount, ruleCoverageHasActive, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
   overlappingWorkflows, identicalWorkflows,
@@ -73,7 +73,7 @@ export const DIMENSION_TOOLTIPS: Record<DimensionKey, string> = {
 const DIMENSION_TO_ACTION_IDS: Record<DimensionKey, string[]> = {
   automationCoverage: ["workflows-inactive"],
   processCompleteness: ["no-pipeline", "no-blueprint"],
-  accessSecurity: ["access-risk", "inactive-users"],
+  accessSecurity: ["access-risk", "inactive-users", "unassigned-roles"],
   dataArchitecture: ["excessive-mandatory-fields", "empty-modules"],
   automationHealth: ["workflows-inactive", "workflows-overlapping", "workflows-duplicate"],
 };
@@ -105,6 +105,11 @@ const ACTION_INFO: Record<string, ActionInfo> = {
     title: "Remove Inactive User Licenses",
     why: "Every inactive user with a paid license is a direct monthly cost with zero return.",
     impact: "High", effort: "Easy", targetSection: "crm-dashboard",
+  },
+  "unassigned-roles": {
+    title: "Clean Up Roles With No User Assigned",
+    why: "A role nobody holds is leftover clutter from a reorg or a hire who never started - it adds confusion to the role hierarchy without controlling anyone's access.",
+    impact: "Low", effort: "Easy", targetSection: "crm-dashboard",
   },
   "excessive-mandatory-fields": {
     title: "Reduce Mandatory Field Count",
@@ -143,6 +148,7 @@ function actionConditionTriggered(id: string, entityData: Record<CrmEntityType, 
       return profiles.length === 1 || profiles.every(isAdminProfile) || profiles.filter(isAdminProfile).length > 2;
     }
     case "inactive-users": return entityData.users.items.some(isInactiveUser);
+    case "unassigned-roles": return unassignedRoles(entityData.roles.items, entityData.users.items).length > 0;
     // null means the real (layout-based) count hasn't resolved yet - no
     // recommendation until it's known, rather than guessing off the flat
     // Fields API's unusable mandatory/system_mandatory flags.
@@ -163,6 +169,7 @@ const ACTION_REQUIRES: Record<string, CrmEntityType[]> = {
   "no-blueprint": ["blueprints"],
   "access-risk": ["profiles"],
   "inactive-users": ["users"],
+  "unassigned-roles": ["roles", "users"],
   // Not entityData.fields - the real count comes from mandatoryFieldCount
   // (useMandatoryFields.ts), gated in actionConditionTriggered instead.
   "excessive-mandatory-fields": [],
@@ -185,12 +192,17 @@ export interface ChecklistItem {
   detail: string;
   /** Real point value this item is worth in the scoring formula - shown as "+N pts" (earned) on passing items and "+N pts available" on failing ones. */
   weight: number;
+  /** Points actually earned toward `weight` when a signal breakdown gives
+   * partial credit (e.g. automation coverage: 3 of 5 signals on) - only set
+   * when it can differ from the pass/fail-implied 0-or-`weight`. Rendered as
+   * "+earnedWeight of weight pts" instead of the plain pass/fail badge. */
+  earnedWeight?: number;
   /** Optional on/off breakdown of the individual signals behind this item's
    * verdict (e.g. automation coverage's assignment/approval/validation/layout
-   * rules + workflow), rendered as a bullet list under `detail` when present.
-   * Display-only - a signal being off never changes `status` or `weight`;
-   * the item still passes as long as ANY signal is on. */
-  signals?: { label: string; on: boolean }[];
+   * rules + workflow), rendered as a "+N pt"/"-N pt" bullet list under
+   * `detail` when present. `status` still reflects "is ANY signal on", but
+   * `earnedWeight` (when set) reflects how many of them actually are. */
+  signals?: { label: string; on: boolean; points: number }[];
 }
 
 export interface DimensionRecommendation {
@@ -260,10 +272,24 @@ function automationCoverageChecklist(entityData: Record<CrmEntityType, EntitySta
   }
   const activeWorkflows = entityData.workflows.items.filter(isActiveWorkflow);
   const weight = Math.round(20 / coreApiNames.length);
+  // 5 signals per module: an active workflow, plus assignment/approval/
+  // validation/layout rules - matching AUTOMATION_SIGNAL_COUNT in
+  // businessScore.ts's scoreAutomationCoverage, which now earns each module
+  // this same fraction of `weight` per signal that's actually on, so this
+  // checklist's earnedWeight can never disagree with the real score.
+  const pointsPerSignal = weight / 5;
   return coreApiNames.map(apiName => {
     const hasWorkflow = activeWorkflows.some(w => workflowReferencesModule(w, apiName));
     const ruleCount = ruleCoverageCount(ruleCoverage, apiName);
     const pass = hasWorkflow || ruleCount > 0;
+    const signals: { label: string; on: boolean }[] = [
+      { label: "Assignment rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "assignment") },
+      { label: "Approval rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "approval") },
+      { label: "Validation rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "validation") },
+      { label: "Layout rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "layout") },
+      { label: "Workflow", on: hasWorkflow },
+    ];
+    const earnedWeight = Math.round(pointsPerSignal * signals.filter(s => s.on).length);
     return {
       id: `automation-coverage-${apiName}`,
       label: `${apiName} has automation coverage`,
@@ -272,16 +298,11 @@ function automationCoverageChecklist(entityData: Record<CrmEntityType, EntitySta
         ? `Covered by ${hasWorkflow ? "an active workflow" : `${ruleCount} rule${ruleCount !== 1 ? "s" : ""} (assignment/approval/validation/layout)`}.`
         : `No active workflow or assignment/approval/validation/layout rule found for ${apiName}.`,
       weight,
-      // Passing needs only ONE of these four (or an active workflow, called
-      // out separately in `detail` above) to be on - shown individually so a
-      // client can see e.g. "Assignment rule: off" even though the module
-      // still passes overall on another rule type or its workflow.
-      signals: [
-        { label: "Assignment rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "assignment") },
-        { label: "Approval rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "approval") },
-        { label: "Validation rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "validation") },
-        { label: "Layout rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "layout") },
-      ],
+      earnedWeight,
+      // Each signal shows the points it contributes when on (+) or costs
+      // when off (-), so a client sees exactly where the module's earnedWeight
+      // came from instead of just a pass/fail verdict.
+      signals: signals.map(s => ({ ...s, points: pointsPerSignal })),
     };
   });
 }
@@ -356,6 +377,11 @@ function processCompletenessReason(entityData: Record<CrmEntityType, EntityState
   return `Missing: ${missing.join(", ")}.`;
 }
 
+function roleName(role: unknown): string {
+  const r = (role ?? {}) as Record<string, unknown>;
+  return String(r.name ?? r.label ?? "Unnamed role");
+}
+
 function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
   // Deleted accounts are gone from the org and cost nothing - they're
   // excluded up front so this whole check (and its user count) reflects only
@@ -370,6 +396,8 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   const activeAdminCount = trueActiveUsers.filter(isAdminProfileUser).length;
   const activeUserCount = trueActiveUsers.length;
   const profileCount = entityData.profiles.items.length;
+  const roleCount = entityData.roles.items.length;
+  const unassigned = unassignedRoles(entityData.roles.items, entityData.users.items);
   return [
     {
       id: "access-admin-count", label: "Admin access is limited", status: activeAdminCount <= 2 ? "pass" : "fail",
@@ -383,6 +411,17 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       detail: profileCount > 1 ? `${profileCount} profiles configured.` : "Only one profile exists - everyone shares the same access level.",
       weight: 10,
     },
+    {
+      id: "access-unassigned-roles",
+      label: "No roles without an assigned user",
+      status: roleCount === 0 || unassigned.length === 0 ? "pass" : "fail",
+      detail: roleCount === 0
+        ? "No roles found."
+        : unassigned.length === 0
+          ? `All ${roleCount} role${roleCount !== 1 ? "s" : ""} configured ${roleCount !== 1 ? "have" : "has"} at least one user assigned.`
+          : `${unassigned.length} of ${roleCount} role${roleCount !== 1 ? "s" : ""} ${unassigned.length !== 1 ? "have" : "has"} no user assigned: ${unassigned.map(roleName).join(", ")}.`,
+      weight: 5,
+    },
   ];
 }
 
@@ -393,10 +432,12 @@ function accessSecurityReason(entityData: Record<CrmEntityType, EntityState>): s
   const activeUserCount = trueActiveUsers.length;
   const inactiveUsers = activeUsers.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
+  const unassignedRoleCount = unassignedRoles(entityData.roles.items, entityData.users.items).length;
   const issues: string[] = [];
   if (activeAdminCount > 2) issues.push(`${activeAdminCount} of ${activeUserCount} active users hold an admin-named profile (more than 2)`);
   if (inactiveUsers > 0) issues.push(`${inactiveUsers} user${inactiveUsers !== 1 ? "s" : ""} disabled but still licensed`);
   if (profileCount === 1) issues.push("only one profile exists, so there's no role separation");
+  if (unassignedRoleCount > 0) issues.push(`${unassignedRoleCount} role${unassignedRoleCount !== 1 ? "s have" : " has"} no user assigned`);
   if (issues.length === 0) return "Access is split across multiple profiles and admin access is limited.";
   return `${issues.join("; ")}.`;
 }

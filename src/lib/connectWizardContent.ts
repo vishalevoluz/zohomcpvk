@@ -33,18 +33,24 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     tools: ["ZohoCRM_getRecords"],
   },
   {
-    // getApprovalProcess, getScheduledJobs, getEmailTemplates,
-    // getAssignmentRules, and getConnections were removed from this list -
-    // none exist in Zoho's real MCP tool catalogue, so they showed red
-    // forever and sent users hunting for a checkbox the console never had.
-    // Approvals/schedules/assignment rules are treated as manual-review
-    // items instead (assignment-rule coverage still lights up automatically
-    // if a getAssignmentRules-style tool ever appears - see
-    // useRuleCoverage.ts). getOrganization was also corrected to the real
-    // plural name, getOrganizations.
+    // getScheduledJobs, getEmailTemplates, and getConnections were removed
+    // from this list - none exist in Zoho's real MCP tool catalogue, so they
+    // showed red forever and sent users hunting for a checkbox the console
+    // never had. Schedules are treated as a manual-review item instead.
+    // getOrganization was also corrected to the real plural name,
+    // getOrganizations.
+    // The approval-process and assignment-rule read tools below DO exist on
+    // this org's MCP server - added so users see them as available to enable
+    // instead of the app silently detecting them with no prompt.
+    // deleteApprovalProcess is deliberately left out - this wizard only lists
+    // tools the audit actually reads from, never mutation tools.
     label: "Extended coverage (nice to have)",
     tools: [
       "ZohoCRM_getOrganizations", "ZohoCRM_getValidationRules", "ZohoCRM_getLayoutRules",
+      "ZohoCRM_getApprovalProcess", "ZohoCRM_getSingleApprovalProcess", "ZohoCRM_getApprovalProcessRules",
+      "ZohoCRM_getApprovalProcessRule",
+      "ZohoCRM_getAssignmentRules", "ZohoCRM_getAssignmentRuleById", "ZohoCRM_getAssignmentRulesCount",
+      "ZohoCRM_getAssignmentRuleAssociations",
     ],
   },
 ];

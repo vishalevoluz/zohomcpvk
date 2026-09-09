@@ -371,6 +371,49 @@ export function isAdminProfileUser(user: unknown): boolean {
   return /admin/i.test(userProfileName(user));
 }
 
+// The role a *user* is assigned - same role: { id, name } nesting Zoho's
+// Users API uses for profile above. Matched by id first (stable even if two
+// roles share a display name in a deep hierarchy) with the name as a
+// fallback for servers that only return one of the two.
+function userRoleRef(user: unknown): { id: string; name: string } {
+  if (!user || typeof user !== "object") return { id: "", name: "" };
+  const r = user as Record<string, unknown>;
+  const role = r.role ?? r.Role;
+  if (!role) return { id: "", name: "" };
+  if (typeof role === "string") return { id: "", name: role };
+  if (typeof role === "object") {
+    const ro = role as Record<string, unknown>;
+    return { id: String(ro.id ?? ""), name: String(ro.name ?? ro.label ?? "") };
+  }
+  return { id: "", name: String(role) };
+}
+
+// Roles configured in the org that no current user actually holds - a
+// leftover from a reorg, a role created for a hire who left before ever
+// being assigned it, or just clutter from testing the role hierarchy. A
+// deleted user's old role assignment doesn't keep a role "in use" (see
+// accessSecurityChecklist's own "deleted accounts cost nothing" reasoning);
+// a merely disabled-but-licensed user's role assignment still counts, since
+// that role is still genuinely held by an account that exists.
+export function unassignedRoles(roles: unknown[], users: unknown[]): unknown[] {
+  const liveUsers = users.filter(u => !isDeletedUser(u));
+  const assignedIds = new Set<string>();
+  const assignedNames = new Set<string>();
+  for (const u of liveUsers) {
+    const ref = userRoleRef(u);
+    if (ref.id) assignedIds.add(ref.id);
+    if (ref.name) assignedNames.add(ref.name.toLowerCase());
+  }
+  return roles.filter(role => {
+    const r = (role ?? {}) as Record<string, unknown>;
+    const id = String(r.id ?? "");
+    const name = String(r.name ?? r.label ?? "").toLowerCase();
+    if (id && assignedIds.has(id)) return false;
+    if (name && assignedNames.has(name)) return false;
+    return true;
+  });
+}
+
 export type UserStatusBucket = "active" | "inactive" | "deleted";
 
 // Three-way classification matching what the Full User List's status badge
@@ -528,10 +571,19 @@ function workflowModuleRef(workflow: unknown): string {
 
 export function workflowReferencesModule(workflow: unknown, apiName: string): boolean {
   if (!apiName) return false;
+  // Trusts ONLY the structured module reference (module/module_name/
+  // se_module/entity - the real field Zoho's workflow rules API returns).
+  // This used to fall back to a blind substring search across the whole
+  // stringified payload for payload shapes with no known module key, but
+  // that produced real false positives in practice: e.g. Accounts falsely
+  // "covered" by a Deals/Leads workflow whose JSON happened to contain the
+  // word "accounts" somewhere unrelated (a URL, a description, an
+  // unrelated field) - not because that workflow actually applies to
+  // Accounts. A module this can no longer detect from a non-standard
+  // payload shape shows as uncovered instead of falsely covered - the
+  // safer failure direction for an audit tool.
   const ref = workflowModuleRef(workflow);
-  if (ref && ref.toLowerCase() === apiName.toLowerCase()) return true;
-  // Fallback for payload shapes where the module reference isn't under a known key
-  return JSON.stringify(workflow ?? {}).toLowerCase().includes(apiName.toLowerCase());
+  return ref !== "" && ref.toLowerCase() === apiName.toLowerCase();
 }
 
 // Blueprint list items carry the same shape of module reference as workflows

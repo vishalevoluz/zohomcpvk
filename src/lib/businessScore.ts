@@ -1,6 +1,13 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, workflowReferencesModule, ruleCoverageCount, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, identicalWorkflows, withoutOverlappingWorkflows, withoutIdenticalWorkflows } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, unassignedRoles, workflowReferencesModule, ruleCoverageHasActive, PER_MODULE_COVERAGE_KEYS, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, identicalWorkflows, withoutOverlappingWorkflows, withoutIdenticalWorkflows } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
+
+// The 5 automation signals a core module is scored against - the same set
+// shown as individual on/off bullets in the Automation Coverage checklist
+// (see automationCoverageChecklist in healthAuditModel.ts). Kept as exactly
+// this constant everywhere so the real score and the checklist's bullets can
+// never disagree about what "5" means.
+const AUTOMATION_SIGNAL_COUNT = PER_MODULE_COVERAGE_KEYS.length + 1; // 4 rule types + workflow
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 
 export interface HealthScoreDimensions {
@@ -37,15 +44,22 @@ function scoreAutomationCoverage(modules: unknown[], workflows: unknown[], ruleC
   const coreApiNames = automationCoverageApiNames(modules);
   if (coreApiNames.length === 0) return 20;
   const activeWorkflows = workflows.filter(isActiveWorkflow);
-  // "Automated" now means workflows OR any of assignment/approval/validation/
-  // layout rules - a module fully covered by a validation rule + assignment
-  // rule but no workflow shouldn't read as unautomated just because workflows
-  // happen to be the only rule type entityData fetches as a flat list.
-  const covered = coreApiNames.filter(apiName => {
-    if (activeWorkflows.some(w => workflowReferencesModule(w, apiName))) return true;
-    return ruleCoverageCount(ruleCoverage, apiName) > 0;
-  }).length;
-  return Math.round(20 * (covered / coreApiNames.length));
+  const weightPerModule = 20 / coreApiNames.length;
+  // Proportional credit: each module earns its share of points per automation
+  // signal that's genuinely ON (an active workflow, or an active assignment/
+  // approval/validation/layout rule) rather than full credit the moment ANY
+  // one signal is on. A module with only 1 of 5 signals active now scores
+  // accordingly instead of reading identically to one with all 5 - matching
+  // the same on/off bullets shown per module in the Health Score checklist,
+  // so the two can never disagree about what's actually covered. A rule that
+  // exists but is disabled no longer inflates this the way a bare count did.
+  const totalPoints = coreApiNames.reduce((sum, apiName) => {
+    const hasWorkflow = activeWorkflows.some(w => workflowReferencesModule(w, apiName));
+    const activeRuleTypes = PER_MODULE_COVERAGE_KEYS.filter(key => ruleCoverageHasActive(ruleCoverage, apiName, key)).length;
+    const signalsOn = activeRuleTypes + (hasWorkflow ? 1 : 0);
+    return sum + weightPerModule * (signalsOn / AUTOMATION_SIGNAL_COUNT);
+  }, 0);
+  return Math.round(totalPoints);
 }
 
 function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], pipelineStageCount: number, outOfOrderStageCount: number): number {
@@ -60,7 +74,7 @@ function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], p
   return Math.max(0, score);
 }
 
-function scoreAccessSecurity(profiles: unknown[], users: unknown[]): number {
+function scoreAccessSecurity(profiles: unknown[], users: unknown[], roles: unknown[]): number {
   let score = 20;
   // Deleted accounts are gone from the org and cost nothing - excluded up
   // front so a deleted user with a leftover admin-named profile or "disabled"
@@ -76,6 +90,12 @@ function scoreAccessSecurity(profiles: unknown[], users: unknown[]): number {
   const inactiveUsers = activeUsers.filter(isInactiveUser).length;
   score -= Math.min(10, inactiveUsers * 3);
   if (profiles.length === 1) score -= 10;
+  // Roles nobody currently holds are stale role-hierarchy clutter (a reorg
+  // leftover, a role made for a hire who left first) - a small, capped
+  // deduction rather than a heavy one, since an unused role is untidy but
+  // not itself a live access risk the way excess admins or a shared login
+  // level are.
+  score -= Math.min(5, unassignedRoles(roles, users).length * 2);
   return Math.max(0, score);
 }
 
@@ -181,7 +201,7 @@ export function computeHealthScore(
   const dimensions: HealthScoreDimensions = {
     automationCoverage: scoreAutomationCoverage(entityData.modules.items, entityData.workflows.items, ruleCoverage),
     processCompleteness: scoreProcessCompleteness(entityData.pipelines.items, entityData.blueprints.items, pipelineStageCount, outOfOrderStageCount),
-    accessSecurity: scoreAccessSecurity(entityData.profiles.items, entityData.users.items),
+    accessSecurity: scoreAccessSecurity(entityData.profiles.items, entityData.users.items, entityData.roles.items),
     dataArchitecture: scoreDataArchitecture(mandatoryFieldCount, entityData.modules.items),
     automationHealth: scoreAutomationHealth(entityData.workflows.items),
   };
@@ -292,4 +312,4 @@ export function estimateScoreGain(
 }
 
 // Entities that must be resolved before the score reflects real data.
-export const HEALTH_SCORE_ENTITIES: CrmEntityType[] = ["workflows", "blueprints", "pipelines", "stages", "profiles", "users", "fields", "modules"];
+export const HEALTH_SCORE_ENTITIES: CrmEntityType[] = ["workflows", "blueprints", "pipelines", "stages", "profiles", "users", "roles", "fields", "modules"];

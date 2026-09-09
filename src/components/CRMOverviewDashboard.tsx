@@ -566,7 +566,7 @@ function generateRecommendations(
     severity: "medium", category: "architecture", icon: "⟳",
   });
 
-  // Approval Process - real per-module counts when getApprovalRules is connected;
+  // Approval Process - real per-module counts when getApprovalProcess is connected;
   // falls back to the general best-practice suggestion otherwise.
   const approvalEntries = ruleCoverage ? Object.entries(ruleCoverage.approval) : [];
   if (approvalEntries.length > 0) {

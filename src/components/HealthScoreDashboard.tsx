@@ -16,6 +16,14 @@ import {
   type DimensionIconKey,
 } from "@/lib/healthAuditModel";
 
+// Signal point values are usually whole numbers (e.g. 1 pt each for the
+// typical 4-core-module case) but can come out fractional for orgs missing
+// some core modules (weight/5 doesn't always divide evenly) - shown to one
+// decimal only when it's not a whole number instead of a noisy "1.2000000...".
+function formatSignalPoints(points: number): string {
+  return Number.isInteger(points) ? String(points) : points.toFixed(1);
+}
+
 interface Props {
   entityData: Record<CrmEntityType, EntityState>;
   pipelineStageCount: number;
@@ -138,14 +146,23 @@ function CategoryCard({
                     <ul className="hsd-checklist-signals">
                       {item.signals.map(sig => (
                         <li key={sig.label} className={sig.on ? "on" : "off"}>
-                          <span className="hsd-checklist-signal-dot" />
-                          {sig.label}: {sig.on ? "on" : "off"}
+                          <span className="hsd-checklist-signal-left">
+                            <span className="hsd-checklist-signal-dot" />
+                            <span className="hsd-checklist-signal-label">{sig.label}</span>
+                          </span>
+                          <span className={`hsd-checklist-signal-pts ${sig.on ? "plus" : "minus"}`}>
+                            {sig.on ? "+" : "−"}{formatSignalPoints(sig.points)} pt{sig.points !== 1 ? "s" : ""}
+                          </span>
                         </li>
                       ))}
                     </ul>
                   )}
                 </div>
-                {item.status === "pass"
+                {item.earnedWeight !== undefined ? (
+                  <span className={`hsd-checklist-weight ${item.earnedWeight > 0 ? "earned" : ""}`}>
+                    {item.earnedWeight === item.weight ? `+${item.weight} pts` : `+${item.earnedWeight} of ${item.weight} pts`}
+                  </span>
+                ) : item.status === "pass"
                   ? <span className="hsd-checklist-weight earned">+{item.weight} pts</span>
                   : <span className="hsd-checklist-weight">+{item.weight} pts available</span>}
               </li>
