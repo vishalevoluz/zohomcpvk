@@ -60,12 +60,46 @@ export async function listTools(config: McpConfig): Promise<McpTool[]> {
   return result.tools ?? [];
 }
 
+// A tool can report a business-logic failure (e.g. a required query param
+// missing) while the MCP transport call itself still succeeds - this
+// server's convention is isError: false with the real verdict living in
+// structuredContent.status / structuredContent.data.status instead, but a
+// standard isError: true (with the message in the content text block) is
+// checked too for servers that follow that convention instead. Detected
+// centrally here, once, rather than requiring every one of the dozens of
+// executeTool call sites across the app to separately guard against it - a
+// caller that doesn't check this treats the failure's own error-message
+// text as if it were real tool output (e.g. one fake "layout" or "rule"
+// record with no real fields), silently miscounting a failed fetch as a
+// confirmed zero instead of surfacing it as the error it actually is.
+function toolCallFailureMessage(result: unknown): string | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as Record<string, unknown>;
+  if (r.isError === true) {
+    const content = Array.isArray(r.content) ? (r.content as Record<string, unknown>[]) : [];
+    const text = content.find(c => c.type === "text" && typeof c.text === "string")?.text;
+    return typeof text === "string" ? text : "Tool reported an error";
+  }
+  const sc = r.structuredContent as Record<string, unknown> | undefined;
+  if (sc) {
+    const dataStatus = (sc.data as Record<string, unknown> | undefined)?.status;
+    if (sc.status === "failure" || dataStatus === "failure") {
+      const message = (sc.data as Record<string, unknown> | undefined)?.message;
+      return typeof message === "string" ? message : "Tool reported failure";
+    }
+  }
+  return null;
+}
+
 export async function executeTool(
   config: McpConfig,
   toolName: string,
   toolInput: Record<string, unknown> = {}
 ): Promise<unknown> {
-  return mcpRequest(config, "tools/call", { name: toolName, arguments: toolInput });
+  const result = await mcpRequest(config, "tools/call", { name: toolName, arguments: toolInput });
+  const failure = toolCallFailureMessage(result);
+  if (failure) throw new Error(failure);
+  return result;
 }
 
 function buildExampleValue(schema: McpSchemaProperty): unknown {

@@ -216,7 +216,15 @@ export default function HealthScoreDashboard({
   const [displayScore, setDisplayScore] = useState(0);
 
   const mandatoryFieldsResolved = !mandatoryFields || (!mandatoryFields.loading && mandatoryFields.lastFetched !== null);
-  const mandatoryFieldCount = mandatoryFields?.lastFetched !== null && mandatoryFields ? mandatoryFields.count : null;
+  // perModule stays empty whenever EVERY core module's layout fetch failed
+  // (see useMandatoryFields.ts) - lastFetched still gets set in that case (so
+  // the loader doesn't hang forever waiting on a fetch that's done, just
+  // failed), so checking only lastFetched here would read a total failure as
+  // a confirmed "0 mandatory fields" instead of the honest "unknown" the
+  // dimension's own copy ("this isn't a confirmed 0") already assumes.
+  const mandatoryFieldCount = mandatoryFields?.lastFetched !== null && mandatoryFields && mandatoryFields.perModule.length > 0
+    ? mandatoryFields.count
+    : null;
 
   const model = useMemo(
     () => buildHealthAuditModel(

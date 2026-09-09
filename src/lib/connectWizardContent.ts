@@ -11,46 +11,48 @@ export function displayToolName(tool: string): string {
 
 export const CONNECT_WIZARD_TOOL_GROUPS = [
   {
+    // getScheduledJobs, getEmailTemplates, getConnections, executeCOQLQuery,
+    // and getRecordCount were removed from earlier versions of this list -
+    // none exist in Zoho's real MCP tool catalogue, so they showed red
+    // forever and sent users hunting for a checkbox the console never had.
+    // getRecordCount is still used opportunistically if a server ever
+    // exposes a getRecordCount-style tool (see useModuleRecordCounts.ts),
+    // it's just not something we can tell users to go enable. Schedules are
+    // treated as a manual-review item instead. getOrganization was also
+    // corrected to the real plural name, getOrganizations.
+    // The approval-process, assignment-rule, and Connected Workflow tools
+    // below DO exist on this org's MCP server - required alongside the rest
+    // instead of being tucked away as merely "nice to have."
+    // deleteApprovalProcess is deliberately left out - this wizard only lists
+    // tools the audit actually reads from, never mutation tools.
+    // Note: WorkflowAudit.tsx's "Connected" tab separately gates itself on a
+    // flat "getConnectedWorkflows" list tool that isn't in this org's real
+    // catalogue (only the module-scoped getConnectedWorkflowRules is), so
+    // that tab may still read as unavailable even with these enabled until
+    // that gate is fixed to use the real tool.
     label: "Core structure & automation (required)",
     tools: [
       "ZohoCRM_getModules", "ZohoCRM_getFields", "ZohoCRM_getLayouts", "ZohoCRM_getWorkflowRules",
       "ZohoCRM_getWorkflowRuleById", "ZohoCRM_getWorkflowRuleUsage", "ZohoCRM_getWorkflowConfigurations",
-      "ZohoCRM_getWorkflowRulesActionsCount", "ZohoCRM_getFunctions",
-      "ZohoCRM_getFunctionCode", "ZohoCRM_getAutomationFunctionFailures",
+      "ZohoCRM_getWorkflowRulesActionsCount", "ZohoCRM_getWorkflowRulesCount", "ZohoCRM_getFunctions",
+      "ZohoCRM_getFunction", "ZohoCRM_getFunctionCode", "ZohoCRM_getAllAutomationFunctions",
+      "ZohoCRM_getAutomationFunctions", "ZohoCRM_getAutomationFunctionFailures",
       "ZohoCRM_getUsers", "ZohoCRM_getRoles", "ZohoCRM_getProfiles", "ZohoCRM_getPipelines",
       "ZohoCRM_getBlueprint", "ZohoCRM_getBlueprintId", "ZohoCRM_getBlueprintStateById",
       "ZohoCRM_getBlueprintProcessConfigurationMeta",
-    ],
-  },
-  {
-    // executeCOQLQuery and getRecordCount were removed from this list -
-    // neither exists in Zoho's real MCP tool catalogue (verified against a
-    // live server's tools/list), so they showed red forever. getRecordCount
-    // is still used opportunistically if a server ever exposes a
-    // getRecordCount-style tool (see useModuleRecordCounts.ts), it's just
-    // not something we can tell users to go enable.
-    label: "Record-level data quality (strongly recommended)",
-    tools: ["ZohoCRM_getRecords"],
-  },
-  {
-    // getScheduledJobs, getEmailTemplates, and getConnections were removed
-    // from this list - none exist in Zoho's real MCP tool catalogue, so they
-    // showed red forever and sent users hunting for a checkbox the console
-    // never had. Schedules are treated as a manual-review item instead.
-    // getOrganization was also corrected to the real plural name,
-    // getOrganizations.
-    // The approval-process and assignment-rule read tools below DO exist on
-    // this org's MCP server - added so users see them as available to enable
-    // instead of the app silently detecting them with no prompt.
-    // deleteApprovalProcess is deliberately left out - this wizard only lists
-    // tools the audit actually reads from, never mutation tools.
-    label: "Extended coverage (nice to have)",
-    tools: [
       "ZohoCRM_getOrganizations", "ZohoCRM_getValidationRules", "ZohoCRM_getLayoutRules",
       "ZohoCRM_getApprovalProcess", "ZohoCRM_getSingleApprovalProcess", "ZohoCRM_getApprovalProcessRules",
       "ZohoCRM_getApprovalProcessRule",
       "ZohoCRM_getAssignmentRules", "ZohoCRM_getAssignmentRuleById", "ZohoCRM_getAssignmentRulesCount",
       "ZohoCRM_getAssignmentRuleAssociations",
+      "ZohoCRM_getConnectedWorkflowRules", "ZohoCRM_getConnectedWorkflowRuleById",
+      "ZohoCRM_getConnectedWorkflowById", "ZohoCRM_getConnectedWorkflowConfigurations",
+      "ZohoCRM_getConnectedWorkflowActionsCount",
+      "ZohoCRM_createZiaRecommendation", "ZohoCRM_createZiaSimilarity",
     ],
+  },
+  {
+    label: "Record-level data quality (strongly recommended)",
+    tools: ["ZohoCRM_getRecords", "ZohoCRM_searchRecords"],
   },
 ];

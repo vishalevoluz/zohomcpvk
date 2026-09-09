@@ -873,6 +873,20 @@ function computeWorkflowDuplicateGroups(items: unknown[]): WorkflowDuplicateGrou
     .sort((a, b) => b.items.length - a.items.length);
 }
 
+// Grouped view of overlappingWorkflowGroups (active workflows sharing a
+// module + trigger event), same "one row per group, count badge, expandable
+// member chips" shape as the Duplicate tab - shows exactly which workflows
+// race on the same event and what that shared event is, instead of a flat
+// "overlapping" badge with no way to see who it's overlapping *with*.
+function computeWorkflowOverlapGroups(items: unknown[]): WorkflowDuplicateGroupView[] {
+  return overlappingWorkflowGroups(items)
+    .map(group => {
+      const members = group.map((w, i) => ({ id: String((w as Record<string, unknown> | null)?.id ?? i), name: getItemName(w, i) }));
+      return { key: members.map(m => m.id).join(","), condition: workflowMatchCondition(group[0], false), items: members };
+    })
+    .sort((a, b) => b.items.length - a.items.length);
+}
+
 // "never" isn't mutually exclusive with active/inactive (an active workflow
 // can genuinely have never fired yet), and duplicate/overlapping are their own
 // independent flags too - so each toggle applies its own predicate rather than
@@ -2069,6 +2083,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // Same collapse-tracking, mirrored for the Workflow drilldown's duplicate
   // groups - expanded by default, same as the Functions card.
   const [collapsedWorkflowDuplicates, setCollapsedWorkflowDuplicates] = useState<Set<string>>(new Set());
+  const [collapsedWorkflowOverlaps, setCollapsedWorkflowOverlaps] = useState<Set<string>>(new Set());
   const [previewFunctionId, setPreviewFunctionId] = useState<string | null>(null);
   const [functionsListExpanded, setFunctionsListExpanded] = useState(false);
   type FunctionsSubTab = "issues" | "duplicates" | "all";
@@ -2305,6 +2320,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const enrichedWorkflowItems = enrichWorkflowsWithDetail(entityData.workflows.items, workflowDetails.detailByWfId);
   const workflowBreakdown = computeWorkflowBreakdown(enrichedWorkflowItems);
   const workflowDuplicateGroups = computeWorkflowDuplicateGroups(enrichedWorkflowItems);
+  const workflowOverlapGroups = computeWorkflowOverlapGroups(enrichedWorkflowItems);
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
@@ -3342,6 +3358,42 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                           return next;
                         })}
                         data-tooltip={`Matched on - ${group.condition}. Detected ${group.items.length} times total.`}
+                      >
+                        <span className="kpi-drilldown-name">{group.condition}</span>
+                        <span className="kpi-drilldown-badge neutral">{group.items.length}×</span>
+                        <span className="function-dup-caret">{isExpanded ? "▾" : "▸"}</span>
+                      </button>
+                      {isExpanded && (
+                        <div className="kpi-drilldown-layout-names">
+                          {group.items.map(it => (
+                            <span key={it.id} className="kpi-drilldown-layout-chip custom" data-tooltip={`Workflow ID: ${it.id}`}>{it.name}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })}
+              </div>
+            )
+          ) : workflowFilter === "overlapping" ? (
+            workflowOverlapGroups.length === 0 ? (
+              <p className="business-view-hint">No overlapping workflows found.</p>
+            ) : (
+              <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                {workflowOverlapGroups
+                  .filter(group => matchesSearch(group.condition, ...group.items.map(it => it.name)))
+                  .map(group => {
+                    const isExpanded = !collapsedWorkflowOverlaps.has(group.key);
+                    return (
+                    <div key={group.key} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                      <button
+                        className="function-dup-toggle"
+                        onClick={() => setCollapsedWorkflowOverlaps(prev => {
+                          const next = new Set(prev);
+                          if (next.has(group.key)) next.delete(group.key); else next.add(group.key);
+                          return next;
+                        })}
+                        data-tooltip={`Matched on - ${group.condition}. ${group.items.length} active workflows race on this event.`}
                       >
                         <span className="kpi-drilldown-name">{group.condition}</span>
                         <span className="kpi-drilldown-badge neutral">{group.items.length}×</span>

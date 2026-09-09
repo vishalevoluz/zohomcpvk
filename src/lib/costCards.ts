@@ -19,6 +19,17 @@ export interface CostCardResult {
   honesty: string;
 }
 
+// Natural-language list join ("A, B and C" rather than "A, B, C") for the
+// one card below that lists every named offender inline as a plain
+// parenthetical, not an "e.g./including" lead-in - those read fine as a bare
+// comma list, but a full list reads more naturally with "and" before the
+// last item.
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  if (items.length === 2) return items.join(" and ");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
 // Business-consequence framing for each finding in businessFindings.ts - the
 // diagnosis/"what this is costing you" presentation. The same finding also
 // feeds priorityActions.ts's actionable-fix framing, sharing the `id` so a
@@ -54,7 +65,7 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
   },
   "empty-modules": {
     icon: "⊞", headline: "You Are Running Unused Complexity",
-    body: f => `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")}${f.count > f.offenders.length ? ", etc." : ""})` : ""} sit empty with zero automation - clutter that slows your team down without adding value.`,
+    body: f => `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${joinWithAnd(f.offenders)}${f.count > f.offenders.length ? ", etc." : ""})` : ""} sit empty with zero automation - clutter that slows your team down without adding value.`,
   },
   "stale-deals": {
     icon: "⌛", headline: "Deals Are Going Cold in Your Pipeline",
@@ -70,7 +81,9 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
   },
   "duplicate-emails": {
     icon: "⧉", headline: "Duplicate Records Are Splitting Your Data",
-    body: f => `${f.count} lead/contact records share an email with another record${f.offenders.length ? `, e.g. ${f.offenders.slice(0, 3).join(", ")}` : ""} - inflating counts and splitting customer history.`,
+    // Never echoes the actual email addresses - see "Where this shows up" in
+    // the expanded detail for a redacted, group-size-only breakdown instead.
+    body: f => `${f.count} lead/contact records share an email with another record - inflating counts and splitting customer history.`,
   },
   "no-lead-source": {
     icon: "◫", headline: "You Don't Know What's Working",

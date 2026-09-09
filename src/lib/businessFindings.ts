@@ -324,7 +324,11 @@ const FINDING_DEFS: FindingDef[] = [
       const totalDupRecords = dupGroups.reduce((sum, [, recs]) => sum + recs.length, 0);
       const fullyConfirmed = isFullPopulation(leadItems.length) && isFullPopulation(contactItems.length);
       return {
-        offenders: dupGroups.slice(0, 5).map(([email, recs]) => `${email} (${recs.length}×)`),
+        // Named by group size only, never the actual email address - a real
+        // customer's email is personal data that shouldn't be echoed back
+        // into a report someone might screenshot or share, unlike an
+        // internal record/deal/user name.
+        offenders: dupGroups.slice(0, 5).map(([, recs], i) => `Duplicate group ${i + 1}: ${recs.length} records share one email address`),
         count: totalDupRecords,
         sampleSize: fullyConfirmed ? undefined : all.length,
         honesty: fullyConfirmed
