@@ -1481,8 +1481,16 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 .wizard-page { max-width: 700px; width: 100%; margin: 0 auto; }
 .wizard-page-intro { text-align: center; margin-bottom: 22px; }
-.wizard-page-intro h2 { font-size: 20px; font-weight: 650; color: var(--l-text); margin-bottom: 6px; }
-.wizard-page-intro p { font-size: 13.5px; color: var(--l-muted); line-height: 1.55; }
+/* This heading/subtitle sits directly on .bg-animated-gradient, not inside
+   an opaque card - that background swings all the way from near-black to a
+   bright #34d399/#28996f green as it animates, so a single fixed light text
+   color only has good contrast against part of that range and can nearly
+   disappear once the animation pans into its brighter phase. A dark text
+   shadow keeps it readable across the whole cycle instead of just some of
+   it - the fix .wizard-page-intro's fixed --l-text/--l-muted colors alone
+   couldn't provide. */
+.wizard-page-intro h2 { font-size: 20px; font-weight: 650; color: var(--l-text); margin-bottom: 6px; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55); }
+.wizard-page-intro p { font-size: 13.5px; color: var(--l-muted); line-height: 1.55; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6); }
 
 /* Single row, never wraps — a wrapped pill used to strand its leading
    connector line dangling above the row below it (disconnected from any
