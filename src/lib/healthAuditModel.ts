@@ -7,9 +7,10 @@
 // output; checklist item `weight`s are informational ("potential gain from
 // this one fix"), never summed into a second competing total.
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isEntityResolved } from "@/lib/useCrmEntities";
+import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, unassignedRoles,
+  profilePermissionsKnown, usersWithDeletePermission,
   workflowReferencesModule, ruleCoverageCount, ruleCoverageHasActive, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
   overlappingWorkflows, identicalWorkflows,
@@ -403,6 +404,11 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   const profileCount = entityData.profiles.items.length;
   const roleCount = entityData.roles.items.length;
   const unassigned = unassignedRoles(entityData.roles.items, entityData.users.items);
+  // null = the connected getProfiles tool didn't return permission detail in
+  // a shape this app recognizes - shown as "couldn't determine" rather than
+  // a false "nobody can delete anything".
+  const permissionsKnown = entityData.profiles.items.some(profilePermissionsKnown);
+  const deleteCapableUsers = permissionsKnown ? usersWithDeletePermission(entityData.users.items, entityData.profiles.items) : null;
   return [
     {
       id: "access-admin-count", label: "Admin access is limited", status: activeAdminCount <= 2 ? "pass" : "fail",
@@ -430,6 +436,21 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       // this list can run to a dozen+ roles for orgs with a deep hierarchy.
       tags: unassigned.length > 0 ? unassigned.map(roleName) : undefined,
       weight: 5,
+    },
+    {
+      id: "access-delete-permission",
+      label: "Who can delete records",
+      // Informational, not scored (weight: 0) - who holds delete access
+      // isn't inherently good or bad the way "too many admins" is, and this
+      // app has no verified basis for a "too many" threshold here yet.
+      status: "pass",
+      detail: deleteCapableUsers === null
+        ? "Couldn't determine delete permissions - this MCP connection's getProfiles response doesn't expose per-permission detail in a recognized shape."
+        : deleteCapableUsers.length === 0
+          ? "No active user's profile grants delete access on any module."
+          : `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold a profile with delete access on at least one module:`,
+      tags: deleteCapableUsers && deleteCapableUsers.length > 0 ? deleteCapableUsers.map((u, i) => getItemName(u, i)) : undefined,
+      weight: 0,
     },
   ];
 }

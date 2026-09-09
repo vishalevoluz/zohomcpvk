@@ -371,6 +371,64 @@ export function isAdminProfileUser(user: unknown): boolean {
   return /admin/i.test(userProfileName(user));
 }
 
+// Every individual permission entry a profile grants, regardless of which of
+// two real Zoho response shapes getProfiles returns them in: nested as
+// sections[].categories[].permissions[] (the documented v8 shape - see the
+// getProfiles tool's own description: "permission details, and section
+// groupings"), or a flatter permissions_details[] array some MCP server
+// versions expose instead. Returns [] (not a guess) when neither shape is
+// present, so callers can tell "this profile grants nothing" apart from "we
+// couldn't read this server's permission format at all."
+function profilePermissionEntries(profile: unknown): Record<string, unknown>[] {
+  if (!profile || typeof profile !== "object") return [];
+  const r = profile as Record<string, unknown>;
+  if (Array.isArray(r.permissions_details)) return r.permissions_details as Record<string, unknown>[];
+  const sections = Array.isArray(r.sections) ? (r.sections as Record<string, unknown>[]) : [];
+  const entries: Record<string, unknown>[] = [];
+  for (const section of sections) {
+    const categories = Array.isArray(section.categories) ? (section.categories as Record<string, unknown>[]) : [];
+    for (const category of categories) {
+      const permissions = Array.isArray(category.permissions) ? (category.permissions as Record<string, unknown>[]) : [];
+      entries.push(...permissions);
+    }
+  }
+  return entries;
+}
+
+// True only when this profile's permission data was actually readable in one
+// of the two shapes above - lets a caller show "couldn't determine" instead
+// of a false "nobody can delete anything" when the connected server doesn't
+// expose permission detail at all.
+export function profilePermissionsKnown(profile: unknown): boolean {
+  return profilePermissionEntries(profile).length > 0;
+}
+
+// True when this profile grants delete access on at least one module -
+// requires an explicit enabled: true on a permission whose name/label
+// mentions "delete" (Zoho's real per-module permission set is create/edit/
+// delete/view, sometimes with a module-specific key like "leads_delete").
+// Deliberately does NOT default a permission with no "enabled" field to
+// granted - an ambiguous read should undercount rather than falsely flag a
+// profile as delete-capable.
+export function profileHasDeletePermission(profile: unknown): boolean {
+  return profilePermissionEntries(profile).some(p => {
+    const name = String(p.name ?? p.display_label ?? p.label ?? "").toLowerCase();
+    return /delete/.test(name) && p.enabled === true;
+  });
+}
+
+// Active, non-deleted users whose assigned profile grants delete access on
+// at least one module - matched by profile name (Zoho profile names are
+// unique per org), same matching convention isAdminProfileUser uses.
+export function usersWithDeletePermission(users: unknown[], profiles: unknown[]): unknown[] {
+  const deleteProfileNames = new Set(
+    profiles.filter(profileHasDeletePermission)
+      .map(p => String((p as Record<string, unknown> | null)?.name ?? "").toLowerCase())
+      .filter(Boolean)
+  );
+  return users.filter(u => !isDeletedUser(u) && isActiveUser(u) && deleteProfileNames.has(userProfileName(u).toLowerCase()));
+}
+
 // The display name of the role a *user* is assigned - same role: { id, name }
 // nesting Zoho's Users API uses for profile above (see userProfileName).
 export function userRoleName(user: unknown): string {
