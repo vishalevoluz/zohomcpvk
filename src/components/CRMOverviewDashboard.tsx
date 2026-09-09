@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, identicalWorkflows, overlappingWorkflows, identicalWorkflowGroups, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -794,33 +794,61 @@ function workflowLastTriggeredTooltip(row: WorkflowBreakdownRow): string {
     : `Last executed ${formatLastTriggered(row.lastTriggered)}.`;
 }
 
+// Case-insensitive display-name grouping for the Workflows card's "Duplicate"
+// badge - unlike identicalWorkflowGroups (module+trigger+criteria+actions,
+// name deliberately excluded, used by the real Health Score and Automation
+// Health checklist), this card's Duplicate concept is scoped to name only,
+// same simple match the Functions card's "Duplicate Function Names" already
+// uses - no module/trigger/criteria/actions comparison involved.
+function workflowNameDuplicateGroups(rows: { id: string; name: string }[]): Map<string, { id: string; name: string }[]> {
+  const byName = new Map<string, { id: string; name: string }[]>();
+  for (const row of rows) {
+    const key = row.name.trim().toLowerCase();
+    if (!key) continue;
+    const arr = byName.get(key) ?? [];
+    arr.push(row);
+    byName.set(key, arr);
+  }
+  for (const [key, arr] of byName) if (arr.length < 2) byName.delete(key);
+  return byName;
+}
+
+function workflowNameMatchDetail(id: string, group: { id: string; name: string }[]): string {
+  const others = group.filter(m => m.id !== id);
+  const names = others.map(m => m.name).join(", ") || "-";
+  return `Matched on - Name: "${group[0].name}" (case-insensitive). Same as ${others.length} other workflow${others.length !== 1 ? "s" : ""}: ${names}. Detected ${group.length} times total.`;
+}
+
 // Sorted inactive-first, then never-triggered-first within active - same
 // "surface the actionable ones" convention as the other breakdowns here.
 function computeWorkflowBreakdown(items: unknown[]): WorkflowBreakdownRow[] {
-  const duplicateSet = new Set(identicalWorkflows(items));
+  const idNames = items.map((w, i) => ({ id: String((w as Record<string, unknown> | null)?.id ?? i), name: getItemName(w, i) }));
+  const nameGroups = workflowNameDuplicateGroups(idNames);
+  const duplicateGroupById = new Map<string, { id: string; name: string }[]>();
+  for (const group of nameGroups.values()) for (const m of group) duplicateGroupById.set(m.id, group);
+
   const overlappingSet = new Set(overlappingWorkflows(items));
-  const duplicateGroupByItem = new Map<unknown, unknown[]>();
-  identicalWorkflowGroups(items).forEach(group => group.forEach(w => duplicateGroupByItem.set(w, group)));
   const overlappingGroupByItem = new Map<unknown, unknown[]>();
   overlappingWorkflowGroups(items).forEach(group => group.forEach(w => overlappingGroupByItem.set(w, group)));
   return items
     .map((w, i) => {
-      const duplicate = duplicateSet.has(w);
+      const id = idNames[i].id;
+      const duplicateGroup = duplicateGroupById.get(id);
+      const duplicate = !!duplicateGroup;
       const overlapping = overlappingSet.has(w);
-      const duplicateGroup = duplicateGroupByItem.get(w);
       const overlappingGroup = overlappingGroupByItem.get(w);
       const lastTriggered = workflowLastTriggered(w);
       const daysSinceTrigger = daysSince(lastTriggered);
       return {
-        id: String((w as Record<string, unknown> | null)?.id ?? i),
-        name: getItemName(w, i),
+        id,
+        name: idNames[i].name,
         module: workflowModuleLabel(w) || "-",
         active: isActiveWorkflow(w),
         lastTriggered,
         longTrigger: daysSinceTrigger !== null && daysSinceTrigger > LONG_TRIGGER_DAYS,
         duplicate,
         overlapping,
-        duplicateDetail: duplicate && duplicateGroup ? workflowMatchDetail(w, duplicateGroup, true) : null,
+        duplicateDetail: duplicateGroup ? workflowNameMatchDetail(id, duplicateGroup) : null,
         overlappingDetail: overlapping && overlappingGroup ? workflowMatchDetail(w, overlappingGroup, false) : null,
       };
     })
@@ -833,16 +861,15 @@ interface WorkflowDuplicateGroupView {
   items: { id: string; name: string }[];
 }
 
-// Grouped view of identicalWorkflowGroups, for the Duplicate filter to render
-// as expandable match-condition cards - same "one row per group, count badge,
-// expandable member chips" shape as the Functions card's Duplicate Function
-// Names tab, instead of scattering each duplicate as its own flat row.
+// Grouped view of workflowNameDuplicateGroups, for the Duplicate filter to
+// render as expandable match-condition cards - same "one row per group,
+// count badge, expandable member chips" shape as the Functions card's
+// Duplicate Function Names tab, instead of scattering each duplicate as its
+// own flat row.
 function computeWorkflowDuplicateGroups(items: unknown[]): WorkflowDuplicateGroupView[] {
-  return identicalWorkflowGroups(items)
-    .map(group => {
-      const members = group.map((w, i) => ({ id: String((w as Record<string, unknown> | null)?.id ?? i), name: getItemName(w, i) }));
-      return { key: members.map(m => m.id).join(","), condition: workflowMatchCondition(group[0], true), items: members };
-    })
+  const idNames = items.map((w, i) => ({ id: String((w as Record<string, unknown> | null)?.id ?? i), name: getItemName(w, i) }));
+  return [...workflowNameDuplicateGroups(idNames).values()]
+    .map(members => ({ key: members.map(m => m.id).join(","), condition: `Name: "${members[0].name}"`, items: members }))
     .sort((a, b) => b.items.length - a.items.length);
 }
 
@@ -906,7 +933,7 @@ function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): ZiaInsight {
   const duplicate = rows.filter(r => r.duplicate).length;
   const overlapping = rows.filter(r => r.overlapping).length;
   const points: string[] = [];
-  if (duplicate > 0) points.push(cap(`${duplicate} workflow${duplicate !== 1 ? "s are" : " is"} an exact duplicate of another (same module, trigger, criteria and actions).`));
+  if (duplicate > 0) points.push(cap(`${duplicate} workflow${duplicate !== 1 ? "s share" : " shares"} the exact same name as another workflow.`));
   if (overlapping > 0) points.push(cap(`${overlapping} workflow${overlapping !== 1 ? "s share" : " shares"} a trigger event with another active rule.`));
   if (inactive > 0) points.push(cap(`${inactive} workflow${inactive !== 1 ? "s are" : " is"} inactive.`));
   if (neverTriggered > 0) points.push(cap(`${neverTriggered} active workflow${neverTriggered !== 1 ? "s have" : " has"} never fired.`));
@@ -1861,6 +1888,7 @@ interface UserBreakdownRow {
   id: string;
   name: string;
   profile: string;
+  role: string;
   status: UserStatusBucket;
 }
 
@@ -1878,11 +1906,12 @@ function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): U
       const r = (u ?? {}) as Record<string, unknown>;
       const profile = typeof r.profile === "object" && r.profile
         ? String((r.profile as Record<string, unknown>).name ?? "-")
-        : String(r.role ?? "-");
+        : "-";
       return {
         id: String(r.id ?? i),
         name: getItemName(u, i),
         profile,
+        role: userRoleName(u) || "-",
         status: userStatusBucket(u),
       };
     })
@@ -2865,10 +2894,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => r.status === "inactive").length} Inactive</span>
           </div>
           <div className="kpi-drilldown-table">
-            {userBreakdown.filter(row => matchesSearch(row.name, row.profile)).map(row => (
+            {userBreakdown.filter(row => matchesSearch(row.name, row.profile, row.role)).map(row => (
               <div key={row.id} className="kpi-drilldown-row">
                 <span className="kpi-drilldown-name">{row.name}</span>
-                <span className="kpi-drilldown-module">{row.profile}</span>
+                <span className="kpi-drilldown-module" data-tooltip={`Profile: ${row.profile}`}>{row.profile}</span>
+                <span className="kpi-drilldown-module" data-tooltip={`Role: ${row.role}`}>{row.role}</span>
                 <span className={`kpi-drilldown-badge status-${row.status}`}>{row.status}</span>
               </div>
             ))}
@@ -3276,7 +3306,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "duplicate" ? "selected" : ""}`}
               onClick={() => setWorkflowFilter(prev => (prev === "duplicate" ? "all" : "duplicate"))}
-              data-tooltip="Same module, trigger, criteria and actions as another rule - regardless of name"
+              data-tooltip="Shares the exact same display name (case-insensitive) as another workflow, regardless of module, trigger, criteria, or actions"
             >
               {workflowBreakdown.filter(r => r.duplicate).length} Duplicate
             </button>
@@ -3340,7 +3370,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   <span className="kpi-drilldown-module">{row.module}</span>
                   <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : row.longTrigger ? "long-trigger" : ""}`} data-tooltip={workflowLastTriggeredTooltip(row)}>{formatLastTriggered(row.lastTriggered)}</span>
                   {row.longTrigger && <span className="kpi-drilldown-badge status-draft" data-tooltip={WORKFLOW_LONG_TRIGGER_TOOLTIP}>long trigger</span>}
-                  {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.duplicateDetail ?? "Identical module, trigger, criteria and actions as another rule"}>duplicate</span>}
+                  {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.duplicateDetail ?? "Same display name as another workflow"}>duplicate</span>}
                   {row.overlapping && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.overlappingDetail ?? "Shares a module + trigger event with another active rule"}>overlapping</span>}
                   <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`} data-tooltip={row.active ? WORKFLOW_ACTIVE_TOOLTIP : WORKFLOW_INACTIVE_TOOLTIP}>{row.active ? "active" : "inactive"}</span>
                 </div>

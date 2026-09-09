@@ -298,8 +298,8 @@ function formatDateTime(iso?: string | null): string {
 // name (e.g. "ZohoCRM_getWorkflowRuleById"), and an exact match against the
 // bare name would never fire for those, silently disabling every feature
 // gated on it (View Detail, Usage Stats, Actions Count, canDelete/Update/
-// Create, the Connected tab, Load Limits...) despite the tool actually being
-// connected. The suffix check still can't cross-match a same-suffixed
+// Create, the Connected tab...) despite the tool actually being connected.
+// The suffix check still can't cross-match a same-suffixed
 // sibling like "getConnectedWorkflowRuleById" - that string doesn't end
 // with the full "getWorkflowRuleById" (it ends in "...ectedWorkflowRuleById").
 function findTool(allTools: McpTool[], name: string): McpTool | undefined {
@@ -730,9 +730,6 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
   const [detailWf, setDetailWf] = useState<ZohoWorkflow | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const [rulesCount, setRulesCount] = useState<Record<string, unknown> | null>(null);
-  const [rulesCountLoading, setRulesCountLoading] = useState(false);
-  const [rulesCountExpanded, setRulesCountExpanded] = useState(false);
   const [duplicateDetailsExpanded, setDuplicateDetailsExpanded] = useState(true);
 
   const [activeTab, setActiveTab] = useState<WFMainTab>("workflows");
@@ -765,13 +762,11 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
     setSelectedTools(toolNames);
     setWorkflows([]);
     setError("");
-    setRulesCount(null);
     setActionMessage(null);
     setConnectedWfs([]);
     setColumnFilters({});
     if (toolNames.length > 0) {
       void loadWorkflows(toolNames);
-      if (findTool(allTools, "getWorkflowRulesCount")) void loadRulesCount();
     }
   }, [tools]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -801,20 +796,6 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
       if (all.length === 0) setError(`No workflow data found in selected tool${toolsToUse.length > 1 ? "s" : ""}.`);
       else { setWorkflows(all); setFilter("all"); setColumnFilters({}); }
     } finally { setLoading(false); }
-  }
-
-  async function loadRulesCount() {
-    setRulesCountLoading(true);
-    const start = Date.now();
-    try {
-      const result = await executeTool(config, "getWorkflowRulesCount", {});
-      const apiErr = detectApiError(result);
-      if (apiErr) return;
-      const parsed = parseJsonFromMcp(result);
-      if (parsed) { setRulesCount(parsed); setRulesCountExpanded(true); }
-      onLog({ id: crypto.randomUUID(), tool: "getWorkflowRulesCount", input: {}, output: result, status: parsed ? "success" : "error", durationMs: Date.now() - start, timestamp: new Date() });
-    } catch { /* ignore */ }
-    finally { setRulesCountLoading(false); }
   }
 
   async function loadConnectedWorkflows() {
@@ -952,7 +933,6 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
 
   const hasConnectedTool = !!findTool(allTools, "getConnectedWorkflows");
   const hasCreateTool = !!findTool(allTools, "postWorkflowRule");
-  const hasCountTool = !!findTool(allTools, "getWorkflowRulesCount");
 
   return (
     <div className="modules-audit">
@@ -969,39 +949,8 @@ export default function WorkflowAudit({ config, tools, allTools, onLog }: Props)
           <button onClick={() => void loadWorkflows()} disabled={loading || selectedTools.length === 0} className="btn-connect">
             {loading ? <><span className="spinner" /> Loading…</> : "↺ Reload"}
           </button>
-          {hasCountTool && (
-            <button onClick={() => void loadRulesCount()} disabled={rulesCountLoading} className="btn-secondary" title="Load rules count and org limits">
-              {rulesCountLoading ? <><span className="spinner" /> …</> : "Load Limits"}
-            </button>
-          )}
         </div>
       </div>
-
-      {/* Rules count banner */}
-      {rulesCount && (
-        <div className="bp-meta-banner">
-          <div className="bp-meta-banner-header" onClick={() => setRulesCountExpanded(v => !v)}>
-            <span className="bp-meta-banner-title">Workflow Rules - Limits &amp; Usage</span>
-            <span className="bp-meta-banner-toggle">{rulesCountExpanded ? "▲" : "▼"}</span>
-          </div>
-          {rulesCountExpanded ? (
-            <div className="bp-meta-body">
-              {Object.entries(rulesCount).map(([k, v]) => (
-                <div key={k} className="bp-meta-row">
-                  <span className="bp-meta-key">{k}</span>
-                  <span className="bp-meta-val">{typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="bp-meta-summary">
-              {Object.entries(rulesCount).slice(0, 4).map(([k, v]) => (
-                <span key={k} className="bp-meta-chip"><strong>{k}:</strong> {typeof v === "object" ? JSON.stringify(v) : String(v)}</span>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {actionMessage && (
         <div className={actionMessage.ok ? "form-success" : "form-error"} style={{ marginTop: 12 }}>

@@ -371,6 +371,13 @@ export function isAdminProfileUser(user: unknown): boolean {
   return /admin/i.test(userProfileName(user));
 }
 
+// The display name of the role a *user* is assigned - same role: { id, name }
+// nesting Zoho's Users API uses for profile above (see userProfileName).
+export function userRoleName(user: unknown): string {
+  const ref = userRoleRef(user);
+  return ref.name;
+}
+
 // The role a *user* is assigned - same role: { id, name } nesting Zoho's
 // Users API uses for profile above. Matched by id first (stable even if two
 // roles share a display name in a deep hierarchy) with the name as a
