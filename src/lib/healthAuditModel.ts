@@ -82,8 +82,8 @@ interface ActionInfo { title: string; why: string; impact: ActionImpact; effort:
 
 const ACTION_INFO: Record<string, ActionInfo> = {
   "workflows-inactive": {
-    title: "Consolidate Inactive Workflows",
-    why: "Inactive workflows create confusion and may silently fail when re-enabled. Clean them up or delete them.",
+    title: "Review and Clean Up Inactive Workflows",
+    why: "A disabled workflow left sitting around clutters the automation list and often references fields, users, or criteria that have since changed - re-enabling it later without a review can misfire instead of working as originally intended. Go through each one and either bring it back into active use or delete it.",
     impact: "Medium", effort: "Easy", targetSection: "workflows",
   },
   "no-pipeline": {
@@ -203,6 +203,11 @@ export interface ChecklistItem {
    * `detail` when present. `status` still reflects "is ANY signal on", but
    * `earnedWeight` (when set) reflects how many of them actually are. */
   signals?: { label: string; on: boolean; points: number }[];
+  /** A flat list of named examples behind this item's detail (e.g. which
+   * specific roles have no user assigned) - rendered as a wrapped chip list
+   * under `detail` instead of crammed into one long comma-separated
+   * sentence, which stops scaling once there are more than a few names. */
+  tags?: string[];
 }
 
 export interface DimensionRecommendation {
@@ -413,13 +418,17 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
     },
     {
       id: "access-unassigned-roles",
-      label: "No roles without an assigned user",
+      label: "Roles without an assigned user",
       status: roleCount === 0 || unassigned.length === 0 ? "pass" : "fail",
       detail: roleCount === 0
         ? "No roles found."
         : unassigned.length === 0
           ? `All ${roleCount} role${roleCount !== 1 ? "s" : ""} configured ${roleCount !== 1 ? "have" : "has"} at least one user assigned.`
-          : `${unassigned.length} of ${roleCount} role${roleCount !== 1 ? "s" : ""} ${unassigned.length !== 1 ? "have" : "has"} no user assigned: ${unassigned.map(roleName).join(", ")}.`,
+          : `${unassigned.length} of ${roleCount} role${roleCount !== 1 ? "s" : ""} ${unassigned.length !== 1 ? "have" : "has"} no user assigned:`,
+      // Names shown as their own chip list (see tags on ChecklistItem) rather
+      // than crammed into `detail` as one long comma-separated sentence -
+      // this list can run to a dozen+ roles for orgs with a deep hierarchy.
+      tags: unassigned.length > 0 ? unassigned.map(roleName) : undefined,
       weight: 5,
     },
   ];

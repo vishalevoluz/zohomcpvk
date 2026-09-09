@@ -157,6 +157,11 @@ function CategoryCard({
                       ))}
                     </ul>
                   )}
+                  {item.tags && item.tags.length > 0 && (
+                    <div className="hsd-checklist-tags">
+                      {item.tags.map(tag => <span key={tag} className="hsd-checklist-tag">{tag}</span>)}
+                    </div>
+                  )}
                 </div>
                 {item.earnedWeight !== undefined ? (
                   <span className={`hsd-checklist-weight ${item.earnedWeight > 0 ? "earned" : ""}`}>
