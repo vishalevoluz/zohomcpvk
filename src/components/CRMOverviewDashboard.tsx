@@ -939,21 +939,38 @@ function ZiaRecBody({ summary, points, action }: ZiaInsight) {
 
 // Same "flag the stale ones, praise the healthy ones" synthesis as
 // buildZiaActivityInsight below, applied to the workflow breakdown instead.
+// Up to `limit` real workflow names for a flagged group, e.g. "e.g. Follow
+// Up Email, Assign New Lead, etc." - named examples instead of a bare count,
+// same "never just 'several'" convention the rest of this app's findings use.
+function namedExamples(rows: WorkflowBreakdownRow[], limit = 3): string {
+  const shown = rows.slice(0, limit).map(r => r.name).join(", ");
+  return rows.length > limit ? `e.g. ${shown}, etc.` : `e.g. ${shown}.`;
+}
+
 function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): ZiaInsight {
   if (rows.length === 0) return { summary: "No workflows found - nothing to evaluate yet.", points: [] };
-  const inactive = rows.filter(r => !r.active).length;
-  const neverTriggered = rows.filter(r => r.active && !r.lastTriggered).length;
-  const longTrigger = rows.filter(r => r.active && r.longTrigger).length;
-  const duplicate = rows.filter(r => r.duplicate).length;
-  const overlapping = rows.filter(r => r.overlapping).length;
+  const inactiveRows = rows.filter(r => !r.active);
+  const neverTriggeredRows = rows.filter(r => r.active && !r.lastTriggered);
+  const longTriggerRows = rows.filter(r => r.active && r.longTrigger);
+  const duplicateRows = rows.filter(r => r.duplicate);
+  const overlappingRows = rows.filter(r => r.overlapping);
   const points: string[] = [];
-  if (duplicate > 0) points.push(cap(`${duplicate} workflow${duplicate !== 1 ? "s share" : " shares"} the exact same name as another workflow.`));
-  if (overlapping > 0) points.push(cap(`${overlapping} workflow${overlapping !== 1 ? "s share" : " shares"} a trigger event with another active rule.`));
-  if (inactive > 0) points.push(cap(`${inactive} workflow${inactive !== 1 ? "s are" : " is"} inactive.`));
-  if (neverTriggered > 0) points.push(cap(`${neverTriggered} active workflow${neverTriggered !== 1 ? "s have" : " has"} never fired.`));
-  if (longTrigger > 0) points.push(cap(`${longTrigger} active workflow${longTrigger !== 1 ? "s haven't" : " hasn't"} fired in over ${LONG_TRIGGER_DAYS} days.`));
+  if (duplicateRows.length > 0) points.push(cap(`${duplicateRows.length} workflow${duplicateRows.length !== 1 ? "s share" : " shares"} the exact same name as another workflow - ${namedExamples(duplicateRows)}`));
+  if (overlappingRows.length > 0) points.push(cap(`${overlappingRows.length} workflow${overlappingRows.length !== 1 ? "s share" : " shares"} a trigger event with another active rule - ${namedExamples(overlappingRows)}`));
+  if (inactiveRows.length > 0) points.push(cap(`${inactiveRows.length} workflow${inactiveRows.length !== 1 ? "s are" : " is"} inactive - ${namedExamples(inactiveRows)}`));
+  if (neverTriggeredRows.length > 0) points.push(cap(`${neverTriggeredRows.length} active workflow${neverTriggeredRows.length !== 1 ? "s have" : " has"} never fired - ${namedExamples(neverTriggeredRows)}`));
+  if (longTriggerRows.length > 0) points.push(cap(`${longTriggerRows.length} active workflow${longTriggerRows.length !== 1 ? "s haven't" : " hasn't"} fired in over ${LONG_TRIGGER_DAYS} days - ${namedExamples(longTriggerRows)}`));
   if (points.length === 0) return { summary: "All workflows are active, unique, and have fired at least once - automation looks healthy.", points: [] };
-  return { summary: "", points, action: "Merge or remove duplicates, reactivate what's still needed, and fix or remove the rest." };
+
+  // Tailored to whichever issues are actually present, instead of one
+  // generic catch-all sentence that mentions fixes for problems this org
+  // might not even have.
+  const actions: string[] = [];
+  if (duplicateRows.length > 0) actions.push("merge or delete the duplicates");
+  if (overlappingRows.length > 0) actions.push("consolidate rules racing on the same trigger");
+  if (inactiveRows.length > 0) actions.push("reactivate or delete the inactive ones");
+  if (neverTriggeredRows.length > 0 || longTriggerRows.length > 0) actions.push("confirm the stale ones still match real records, or retire them");
+  return { summary: "", points, action: cap(`${actions.join("; ")}.`) };
 }
 
 // ─── Activity (Email / Task / Call) drill-down ─────────────────────────────────

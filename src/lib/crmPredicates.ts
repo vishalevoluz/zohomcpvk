@@ -342,6 +342,20 @@ export function isCustomLayout(item: unknown): boolean {
   return name !== "" && name !== "standard";
 }
 
+// Same generated_type metadata, on assignment/approval/validation/layout
+// RULES rather than layouts themselves - Zoho tags a system-generated rule
+// (including internal ones like the CONNECTEDRECORDS_MMLFIELDHIDE layout
+// rule) as generated_type: "default"/"system", distinct from an admin's own
+// "custom" rule. No name-based fallback here (unlike isCustomLayout) - a
+// rule's name has no "Standard"-style convention to guess from, so an item
+// with no generated_type field at all is trusted as real rather than
+// guessed at either way.
+export function isSystemGeneratedRule(item: unknown): boolean {
+  if (!item || typeof item !== "object") return false;
+  const r = item as Record<string, unknown>;
+  return r.generated_type === "default" || r.generated_type === "system";
+}
+
 export function isAdminProfile(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
   const r = item as Record<string, unknown>;

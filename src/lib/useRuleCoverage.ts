@@ -6,7 +6,7 @@ import { executeTool, findParamLocations, findParam, setParam, type ParamLocatio
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
-import { isActiveWorkflow, workflowModuleLabel } from "@/lib/crmPredicates";
+import { isActiveWorkflow, workflowModuleLabel, isSystemGeneratedRule } from "@/lib/crmPredicates";
 import type { RuleCoverage, RuleTypeStat } from "@/lib/businessScore";
 
 function parseMcpJson(result: unknown): Record<string, unknown> | null {
@@ -68,6 +68,14 @@ function extractRuleArray(result: unknown): unknown[] {
 function belongsToRequestedModule(item: unknown, apiName: string): boolean {
   const label = workflowModuleLabel(item);
   return label === "" || label.toLowerCase() === apiName.toLowerCase();
+}
+
+// A system-generated rule (generated_type: "default"/"system", including
+// Zoho's own internal CONNECTEDRECORDS_MMLFIELDHIDE-style layout rules)
+// isn't automation an admin actually configured - counting it would inflate
+// coverage for a module that has no real custom rule at all.
+function isCustomGeneratedRule(item: unknown): boolean {
+  return !isSystemGeneratedRule(item);
 }
 
 // total = every rule of this type the API returned for the module (after the
@@ -187,7 +195,9 @@ export function useRuleCoverage(
           try {
             const output = await executeTool(config, tool.name, input);
             const failed = isFailureResponse(output);
-            const items = failed ? [] : extractRuleArray(output).filter(item => belongsToRequestedModule(item, apiName));
+            const items = failed ? [] : extractRuleArray(output)
+              .filter(item => belongsToRequestedModule(item, apiName))
+              .filter(isCustomGeneratedRule);
             perModule[apiName] = { items, fingerprint: fingerprintItems(items) };
             // A tool-reported failure (see isFailureResponse) surfaces here as
             // an error-status log entry - same visibility as a thrown/network
