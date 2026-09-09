@@ -197,7 +197,7 @@ export default function DashboardPage() {
 
   if (!config) {
     return (
-      <div className="landing-page wizard-standalone">
+      <div className="landing-page wizard-standalone bg-animated-gradient">
         <header className="landing-nav">
           <Link href="/" className="landing-logo">
             <span className="landing-logo-mark">
@@ -232,13 +232,7 @@ export default function DashboardPage() {
     // them have settled yet (see the isPrefetching comment above).
     const loaderPct = coreResolved ? 99 : Math.min(99, Math.round((resolvedLoadSteps / TOTAL_LOAD_STEPS) * 100));
     return (
-      <div className="evo-loader-page">
-        <div className="wizard-bg-waves" aria-hidden="true">
-          <span className="wizard-bg-wave wizard-bg-wave-1" />
-          <span className="wizard-bg-wave wizard-bg-wave-2" />
-          <span className="wizard-bg-wave wizard-bg-wave-3" />
-          <span className="wizard-bg-lines" />
-        </div>
+      <div className="evo-loader-page bg-animated-gradient">
         <div className="evo-loader-split">
           <div className="evo-loader-card">
             <div className="evo-loader-wrap">
@@ -277,7 +271,6 @@ export default function DashboardPage() {
             No loading fallback needed here - isPrefetching is guaranteed false
             by the time this renders (see the full-page loader early-return above). */}
         <div style={{ display: activeSection === "crm-dashboard" ? undefined : "none" }}>
-          {activeSection === "crm-dashboard" && <div className="crm-dashboard-bg-waves" aria-hidden="true" />}
           <BusinessView
             entityData={crm.entityData}
             recordSamples={crmRecords.data}

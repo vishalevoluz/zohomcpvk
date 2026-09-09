@@ -636,7 +636,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   top: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  background: linear-gradient(165deg, #1c1006 0%, #7c2d12 45%, #fb923c 100%);
+  background: linear-gradient(165deg, #051710 0%, #0f766e 45%, #34d399 100%);
   border-right: none;
   display: flex;
   flex-direction: column;
@@ -645,7 +645,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .sidebar.collapsed { width: 64px; }
 
-/* Everything below re-tunes text/hover/border colors for the warm orange
+/* Everything below re-tunes text/hover/border colors for the brand-green
    gradient above - the shared dark-theme tokens (--color-text-secondary,
    -bg-tertiary, etc.) were designed against the app's near-black surfaces
    and read as low-contrast once the sidebar itself became a bright gradient
@@ -984,7 +984,29 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 
 /* ─── Main area ──────────────────────────────────────────────── */
+/* Light "white card" theme for the whole main content area - the MCP Server
+   connection banner, every audit section (Workflow, Functions, Blueprints,
+   Fields, Logs, Integrations), and the CRM Dashboard all sit under
+   .app-main, so redefining the shared surface/text tokens here (rather than
+   scoping them to just one section) makes them all consistently light at
+   once via the same var(...) references every component already uses -
+   no per-component rewrites needed. The sidebar is a sibling of .app-main,
+   not a descendant, so its own dark-to-green gradient theme is untouched.
+   The page background itself is the plain light --color-bg-tertiary, not a
+   dark gradient - page-level text (section headings, the MCP Server banner)
+   sits directly on this background rather than inside an opaque card, so it
+   has to stay light enough for dark text to read on it everywhere, not just
+   inside individual white cards. */
 .app-main {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f8fafc;
+  --color-bg-tertiary: #eef1f5;
+  --color-text: #1a202c;
+  --color-text-secondary: #5a6472;
+  --color-text-tertiary: #94a0b3;
+  --color-border: #e2e8f0;
+  --color-border-strong: #cbd5e1;
+  background: var(--color-bg-tertiary);
   flex: 1;
   min-width: 0;
   padding: 1.5rem;
@@ -1414,16 +1436,13 @@ details[open] .log-summary::before { transform: rotate(90deg); }
    until a connection succeeds. Themed with the landing page's
    dark/green tokens (--l-*) rather than the dashboard's adaptive
    theme, so it reads as a continuation of the marketing site. */
-/* Solid warm gradient instead of the animated line/wave background - same
-   near-black -> burnt-orange -> #fb923c family as the sidebar and CRM
-   Dashboard backdrop, so all three read as one deliberate palette. Overrides
-   .landing-page's own green radial-gradient background since both classes
-   land on the same element here. */
+/* Background comes from .bg-animated-gradient (added alongside this class in
+   page.tsx) - overrides .landing-page's own static green radial-gradient
+   background since both classes land on the same element here. */
 .wizard-standalone {
   min-height: 100vh;
   position: relative;
   overflow: hidden;
-  background: linear-gradient(165deg, #1c1006 0%, #7c2d12 55%, #fb923c 130%);
 }
 .wizard-standalone > .landing-nav,
 .wizard-standalone > .wizard-standalone-body { position: relative; z-index: 1; }
@@ -1436,75 +1455,23 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   padding: 48px 24px;
 }
 
-/* Decorative, non-interactive backdrop for the connect wizard - a few slow
-   blurred blue glows plus faint diagonal line streaks drifting behind the
-   steps, so this "waiting to connect" screen doesn't read as inert. Purely
-   visual (aria-hidden, pointer-events: none); never affects layout since
-   it's absolutely positioned within the already-relative .wizard-standalone. */
-.wizard-bg-waves { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-.wizard-bg-wave {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(70px);
-  opacity: 0.4;
-  will-change: transform;
-  animation: wizard-wave-drift 24s ease-in-out infinite;
+/* Animated brand-green gradient backdrop - a smooth flowing color shift
+   (no moving lines/blobs) shared by the Connect Wizard and the full-page
+   loader, the app's two "waiting" screens. A wide 4-stop gradient panned via
+   background-position instead of transform/opacity, so it reads as one
+   continuously shifting wash rather than distinct shapes drifting past. */
+.bg-animated-gradient {
+  background: linear-gradient(120deg, #051710, #0f766e, #34d399, #0f766e, #051710);
+  background-size: 400% 400%;
+  animation: bg-gradient-flow 18s ease infinite;
 }
-.wizard-bg-wave-1 {
-  width: 620px; height: 620px; top: -220px; left: -180px;
-  background: radial-gradient(circle at 30% 30%, rgba(59, 130, 246, 0.55), transparent 70%);
-  animation-duration: 22s;
-}
-.wizard-bg-wave-2 {
-  width: 520px; height: 520px; bottom: -200px; right: -140px;
-  background: radial-gradient(circle at 60% 40%, rgba(96, 165, 250, 0.45), transparent 70%);
-  animation-duration: 28s; animation-delay: -6s;
-}
-.wizard-bg-wave-3 {
-  width: 440px; height: 440px; top: 30%; left: 50%;
-  background: radial-gradient(circle at 50% 50%, rgba(37, 99, 235, 0.35), transparent 70%);
-  animation-duration: 32s; animation-delay: -14s;
-}
-@keyframes wizard-wave-drift {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(40px, 30px) scale(1.08); }
-  66% { transform: translate(-30px, -20px) scale(0.96); }
-}
-.wizard-bg-lines {
-  position: absolute; inset: -10% -50%;
-  background-image:
-    repeating-linear-gradient(100deg, transparent 0 120px, rgba(96, 165, 250, 0.12) 120px 142px, transparent 142px 260px),
-    repeating-linear-gradient(100deg, transparent 0 200px, rgba(59, 130, 246, 0.09) 200px 222px, transparent 222px 400px);
-  background-size: 200% 200%;
-  animation: wizard-lines-flow 46s linear infinite;
-  mix-blend-mode: screen;
-}
-@keyframes wizard-lines-flow {
-  0% { background-position: 0% 0%, 0% 0%; }
-  100% { background-position: -200% 0%, 200% 0%; }
+@keyframes bg-gradient-flow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .wizard-bg-wave, .wizard-bg-lines { animation: none; }
-}
-
-/* Static (deliberately no animation) backdrop behind the CRM Dashboard
-   section specifically (the BusinessView + CRMOverviewDashboard tab, not
-   every section - see the activeSection check around this div in page.tsx).
-   Fixed instead of absolute so it stays put behind the full scroll height of
-   a long dashboard page, not just its first viewport; negative z-index
-   keeps it behind ordinary in-flow content without needing every card on
-   the page to opt into a stacking context. Same near-black -> burnt-orange
-   -> #fb923c diagonal gradient as the sidebar (same 165deg angle and color
-   stops), just translucent - the sidebar is a small opaque panel, this sits
-   behind the actual data the user is reading, so it has to stay faint
-   enough for that to win. Motion would compete with the numbers too, unlike
-   the empty loader/wizard screens where the animated version lives. */
-.crm-dashboard-bg-waves {
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background: linear-gradient(165deg, rgba(28, 16, 6, 0.85) 0%, rgba(124, 45, 18, 0.45) 45%, rgba(251, 146, 60, 0.22) 100%);
+  .bg-animated-gradient { animation: none; }
 }
 
 .wizard-page { max-width: 700px; width: 100%; margin: 0 auto; }
