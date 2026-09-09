@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef, useLayoutEffect, useEffect } from "react";
+import { useState, useMemo, useRef, useLayoutEffect, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { ShieldCheck } from "lucide-react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
@@ -36,6 +36,18 @@ export default function DashboardPage() {
 
   const categorized = useMemo(() => categorizeTools(tools), [tools]);
   const activeSectionDef = SECTIONS.find(s => s.id === activeSection)!;
+  // Stable across renders (functional setState update, empty dep array) -
+  // every fetch hook downstream (useCrmEntities, useRuleCoverage, the scan
+  // effects inside CRMOverviewDashboard, etc.) includes onLog in a useEffect
+  // dependency array. A plain function here would be a new reference every
+  // render, defeating every one of those hooks' memoized useCallbacks in
+  // turn (fetchScopedFields -> fetchEntity -> fetchAll, ...) and making
+  // their effects re-evaluate on every render - which large orgs (hundreds
+  // of workflows/functions) could push into React's "Maximum update depth
+  // exceeded" once enough cascading re-renders piled up during a scan.
+  const onLog = useCallback((log: ExecutionLog) => {
+    setLogs(prev => [log, ...prev]);
+  }, []);
   const crm = useCrmEntities(config, tools, onLog);
   const crmRecords = useCrmRecordSamples(
     config,
@@ -132,10 +144,6 @@ export default function DashboardPage() {
   function onSelectSection(s: Section) {
     setActiveSection(s);
     setSelectedTool(null);
-  }
-
-  function onLog(log: ExecutionLog) {
-    setLogs(prev => [log, ...prev]);
   }
 
   if (!config) {

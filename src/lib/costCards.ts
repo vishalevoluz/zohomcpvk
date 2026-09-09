@@ -38,7 +38,7 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
     body: () => "Without a structured pipeline, your sales forecast is a guess. Investors and management cannot rely on it.",
   },
   "workflows-inactive": {
-    icon: "⟳", headline: "Your Automation Is Partly Broken",
+    icon: "⟳", headline: "Part of Your Automation Has Quietly Stopped Working",
     body: f => `${f.note ?? f.count} workflows have silently stopped running${f.offenders.length ? `, including ${f.offenders.slice(0, 3).join(", ")}` : ""} - leads and tasks may be falling through the gaps.`,
   },
   "no-blueprint": {
@@ -54,7 +54,7 @@ const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Find
   },
   "empty-modules": {
     icon: "⊞", headline: "You Are Running Unused Complexity",
-    body: f => `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} sit empty with zero automation - clutter that slows your team down without adding value.`,
+    body: f => `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")}${f.count > f.offenders.length ? ", etc." : ""})` : ""} sit empty with zero automation - clutter that slows your team down without adding value.`,
   },
   "stale-deals": {
     icon: "⌛", headline: "Deals Are Going Cold in Your Pipeline",

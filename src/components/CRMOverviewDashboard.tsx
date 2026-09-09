@@ -3301,7 +3301,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               onClick={() => setWorkflowFilter(prev => (prev === "long-trigger" ? "all" : "long-trigger"))}
               data-tooltip={WORKFLOW_LONG_TRIGGER_TOOLTIP}
             >
-              {workflowBreakdown.filter(r => r.longTrigger).length} Long Trigger
+              {workflowBreakdown.filter(r => r.longTrigger).length} Idle 90+ Days
             </button>
             <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "duplicate" ? "selected" : ""}`}
@@ -3369,7 +3369,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   <span className="kpi-drilldown-name">{row.name}</span>
                   <span className="kpi-drilldown-module">{row.module}</span>
                   <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : row.longTrigger ? "long-trigger" : ""}`} data-tooltip={workflowLastTriggeredTooltip(row)}>{formatLastTriggered(row.lastTriggered)}</span>
-                  {row.longTrigger && <span className="kpi-drilldown-badge status-draft" data-tooltip={WORKFLOW_LONG_TRIGGER_TOOLTIP}>long trigger</span>}
+                  {row.longTrigger && <span className="kpi-drilldown-badge status-draft" data-tooltip={WORKFLOW_LONG_TRIGGER_TOOLTIP}>idle 90+ days</span>}
                   {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.duplicateDetail ?? "Same display name as another workflow"}>duplicate</span>}
                   {row.overlapping && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.overlappingDetail ?? "Shares a module + trigger event with another active rule"}>overlapping</span>}
                   <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`} data-tooltip={row.active ? WORKFLOW_ACTIVE_TOOLTIP : WORKFLOW_INACTIVE_TOOLTIP}>{row.active ? "active" : "inactive"}</span>
