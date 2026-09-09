@@ -272,15 +272,15 @@ function automationCoverageChecklist(entityData: Record<CrmEntityType, EntitySta
         ? `Covered by ${hasWorkflow ? "an active workflow" : `${ruleCount} rule${ruleCount !== 1 ? "s" : ""} (assignment/approval/validation/layout)`}.`
         : `No active workflow or assignment/approval/validation/layout rule found for ${apiName}.`,
       weight,
-      // Passing needs only ONE of these five to be on - shown individually so
-      // a client can see e.g. "Assignment rule: off" even though the module
-      // still passes overall on its Workflow or another rule type.
+      // Passing needs only ONE of these four (or an active workflow, called
+      // out separately in `detail` above) to be on - shown individually so a
+      // client can see e.g. "Assignment rule: off" even though the module
+      // still passes overall on another rule type or its workflow.
       signals: [
         { label: "Assignment rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "assignment") },
         { label: "Approval rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "approval") },
         { label: "Validation rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "validation") },
         { label: "Layout rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "layout") },
-        { label: "Workflow", on: hasWorkflow },
       ],
     };
   });

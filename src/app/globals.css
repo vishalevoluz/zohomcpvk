@@ -2821,6 +2821,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .kpi-drilldown-module { color: var(--color-text-tertiary); flex-shrink: 0; }
 .kpi-drilldown-date { font-size: 12px; color: var(--color-text-secondary); flex-shrink: 0; white-space: nowrap; }
 .kpi-drilldown-date.never { color: var(--bv-critical); font-weight: 600; }
+.kpi-drilldown-date.long-trigger { color: var(--bv-warning); font-weight: 600; }
 .kpi-drilldown-badge {
   font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary); flex-shrink: 0; text-transform: capitalize;

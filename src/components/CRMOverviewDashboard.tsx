@@ -741,6 +741,10 @@ interface WorkflowBreakdownRow {
   module: string;
   active: boolean;
   lastTriggered: string | null;
+  // True only when the workflow HAS fired before but not within
+  // LONG_TRIGGER_DAYS - distinct from "Never Triggered" (lastTriggered ===
+  // null), which flags a rule that's never matched its criteria at all.
+  longTrigger: boolean;
   duplicate: boolean;
   overlapping: boolean;
   // Human-readable explanation of *why* duplicate/overlapping fired: the
@@ -779,10 +783,15 @@ function workflowMatchDetail(w: unknown, group: unknown[], includeCriteriaAction
 // the specific evidence behind it for *this* row, not just the label.
 const WORKFLOW_ACTIVE_TOOLTIP = "This workflow rule is enabled - it will fire automatically the next time its trigger event occurs.";
 const WORKFLOW_INACTIVE_TOOLTIP = "This workflow rule is disabled - it will not fire until it's re-enabled.";
+const LONG_TRIGGER_DAYS = 90;
+const WORKFLOW_LONG_TRIGGER_TOOLTIP = `This workflow has fired before, but not in over ${LONG_TRIGGER_DAYS} days - it may no longer match any real record or criteria, or the process it automates may have moved elsewhere. Worth confirming it's still needed.`;
 function workflowLastTriggeredTooltip(row: WorkflowBreakdownRow): string {
-  return row.lastTriggered
-    ? `Last executed ${formatLastTriggered(row.lastTriggered)}.`
-    : "No execution recorded for this workflow yet - it has never matched its trigger criteria, or this MCP connection doesn't expose execution history.";
+  if (!row.lastTriggered) {
+    return "No execution recorded for this workflow yet - it has never matched its trigger criteria, or this MCP connection doesn't expose execution history.";
+  }
+  return row.longTrigger
+    ? `Last executed ${formatLastTriggered(row.lastTriggered)} - over ${LONG_TRIGGER_DAYS} days ago.`
+    : `Last executed ${formatLastTriggered(row.lastTriggered)}.`;
 }
 
 // Sorted inactive-first, then never-triggered-first within active - same
@@ -800,12 +809,15 @@ function computeWorkflowBreakdown(items: unknown[]): WorkflowBreakdownRow[] {
       const overlapping = overlappingSet.has(w);
       const duplicateGroup = duplicateGroupByItem.get(w);
       const overlappingGroup = overlappingGroupByItem.get(w);
+      const lastTriggered = workflowLastTriggered(w);
+      const daysSinceTrigger = daysSince(lastTriggered);
       return {
         id: String((w as Record<string, unknown> | null)?.id ?? i),
         name: getItemName(w, i),
         module: workflowModuleLabel(w) || "-",
         active: isActiveWorkflow(w),
-        lastTriggered: workflowLastTriggered(w),
+        lastTriggered,
+        longTrigger: daysSinceTrigger !== null && daysSinceTrigger > LONG_TRIGGER_DAYS,
         duplicate,
         overlapping,
         duplicateDetail: duplicate && duplicateGroup ? workflowMatchDetail(w, duplicateGroup, true) : null,
@@ -838,12 +850,13 @@ function computeWorkflowDuplicateGroups(items: unknown[]): WorkflowDuplicateGrou
 // can genuinely have never fired yet), and duplicate/overlapping are their own
 // independent flags too - so each toggle applies its own predicate rather than
 // assigning one category per row.
-function matchesWorkflowFilter(row: WorkflowBreakdownRow, filter: "all" | "active" | "inactive" | "never" | "duplicate" | "overlapping"): boolean {
+function matchesWorkflowFilter(row: WorkflowBreakdownRow, filter: "all" | "active" | "inactive" | "never" | "long-trigger" | "duplicate" | "overlapping"): boolean {
   if (filter === "all") return true;
   if (filter === "active") return row.active;
   if (filter === "inactive") return !row.active;
   if (filter === "duplicate") return row.duplicate;
   if (filter === "overlapping") return row.overlapping;
+  if (filter === "long-trigger") return row.longTrigger;
   return !row.lastTriggered;
 }
 
@@ -889,6 +902,7 @@ function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): ZiaInsight {
   if (rows.length === 0) return { summary: "No workflows found - nothing to evaluate yet.", points: [] };
   const inactive = rows.filter(r => !r.active).length;
   const neverTriggered = rows.filter(r => r.active && !r.lastTriggered).length;
+  const longTrigger = rows.filter(r => r.active && r.longTrigger).length;
   const duplicate = rows.filter(r => r.duplicate).length;
   const overlapping = rows.filter(r => r.overlapping).length;
   const points: string[] = [];
@@ -896,6 +910,7 @@ function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): ZiaInsight {
   if (overlapping > 0) points.push(cap(`${overlapping} workflow${overlapping !== 1 ? "s share" : " shares"} a trigger event with another active rule.`));
   if (inactive > 0) points.push(cap(`${inactive} workflow${inactive !== 1 ? "s are" : " is"} inactive.`));
   if (neverTriggered > 0) points.push(cap(`${neverTriggered} active workflow${neverTriggered !== 1 ? "s have" : " has"} never fired.`));
+  if (longTrigger > 0) points.push(cap(`${longTrigger} active workflow${longTrigger !== 1 ? "s haven't" : " hasn't"} fired in over ${LONG_TRIGGER_DAYS} days.`));
   if (points.length === 0) return { summary: "All workflows are active, unique, and have fired at least once - automation looks healthy.", points: [] };
   return { summary: "", points, action: "Merge or remove duplicates, reactivate what's still needed, and fix or remove the rest." };
 }
@@ -2012,7 +2027,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     if (selectedCard) detailPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedCard]);
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
-  const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never" | "duplicate" | "overlapping">("all");
+  const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never" | "long-trigger" | "duplicate" | "overlapping">("all");
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
   const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
@@ -3252,6 +3267,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               {workflowBreakdown.filter(r => !r.lastTriggered).length} Never Triggered
             </button>
             <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter === "long-trigger" ? "selected" : ""}`}
+              onClick={() => setWorkflowFilter(prev => (prev === "long-trigger" ? "all" : "long-trigger"))}
+              data-tooltip={WORKFLOW_LONG_TRIGGER_TOOLTIP}
+            >
+              {workflowBreakdown.filter(r => r.longTrigger).length} Long Trigger
+            </button>
+            <button
               className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "duplicate" ? "selected" : ""}`}
               onClick={() => setWorkflowFilter(prev => (prev === "duplicate" ? "all" : "duplicate"))}
               data-tooltip="Same module, trigger, criteria and actions as another rule - regardless of name"
@@ -3316,7 +3338,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 <div key={row.id} className="kpi-drilldown-row">
                   <span className="kpi-drilldown-name">{row.name}</span>
                   <span className="kpi-drilldown-module">{row.module}</span>
-                  <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : ""}`} data-tooltip={workflowLastTriggeredTooltip(row)}>{formatLastTriggered(row.lastTriggered)}</span>
+                  <span className={`kpi-drilldown-date ${!row.lastTriggered ? "never" : row.longTrigger ? "long-trigger" : ""}`} data-tooltip={workflowLastTriggeredTooltip(row)}>{formatLastTriggered(row.lastTriggered)}</span>
+                  {row.longTrigger && <span className="kpi-drilldown-badge status-draft" data-tooltip={WORKFLOW_LONG_TRIGGER_TOOLTIP}>long trigger</span>}
                   {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.duplicateDetail ?? "Identical module, trigger, criteria and actions as another rule"}>duplicate</span>}
                   {row.overlapping && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.overlappingDetail ?? "Shares a module + trigger event with another active rule"}>overlapping</span>}
                   <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`} data-tooltip={row.active ? WORKFLOW_ACTIVE_TOOLTIP : WORKFLOW_INACTIVE_TOOLTIP}>{row.active ? "active" : "inactive"}</span>
