@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef, useLayoutEffect, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Boxes, Workflow, Code2, GitBranch, Database, Users, type LucideIcon } from "lucide-react";
 import type { McpConfig, McpTool, ExecutionLog } from "@/types/mcp";
 import { SECTIONS, categorizeTools, type Section } from "@/lib/sections";
 import ConnectWizard from "@/components/ConnectWizard";
@@ -26,6 +26,55 @@ import { useModuleRecordCounts } from "@/lib/useModuleRecordCounts";
 import { useMandatoryFields } from "@/lib/useMandatoryFields";
 import { useOrgCurrency } from "@/lib/useOrgCurrency";
 import { findDealsApiName } from "@/lib/flowMapModel";
+
+// Rotates through what the audit actually covers while the full-page loader
+// (both wizard connect and initial-load screens) sits idle waiting on real
+// network round-trips - gives the wait something to look at instead of a
+// bare percentage, without pretending to reflect the fetch's real progress.
+const LOADER_FEATURES: { icon: LucideIcon; title: string; desc: string }[] = [
+  { icon: Boxes, title: "Modules", desc: "Every module in your org - active, hidden, or sitting empty." },
+  { icon: Workflow, title: "Workflows", desc: "Active vs. inactive rules, duplicates, and overlapping triggers." },
+  { icon: Code2, title: "Functions", desc: "Deluge scripts scanned for missing error handling and dead code." },
+  { icon: GitBranch, title: "Blueprints", desc: "Process enforcement across every stage of your pipeline." },
+  { icon: Database, title: "Fields & Layouts", desc: "Mandatory fields, validation rules, and layout customizations." },
+  { icon: Users, title: "Roles & Profiles", desc: "Who has access to what, and who can delete records." },
+];
+
+function LoaderFeatureCarousel() {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setIndex(i => (i + 1) % LOADER_FEATURES.length), 2600);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="evo-loader-carousel">
+      <p className="evo-loader-carousel-label">What EvoAudit checks</p>
+      <div className="evo-loader-carousel-viewport">
+        {LOADER_FEATURES.map((f, i) => {
+          const Icon = f.icon;
+          return (
+            <div key={f.title} className={`evo-loader-carousel-slide ${i === index ? "active" : ""}`}>
+              <span className="evo-loader-carousel-icon"><Icon size={22} strokeWidth={1.75} /></span>
+              <h3>{f.title}</h3>
+              <p>{f.desc}</p>
+            </div>
+          );
+        })}
+      </div>
+      <div className="evo-loader-carousel-dots">
+        {LOADER_FEATURES.map((f, i) => (
+          <button
+            key={f.title}
+            type="button"
+            aria-label={`Show ${f.title}`}
+            className={`evo-loader-carousel-dot ${i === index ? "active" : ""}`}
+            onClick={() => setIndex(i)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const [config, setConfig] = useState<McpConfig | null>(null);
@@ -184,15 +233,26 @@ export default function DashboardPage() {
     const loaderPct = coreResolved ? 99 : Math.min(99, Math.round((resolvedLoadSteps / TOTAL_LOAD_STEPS) * 100));
     return (
       <div className="evo-loader-page">
-        <div className="evo-loader-wrap">
-          <div className="evo-loader-badge">
-            <span className="spinner spinner-lg" />
-            <span className="evo-loader-name">Evo<span className="landing-logo-accent">Audit</span></span>
+        <div className="wizard-bg-waves" aria-hidden="true">
+          <span className="wizard-bg-wave wizard-bg-wave-1" />
+          <span className="wizard-bg-wave wizard-bg-wave-2" />
+          <span className="wizard-bg-wave wizard-bg-wave-3" />
+          <span className="wizard-bg-lines" />
+        </div>
+        <div className="evo-loader-split">
+          <div className="evo-loader-card">
+            <div className="evo-loader-wrap">
+              <div className="evo-loader-badge">
+                <span className="spinner spinner-lg" />
+                <span className="evo-loader-name">Evo<span className="landing-logo-accent">Audit</span></span>
+              </div>
+              <div className="evo-loader-progress-track" role="progressbar" aria-valuenow={loaderPct} aria-valuemin={0} aria-valuemax={100}>
+                <div className="evo-loader-progress-fill" style={{ width: `${loaderPct}%` }} />
+              </div>
+              <div className="evo-loader-progress-pct">{loaderPct}%</div>
+            </div>
           </div>
-          <div className="evo-loader-progress-track" role="progressbar" aria-valuenow={loaderPct} aria-valuemin={0} aria-valuemax={100}>
-            <div className="evo-loader-progress-fill" style={{ width: `${loaderPct}%` }} />
-          </div>
-          <div className="evo-loader-progress-pct">{loaderPct}%</div>
+          <LoaderFeatureCarousel />
         </div>
       </div>
     );
@@ -217,6 +277,7 @@ export default function DashboardPage() {
             No loading fallback needed here - isPrefetching is guaranteed false
             by the time this renders (see the full-page loader early-return above). */}
         <div style={{ display: activeSection === "crm-dashboard" ? undefined : "none" }}>
+          {activeSection === "crm-dashboard" && <div className="crm-dashboard-bg-waves" aria-hidden="true" />}
           <BusinessView
             entityData={crm.entityData}
             recordSamples={crmRecords.data}
