@@ -1433,11 +1433,12 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 /* ─── Connect wizard (real, functional pre-connect screen) ─────
    Standalone full-page flow shown instead of the dashboard shell
-   until a connection succeeds. Themed with the landing page's
-   dark/green tokens (--l-*) rather than the dashboard's adaptive
-   theme, so it reads as a continuation of the marketing site. */
+   until a connection succeeds. Themed with the landing page's own dark/green
+   tokens (--l-*) - the light-card version didn't hold up (some text stayed
+   unreadable), so this reverts to dark card + light text, matching the
+   original marketing-site continuation this page was designed as. */
 /* Background comes from .bg-animated-gradient (added alongside this class in
-   page.tsx) - overrides .landing-page's own static green radial-gradient
+   page.tsx) - overrides .landing-page's own static radial-gradient
    background since both classes land on the same element here. */
 .wizard-standalone {
   min-height: 100vh;
@@ -1455,13 +1456,17 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   padding: 48px 24px;
 }
 
-/* Animated brand-green gradient backdrop - a smooth flowing color shift
-   (no moving lines/blobs) shared by the Connect Wizard and the full-page
-   loader, the app's two "waiting" screens. A wide 4-stop gradient panned via
+/* Animated dark-green gradient backdrop - a smooth flowing color shift (no
+   moving lines/blobs) shared by the Connect Wizard and the full-page loader,
+   the app's two "waiting" screens. A wide 4-stop gradient panned via
    background-position instead of transform/opacity, so it reads as one
-   continuously shifting wash rather than distinct shapes drifting past. */
+   continuously shifting wash rather than distinct shapes drifting past.
+   !important on the background is deliberate - .landing-page (used together
+   with this class on the same element) declares its own static dark
+   background and sits later in this file, which at equal specificity would
+   otherwise silently win and hide the animation entirely. */
 .bg-animated-gradient {
-  background: linear-gradient(120deg, #051710, #0f766e, #34d399, #0f766e, #051710);
+  background: linear-gradient(120deg, #051710, #28996f, #34d399, #28996f, #051710) !important;
   background-size: 400% 400%;
   animation: bg-gradient-flow 18s ease infinite;
 }
@@ -1513,7 +1518,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   transition: border-color 150ms ease, color 150ms ease;
 }
 .wizard-pill:hover { border-color: rgba(52, 211, 153, 0.35); color: var(--l-muted); }
-.wizard-pill.is-active { color: var(--l-accent); border-color: var(--l-accent); }
+.wizard-pill.is-active { color: var(--l-accent); border-color: var(--l-accent); box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18); }
 .wizard-pill.is-done { color: var(--l-accent); }
 .wizard-pill-num {
   display: inline-flex;
@@ -1527,7 +1532,39 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .wizard-pill.is-active .wizard-pill-num, .wizard-pill.is-done .wizard-pill-num { background: rgba(52, 211, 153, 0.15); }
 
-.wizard-card { background: var(--l-surface); border: 1px solid var(--l-border); border-radius: var(--l-radius); padding: 22px; }
+/* Glowing animated-gradient border (mask trick: a gradient layer clipped to
+   just the border-width ring via mask-composite: exclude) plus a soft green
+   drop shadow, instead of a flat 1px static border - the "card should be
+   animated with color" ask, without needing any JSX changes since it's all
+   pseudo-element. Reuses the same bg-gradient-flow keyframe as the page
+   background, just faster, so the two motions read as part of one system. */
+.wizard-card {
+  position: relative;
+  background: var(--l-surface);
+  border: 1px solid transparent;
+  border-radius: var(--l-radius);
+  padding: 22px;
+  isolation: isolate;
+  box-shadow: 0 20px 60px -24px rgba(52, 211, 153, 0.45);
+}
+.wizard-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(120deg, #34d399, #0f766e, #6ee7b7, #0f766e, #34d399);
+  background-size: 300% 300%;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: bg-gradient-flow 8s ease infinite;
+  pointer-events: none;
+  z-index: -1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wizard-card::before { animation: none; }
+}
 .wizard-card-header { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
 .wizard-card-header svg { color: var(--l-accent); flex-shrink: 0; }
 .wizard-card-header h4 { margin: 0; font-size: 15px; font-weight: 650; color: var(--l-text); }
@@ -1741,10 +1778,10 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   cursor: pointer;
   transition: background 150ms ease, border-color 150ms ease;
 }
-.wizard-btn:hover:not(:disabled) { border-color: #333b46; }
+.wizard-btn:hover:not(:disabled) { border-color: rgba(52, 211, 153, 0.4); }
 .wizard-btn:disabled { cursor: default; opacity: 0.6; }
-.wizard-btn-primary { background: var(--l-accent); border-color: var(--l-accent); color: #06251b; }
-.wizard-btn-primary:hover:not(:disabled) { background: var(--l-accent-hover); border-color: var(--l-accent-hover); }
+.wizard-btn-primary { background: var(--l-accent); border-color: var(--l-accent); color: #06251b; box-shadow: 0 4px 16px -4px rgba(52, 211, 153, 0.55); }
+.wizard-btn-primary:hover:not(:disabled) { background: var(--l-accent-hover); border-color: var(--l-accent-hover); box-shadow: 0 6px 20px -4px rgba(52, 211, 153, 0.65); }
 
 @media (max-width: 700px) {
   .wizard-pills { justify-content: flex-start; }
@@ -5283,6 +5320,12 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   font-weight: 650;
   letter-spacing: 0.01em;
   user-select: none;
+  /* Explicit rather than inherited - without this, the plain "Evo" text (no
+     span/color of its own) fell back to body's global --color-text, a
+     dashboard dark-theme token unrelated to this page's local --l-text,
+     leaving it light-on-light and unreadable once the wizard background
+     switched from dark to a light gradient. */
+  color: var(--l-text);
 }
 .landing-logo-mark {
   width: 24px;
