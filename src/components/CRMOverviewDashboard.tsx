@@ -570,7 +570,7 @@ function generateRecommendations(
   // falls back to the general best-practice suggestion otherwise.
   const approvalEntries = ruleCoverage ? Object.entries(ruleCoverage.approval) : [];
   if (approvalEntries.length > 0) {
-    const zeroApproval = approvalEntries.filter(([, count]) => count === 0).map(([name]) => name);
+    const zeroApproval = approvalEntries.filter(([, stat]) => stat.total === 0).map(([name]) => name);
     if (zeroApproval.length > 0) {
       recs.push({
         id: "approval-process",
@@ -582,7 +582,7 @@ function generateRecommendations(
       recs.push({
         id: "approval-process",
         title: "Approval Processes Are Configured Across Core Modules",
-        description: `All ${approvalEntries.length} core modules have at least one approval process (${approvalEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Keep reviewing thresholds as deal sizes and discount policy change.`,
+        description: `All ${approvalEntries.length} core modules have at least one approval process (${approvalEntries.map(([n, c]) => `${n}: ${c.total}`).join(", ")}). Keep reviewing thresholds as deal sizes and discount policy change.`,
         severity: "low", category: "architecture", icon: "☑",
       });
     }
@@ -598,7 +598,7 @@ function generateRecommendations(
   // Assignment Rules - real per-module counts when getAssignmentRules is connected.
   const assignmentEntries = ruleCoverage ? Object.entries(ruleCoverage.assignment) : [];
   if (assignmentEntries.length > 0) {
-    const zeroAssignment = assignmentEntries.filter(([, count]) => count === 0).map(([name]) => name);
+    const zeroAssignment = assignmentEntries.filter(([, stat]) => stat.total === 0).map(([name]) => name);
     if (zeroAssignment.length > 0) {
       recs.push({
         id: "assignment-rules",
@@ -610,7 +610,7 @@ function generateRecommendations(
       recs.push({
         id: "assignment-rules",
         title: "Assignment Rules Are Configured Across Core Modules",
-        description: `All ${assignmentEntries.length} core modules have at least one assignment rule (${assignmentEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Keep reviewing them as territories or reps change.`,
+        description: `All ${assignmentEntries.length} core modules have at least one assignment rule (${assignmentEntries.map(([n, c]) => `${n}: ${c.total}`).join(", ")}). Keep reviewing them as territories or reps change.`,
         severity: "low", category: "architecture", icon: "➜",
       });
     }
@@ -626,7 +626,7 @@ function generateRecommendations(
   // Validation Rules - real per-module counts when getValidationRules is connected.
   const valEntries = ruleCoverage ? Object.entries(ruleCoverage.validation) : [];
   if (valEntries.length > 0) {
-    const zeroVal = valEntries.filter(([, count]) => count === 0).map(([name]) => name);
+    const zeroVal = valEntries.filter(([, stat]) => stat.total === 0).map(([name]) => name);
     if (zeroVal.length > 0) {
       recs.push({
         id: "validation-rules",
@@ -638,7 +638,7 @@ function generateRecommendations(
       recs.push({
         id: "validation-rules",
         title: "Validation Rules Are Configured Across Core Modules",
-        description: `All ${valEntries.length} core modules have at least one validation rule (${valEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Keep reviewing them as new fields and picklists get added.`,
+        description: `All ${valEntries.length} core modules have at least one validation rule (${valEntries.map(([n, c]) => `${n}: ${c.total}`).join(", ")}). Keep reviewing them as new fields and picklists get added.`,
         severity: "low", category: "architecture", icon: "⚑",
       });
     }
@@ -654,7 +654,7 @@ function generateRecommendations(
   // Layout Rules - real per-module counts when getLayoutRules is connected.
   const layoutEntries = ruleCoverage ? Object.entries(ruleCoverage.layout) : [];
   if (layoutEntries.length > 0) {
-    const zeroLayout = layoutEntries.filter(([, count]) => count === 0).map(([name]) => name);
+    const zeroLayout = layoutEntries.filter(([, stat]) => stat.total === 0).map(([name]) => name);
     if (zeroLayout.length > 0) {
       recs.push({
         id: "layout-rules",
@@ -666,7 +666,7 @@ function generateRecommendations(
       recs.push({
         id: "layout-rules",
         title: "Layout Rules Are Configured Across Core Modules",
-        description: `All ${layoutEntries.length} core modules have at least one layout rule (${layoutEntries.map(([n, c]) => `${n}: ${c}`).join(", ")}). Nice - reps only see fields relevant to the record they're on.`,
+        description: `All ${layoutEntries.length} core modules have at least one layout rule (${layoutEntries.map(([n, c]) => `${n}: ${c.total}`).join(", ")}). Nice - reps only see fields relevant to the record they're on.`,
         severity: "low", category: "architecture", icon: "⊡",
       });
     }
@@ -854,21 +854,50 @@ function formatLastTriggered(iso: string | null): string {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function cap(s: string): string {
+  return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Shared shape for every "Zia flags: ..." style insight below - `points` is
+// one flagged issue per bullet (empty when everything's healthy, in which
+// case `summary` carries the single all-clear sentence instead), and
+// `action` is the optional closing "here's what to do about it" line shown
+// under the bullet list. Splitting flags into an array instead of joining
+// them into one semicolon-separated sentence is what lets ZiaRecBody render
+// them as a real bullet list rather than a wall of text.
+interface ZiaInsight {
+  summary: string;
+  points: string[];
+  action?: string;
+}
+
+function ZiaRecBody({ summary, points, action }: ZiaInsight) {
+  if (points.length === 0) return <p className="zia-rec-desc">{summary}</p>;
+  return (
+    <>
+      <ul className="zia-rec-list">
+        {points.map((point, i) => <li key={i}>{point}</li>)}
+      </ul>
+      {action && <p className="zia-rec-action">{action}</p>}
+    </>
+  );
+}
+
 // Same "flag the stale ones, praise the healthy ones" synthesis as
 // buildZiaActivityInsight below, applied to the workflow breakdown instead.
-function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): { summary: string } {
-  if (rows.length === 0) return { summary: "No workflows found - nothing to evaluate yet." };
+function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): ZiaInsight {
+  if (rows.length === 0) return { summary: "No workflows found - nothing to evaluate yet.", points: [] };
   const inactive = rows.filter(r => !r.active).length;
   const neverTriggered = rows.filter(r => r.active && !r.lastTriggered).length;
   const duplicate = rows.filter(r => r.duplicate).length;
   const overlapping = rows.filter(r => r.overlapping).length;
-  const flags: string[] = [];
-  if (duplicate > 0) flags.push(`${duplicate} workflow${duplicate !== 1 ? "s are" : " is"} an exact duplicate of another (same module, trigger, criteria and actions)`);
-  if (overlapping > 0) flags.push(`${overlapping} workflow${overlapping !== 1 ? "s share" : " shares"} a trigger event with another active rule`);
-  if (inactive > 0) flags.push(`${inactive} workflow${inactive !== 1 ? "s are" : " is"} inactive`);
-  if (neverTriggered > 0) flags.push(`${neverTriggered} active workflow${neverTriggered !== 1 ? "s have" : " has"} never fired`);
-  if (flags.length === 0) return { summary: "All workflows are active, unique, and have fired at least once - automation looks healthy." };
-  return { summary: `Zia flags: ${flags.join("; ")}. Merge or remove duplicates, reactivate what's still needed, and fix or remove the rest.` };
+  const points: string[] = [];
+  if (duplicate > 0) points.push(cap(`${duplicate} workflow${duplicate !== 1 ? "s are" : " is"} an exact duplicate of another (same module, trigger, criteria and actions).`));
+  if (overlapping > 0) points.push(cap(`${overlapping} workflow${overlapping !== 1 ? "s share" : " shares"} a trigger event with another active rule.`));
+  if (inactive > 0) points.push(cap(`${inactive} workflow${inactive !== 1 ? "s are" : " is"} inactive.`));
+  if (neverTriggered > 0) points.push(cap(`${neverTriggered} active workflow${neverTriggered !== 1 ? "s have" : " has"} never fired.`));
+  if (points.length === 0) return { summary: "All workflows are active, unique, and have fired at least once - automation looks healthy.", points: [] };
+  return { summary: "", points, action: "Merge or remove duplicates, reactivate what's still needed, and fix or remove the rest." };
 }
 
 // ─── Activity (Email / Task / Call) drill-down ─────────────────────────────────
@@ -1036,11 +1065,10 @@ function daysSince(dateStr: string | null): number | null {
   return Math.floor((Date.now() - d.getTime()) / 86_400_000);
 }
 
-interface ZiaActivityInsight {
+interface ZiaActivityInsight extends ZiaInsight {
   lastEmail: LatestActivity;
   lastCall: LatestActivity;
   lastTaskDue: LatestActivity;
-  summary: string;
 }
 
 // Synthesizes the three freshest-activity signals into one Zia-style verdict -
@@ -1052,26 +1080,25 @@ function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState
   const lastTaskDue = latestActivity(taskItems, ["due_date", "Due_Date", "closingdate"], ["subject", "Subject", "title", "Title"]);
 
   const STALE_DAYS = 14;
-  const flags: string[] = [];
+  const points: string[] = [];
 
   if (!emails.unavailable) {
     const days = daysSince(lastEmail.date);
-    if (days === null) flags.push("no emails have been logged yet");
-    else if (days > STALE_DAYS) flags.push(`the last email was ${days} days ago`);
+    if (days === null) points.push("No emails have been logged yet.");
+    else if (days > STALE_DAYS) points.push(`The last email was ${days} days ago.`);
   }
   if (!calls.unavailable) {
     const days = daysSince(lastCall.date);
-    if (days === null) flags.push("no calls have been logged yet");
-    else if (days > STALE_DAYS) flags.push(`the last call was ${days} days ago`);
+    if (days === null) points.push("No calls have been logged yet.");
+    else if (days > STALE_DAYS) points.push(`The last call was ${days} days ago.`);
   }
   const taskDays = daysSince(lastTaskDue.date);
-  if (taskDays !== null && taskDays > 0) flags.push(`the most recently due task is now ${taskDays} day${taskDays !== 1 ? "s" : ""} overdue`);
+  if (taskDays !== null && taskDays > 0) points.push(`The most recently due task is now ${taskDays} day${taskDays !== 1 ? "s" : ""} overdue.`);
 
-  const summary = flags.length === 0
-    ? "Recent activity looks healthy across email, calls, and tasks - no gaps flagged."
-    : `Zia flags: ${flags.join("; ")}. Re-engage before this account goes cold.`;
-
-  return { lastEmail, lastCall, lastTaskDue, summary };
+  if (points.length === 0) {
+    return { lastEmail, lastCall, lastTaskDue, summary: "Recent activity looks healthy across email, calls, and tasks - no gaps flagged.", points: [] };
+  }
+  return { lastEmail, lastCall, lastTaskDue, summary: "", points, action: "Re-engage before this account goes cold." };
 }
 
 // ─── Schedules drill-down ───────────────────────────────────────────────────────
@@ -1173,15 +1200,15 @@ function computeScheduleBreakdown(items: unknown[]): ScheduleBreakdownRow[] {
 
 // "Not used" = inactive, or active but has never actually run - both read as
 // automation nobody would notice if it disappeared.
-function buildZiaScheduleInsight(rows: ScheduleBreakdownRow[]): { summary: string } {
-  if (rows.length === 0) return { summary: "No schedules found - nothing to evaluate yet." };
+function buildZiaScheduleInsight(rows: ScheduleBreakdownRow[]): ZiaInsight {
+  if (rows.length === 0) return { summary: "No schedules found - nothing to evaluate yet.", points: [] };
   const inactive = rows.filter(r => !r.active).length;
   const neverRun = rows.filter(r => r.active && !r.lastRun).length;
-  const flags: string[] = [];
-  if (inactive > 0) flags.push(`${inactive} schedule${inactive !== 1 ? "s are" : " is"} inactive`);
-  if (neverRun > 0) flags.push(`${neverRun} active schedule${neverRun !== 1 ? "s have" : " has"} never actually run`);
-  if (flags.length === 0) return { summary: "Every schedule is active and has run at least once - nothing sitting unused." };
-  return { summary: `Zia flags: ${flags.join("; ")}. These schedules aren't doing anything right now - reactivate what's still needed, or delete the rest so it's not mistaken for working automation.` };
+  const points: string[] = [];
+  if (inactive > 0) points.push(cap(`${inactive} schedule${inactive !== 1 ? "s are" : " is"} inactive.`));
+  if (neverRun > 0) points.push(cap(`${neverRun} active schedule${neverRun !== 1 ? "s have" : " has"} never actually run.`));
+  if (points.length === 0) return { summary: "Every schedule is active and has run at least once - nothing sitting unused.", points: [] };
+  return { summary: "", points, action: "These schedules aren't doing anything right now - reactivate what's still needed, or delete the rest so it's not mistaken for working automation." };
 }
 
 // ─── Functions: list, duplicates, active/inactive, code fetch + analysis ──────
@@ -1652,24 +1679,24 @@ const FUNCTION_SEVERITY_ORDER: Record<FunctionIssue["severity"], number> = { hig
 function buildFunctionZiaSummary(
   functionsWithIssuesPct: number, scannedCount: number, duplicates: FunctionDuplicateGroup[],
   suspiciousCount: number, failureCount: number | null,
-): string {
-  if (scannedCount === 0) return "Open this card to scan function code for issues - nothing analyzed yet.";
-  const parts: string[] = [];
+): ZiaInsight {
+  if (scannedCount === 0) return { summary: "Open this card to scan function code for issues - nothing analyzed yet.", points: [] };
+  const points: string[] = [];
   if (functionsWithIssuesPct > 0) {
-    parts.push(`${functionsWithIssuesPct}% of the ${scannedCount} functions scanned have at least one flagged issue - mostly missing error handling and API calls made inside loops`);
+    points.push(cap(`${functionsWithIssuesPct}% of the ${scannedCount} functions scanned have at least one flagged issue - mostly missing error handling and API calls made inside loops.`));
   }
   if (duplicates.length > 0) {
     const dupItemCount = duplicates.reduce((s, g) => s + g.items.length, 0);
-    parts.push(`${duplicates.length} function name${duplicates.length !== 1 ? "s are" : " is"} duplicated across ${dupItemCount} functions total - rename or delete the unused copies so workflows/buttons unambiguously call the right one`);
+    points.push(cap(`${duplicates.length} function name${duplicates.length !== 1 ? "s are" : " is"} duplicated across ${dupItemCount} functions total - rename or delete the unused copies so workflows/buttons unambiguously call the right one.`));
   }
   if (suspiciousCount > 0) {
-    parts.push(`${suspiciousCount} function${suspiciousCount !== 1 ? "s" : ""} still carr${suspiciousCount !== 1 ? "y" : "ies"} a placeholder/test name`);
+    points.push(cap(`${suspiciousCount} function${suspiciousCount !== 1 ? "s" : ""} still carr${suspiciousCount !== 1 ? "y" : "ies"} a placeholder/test name.`));
   }
   if (failureCount) {
-    parts.push(`${failureCount} recent execution failure${failureCount !== 1 ? "s" : ""} logged`);
+    points.push(cap(`${failureCount} recent execution failure${failureCount !== 1 ? "s" : ""} logged.`));
   }
-  if (parts.length === 0) return "No issues, duplicates, or placeholder names found in the functions scanned - code quality looks solid.";
-  return `Zia flags: ${parts.join("; ")}.`;
+  if (points.length === 0) return { summary: "No issues, duplicates, or placeholder names found in the functions scanned - code quality looks solid.", points: [] };
+  return { summary: "", points };
 }
 
 interface FunctionKpiSummary { total: number; active: number; inactive: number; fetched: boolean; }
@@ -2624,12 +2651,12 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           <span className="crm-header-icon">◉</span>
           <div>
             <h2 className="crm-header-title">Data & Recommendations</h2>
-            <p className="crm-header-sub">
-              {loadingCount > 0
-                ? `Loading ${loadingCount} of ${CRM_ENTITIES.length} data sources…`
-                : `${totalItems.toLocaleString()} total items across ${loadedCount} sources`}
-              {lastRefresh && ` · Updated ${formatRelative(lastRefresh)}`}
-            </p>
+            {loadingCount === 0 && (
+              <p className="crm-header-sub">
+                {`${totalItems.toLocaleString()} total items across ${loadedCount} sources`}
+                {lastRefresh && ` · Updated ${formatRelative(lastRefresh)}`}
+              </p>
+            )}
           </div>
         </div>
         <div className="crm-header-actions">
@@ -2877,7 +2904,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                     <span className="zia-rec-icon">✦</span>
                     <span className="zia-rec-title">Zia Recommendation - Unused Schedules</span>
                   </div>
-                  <p className="zia-rec-desc">{ziaScheduleInsight.summary}</p>
+                  <ZiaRecBody {...ziaScheduleInsight} />
                 </div>
               )}
             </>
@@ -2914,7 +2941,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <span className="zia-rec-icon">✦</span>
               <span className="zia-rec-title">Zia Recommendation - Functions</span>
             </div>
-            <p className="zia-rec-desc">{functionZiaSummary}</p>
+            <ZiaRecBody {...functionZiaSummary} />
           </div>
 
           <div className="function-tabs">
@@ -2995,7 +3022,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                                   <span className="zia-rec-icon">✦</span>
                                   <span className="zia-rec-title">Zia Recommendation - Formatting &amp; Comments</span>
                                 </div>
-                                <p className="zia-rec-desc">{reviewCodeQuality(functionRecords.codeByFnId[row.id]!.code!).summary}</p>
+                                <ZiaRecBody {...reviewCodeQuality(functionRecords.codeByFnId[row.id]!.code!)} />
                               </div>
                             </>
                           )}
@@ -3080,7 +3107,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                                 <span className="zia-rec-icon">✦</span>
                                 <span className="zia-rec-title">Zia Recommendation - Formatting &amp; Comments</span>
                               </div>
-                              <p className="zia-rec-desc">{reviewCodeQuality(functionRecords.codeByFnId[fn.id]!.code!).summary}</p>
+                              <ZiaRecBody {...reviewCodeQuality(functionRecords.codeByFnId[fn.id]!.code!)} />
                             </div>
 
                             <strong className="function-code-issues-label">Recommendations for this function</strong>
@@ -3302,7 +3329,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <span className="zia-rec-icon">✦</span>
               <span className="zia-rec-title">Zia Recommendation - Workflows</span>
             </div>
-            <p className="zia-rec-desc">{ziaWorkflowInsight.summary}</p>
+            <ZiaRecBody {...ziaWorkflowInsight} />
           </div>
         </div>
       )}
@@ -3345,7 +3372,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 {ziaActivityInsight.lastTaskDue.label && <span className="activity-zia-sub">{ziaActivityInsight.lastTaskDue.label}</span>}
               </div>
             </div>
-            <p className="zia-rec-desc">{ziaActivityInsight.summary}</p>
+            <ZiaRecBody {...ziaActivityInsight} />
           </div>
         </div>
       )}

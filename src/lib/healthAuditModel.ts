@@ -10,7 +10,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser,
-  workflowReferencesModule, ruleCoverageCount, blueprintStatus, unreferencedModules, isDeletedModule,
+  workflowReferencesModule, ruleCoverageCount, ruleCoverageHasActive, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
   overlappingWorkflows, identicalWorkflows,
 } from "@/lib/crmPredicates";
@@ -185,6 +185,12 @@ export interface ChecklistItem {
   detail: string;
   /** Real point value this item is worth in the scoring formula - shown as "+N pts" (earned) on passing items and "+N pts available" on failing ones. */
   weight: number;
+  /** Optional on/off breakdown of the individual signals behind this item's
+   * verdict (e.g. automation coverage's assignment/approval/validation/layout
+   * rules + workflow), rendered as a bullet list under `detail` when present.
+   * Display-only - a signal being off never changes `status` or `weight`;
+   * the item still passes as long as ANY signal is on. */
+  signals?: { label: string; on: boolean }[];
 }
 
 export interface DimensionRecommendation {
@@ -266,6 +272,16 @@ function automationCoverageChecklist(entityData: Record<CrmEntityType, EntitySta
         ? `Covered by ${hasWorkflow ? "an active workflow" : `${ruleCount} rule${ruleCount !== 1 ? "s" : ""} (assignment/approval/validation/layout)`}.`
         : `No active workflow or assignment/approval/validation/layout rule found for ${apiName}.`,
       weight,
+      // Passing needs only ONE of these five to be on - shown individually so
+      // a client can see e.g. "Assignment rule: off" even though the module
+      // still passes overall on its Workflow or another rule type.
+      signals: [
+        { label: "Assignment rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "assignment") },
+        { label: "Approval rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "approval") },
+        { label: "Validation rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "validation") },
+        { label: "Layout rule", on: ruleCoverageHasActive(ruleCoverage, apiName, "layout") },
+        { label: "Workflow", on: hasWorkflow },
+      ],
     };
   });
 }

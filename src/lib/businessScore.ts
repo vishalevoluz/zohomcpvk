@@ -15,7 +15,7 @@ export interface HealthScoreDimensions {
 // same "what counts as automation" definition without importing this file
 // (which itself imports from flowMapModel.ts). Re-exported here so existing
 // consumers (useRuleCoverage.ts, BusinessView.tsx, etc.) don't need to change.
-export type { RuleCoverage } from "@/lib/crmPredicates";
+export type { RuleCoverage, RuleTypeStat } from "@/lib/crmPredicates";
 
 export type HealthZone = "healthy" | "needs-attention" | "at-risk" | "critical";
 

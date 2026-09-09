@@ -247,10 +247,13 @@ export function analyzeFunctionScript(script: string): FunctionIssue[] {
   let idMatch: RegExpExecArray | null;
   while ((idMatch = hardcodedIdRe.exec(script))) hardcodedIds.add(idMatch[1]);
   if (hardcodedIds.size > 0) {
-    const shown = [...hardcodedIds].slice(0, 3).join(", ");
+    // Never echo the actual matched digits back into the UI - these are real
+    // record/user IDs (and this same 15-19 digit shape can coincidentally
+    // catch other sensitive numeric literals) from the customer's own org,
+    // so the finding stays generic instead of leaking them into a report.
     issues.push({
       category: "hardcoded", severity: "medium",
-      message: `Hardcoded record/user ID${hardcodedIds.size !== 1 ? "s" : ""} found (${shown}${hardcodedIds.size > 3 ? ", …" : ""}) - this only works in the org it was copied from. Pass IDs in as function arguments or look them up dynamically instead.`,
+      message: `A static record/user ID${hardcodedIds.size !== 1 ? "s have" : " has"} passed in this function - this only works in the org it was copied from. Pass IDs in as function arguments or look them up dynamically instead.`,
     });
   }
 
@@ -395,12 +398,17 @@ export function checkFunctionMetadata(fn: { name?: string; description?: string 
 export interface CodeQualityInsight {
   commentRatioPct: number;
   summary: string;
+  points: string[];
 }
 
 const LONG_LINE_THRESHOLD = 120;
 
+function capitalize(s: string): string {
+  return s.length === 0 ? s : s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 export function reviewCodeQuality(script: string): CodeQualityInsight {
-  if (!script || !script.trim()) return { commentRatioPct: 0, summary: "No code to review." };
+  if (!script || !script.trim()) return { commentRatioPct: 0, summary: "No code to review.", points: [] };
 
   const lines = script.split("\n");
   const codeLines = lines.filter(l => l.trim() !== "");
@@ -420,28 +428,28 @@ export function reviewCodeQuality(script: string): CodeQualityInsight {
   const mixedIndentation = usesTabs && usesSpaces;
   const hasLongBlankRun = /\n{4,}/.test(script);
 
-  const parts: string[] = [];
+  const points: string[] = [];
 
   if (commentSignal === 0 && codeLines.length > 10) {
-    parts.push("no comments anywhere in the function - add a few lines explaining what it does and why, especially around any non-obvious business logic");
+    points.push("No comments anywhere in the function - add a few lines explaining what it does and why, especially around any non-obvious business logic.");
   } else if (commentRatioPct < 5 && codeLines.length > 20) {
-    parts.push(`only ${commentRatioPct}% of lines are commented - a function this size benefits from more explanation of why, not just what`);
+    points.push(capitalize(`only ${commentRatioPct}% of lines are commented - a function this size benefits from more explanation of why, not just what.`));
   } else if (commentSignal > 0) {
-    parts.push(`comments cover roughly ${commentRatioPct}% of the code`);
+    points.push(capitalize(`comments cover roughly ${commentRatioPct}% of the code.`));
   }
 
   if (mixedIndentation) {
-    parts.push("mixes tabs and spaces for indentation - pick one so it reads consistently in every editor");
+    points.push("Mixes tabs and spaces for indentation - pick one so it reads consistently in every editor.");
   }
   if (longLines > 0) {
-    parts.push(`${longLines} line${longLines !== 1 ? "s" : ""} over ${LONG_LINE_THRESHOLD} characters - consider breaking these up for readability`);
+    points.push(capitalize(`${longLines} line${longLines !== 1 ? "s" : ""} over ${LONG_LINE_THRESHOLD} characters - consider breaking these up for readability.`));
   }
   if (hasLongBlankRun) {
-    parts.push("has stretches of 3+ blank lines in a row - trim these for a tighter, more readable function");
+    points.push("Has stretches of 3+ blank lines in a row - trim these for a tighter, more readable function.");
   }
 
-  if (parts.length === 0) {
-    return { commentRatioPct, summary: "Formatting and commenting look solid - no readability issues flagged." };
+  if (points.length === 0) {
+    return { commentRatioPct, summary: "Formatting and commenting look solid - no readability issues flagged.", points: [] };
   }
-  return { commentRatioPct, summary: `Zia's formatting review: ${parts.join("; ")}.` };
+  return { commentRatioPct, summary: "", points };
 }

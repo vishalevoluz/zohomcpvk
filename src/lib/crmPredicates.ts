@@ -547,11 +547,22 @@ export function blueprintsForModule(blueprints: unknown[], apiName: string): unk
 // Lives here (rather than in businessScore.ts) so both businessScore.ts and
 // flowMapModel.ts can share the same "what counts as automation" definition
 // without importing from each other.
+// total = every rule of this type found for the module, regardless of status;
+// active = the subset that's actually turned on (per isActiveWorkflow's
+// generic active/enabled/status check). Coverage scoring below still keys
+// off `total` (unchanged behavior) - `active` exists so callers that want to
+// show which of the 5 automation signals are genuinely on (not just present)
+// have that without a second fetch.
+export interface RuleTypeStat {
+  total: number;
+  active: number;
+}
+
 export interface RuleCoverage {
-  validation: Record<string, number>;
-  layout: Record<string, number>;
-  assignment: Record<string, number>;
-  approval: Record<string, number>;
+  validation: Record<string, RuleTypeStat>;
+  layout: Record<string, RuleTypeStat>;
+  assignment: Record<string, RuleTypeStat>;
+  approval: Record<string, RuleTypeStat>;
   scheduleCount: number | null;
 }
 
@@ -567,7 +578,15 @@ export const PER_MODULE_COVERAGE_KEYS: (keyof Pick<RuleCoverage, "validation" | 
 // agree with it instead of only counting workflows.
 export function ruleCoverageCount(ruleCoverage: RuleCoverage | null, apiName: string): number {
   if (!ruleCoverage) return 0;
-  return PER_MODULE_COVERAGE_KEYS.reduce((sum, key) => sum + (ruleCoverage[key][apiName] ?? 0), 0);
+  return PER_MODULE_COVERAGE_KEYS.reduce((sum, key) => sum + (ruleCoverage[key][apiName]?.total ?? 0), 0);
+}
+
+// Whether a module has at least one rule of this type that's actually turned
+// on (not just present) - used to render the automation-coverage signal
+// bullets (assignment/approval/validation/layout/workflow) so a disabled
+// rule shows as "off" even though it still counts toward ruleCoverageCount.
+export function ruleCoverageHasActive(ruleCoverage: RuleCoverage | null, apiName: string, key: typeof PER_MODULE_COVERAGE_KEYS[number]): boolean {
+  return (ruleCoverage?.[key][apiName]?.active ?? 0) > 0;
 }
 
 // Per-type breakdown (validation/layout/assignment/approval counts) for one
@@ -575,10 +594,10 @@ export function ruleCoverageCount(ruleCoverage: RuleCoverage | null, apiName: st
 // just a combined total, e.g. the flow map's Automation node tooltip.
 export function ruleCoverageBreakdown(ruleCoverage: RuleCoverage | null, apiName: string): Record<typeof PER_MODULE_COVERAGE_KEYS[number], number> {
   return {
-    validation: ruleCoverage?.validation[apiName] ?? 0,
-    layout: ruleCoverage?.layout[apiName] ?? 0,
-    assignment: ruleCoverage?.assignment[apiName] ?? 0,
-    approval: ruleCoverage?.approval[apiName] ?? 0,
+    validation: ruleCoverage?.validation[apiName]?.total ?? 0,
+    layout: ruleCoverage?.layout[apiName]?.total ?? 0,
+    assignment: ruleCoverage?.assignment[apiName]?.total ?? 0,
+    approval: ruleCoverage?.approval[apiName]?.total ?? 0,
   };
 }
 

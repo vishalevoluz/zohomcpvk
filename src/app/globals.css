@@ -3262,6 +3262,24 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   margin: 0;
 }
 
+.zia-rec-list {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.zia-rec-action {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  margin: 6px 0 0;
+  font-style: italic;
+}
+
 /* Zia Chat */
 .zia-chat {
   border-top: 0.5px solid var(--color-border);
@@ -4322,6 +4340,22 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .hsd-checklist-weight.earned {
   background: var(--color-success-bg); color: var(--bv-healthy);
 }
+
+.hsd-checklist-signals {
+  list-style: none; display: flex; flex-wrap: wrap; gap: 4px 12px;
+  margin-top: 6px; padding: 0;
+}
+.hsd-checklist-signals li {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11.5px; font-weight: 500; color: var(--color-text-secondary);
+}
+.hsd-checklist-signals li.off { color: var(--bv-critical); }
+.hsd-checklist-signal-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: var(--color-text-tertiary);
+}
+.hsd-checklist-signals li.on .hsd-checklist-signal-dot { background: var(--bv-healthy); }
+.hsd-checklist-signals li.off .hsd-checklist-signal-dot { background: var(--bv-critical); }
 
 .hsd-recommendations h4 {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;

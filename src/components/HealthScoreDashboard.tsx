@@ -134,6 +134,16 @@ function CategoryCard({
                 <div className="hsd-checklist-text">
                   <span className="hsd-checklist-label">{item.label}</span>
                   <span className="hsd-checklist-detail">{item.detail}</span>
+                  {item.signals && (
+                    <ul className="hsd-checklist-signals">
+                      {item.signals.map(sig => (
+                        <li key={sig.label} className={sig.on ? "on" : "off"}>
+                          <span className="hsd-checklist-signal-dot" />
+                          {sig.label}: {sig.on ? "on" : "off"}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 {item.status === "pass"
                   ? <span className="hsd-checklist-weight earned">+{item.weight} pts</span>

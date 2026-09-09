@@ -6,7 +6,8 @@ import { executeTool } from "@/lib/zohoMcp";
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved } from "@/lib/useCrmEntities";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
-import type { RuleCoverage } from "@/lib/businessScore";
+import { isActiveWorkflow } from "@/lib/crmPredicates";
+import type { RuleCoverage, RuleTypeStat } from "@/lib/businessScore";
 
 function parseMcpJson(result: unknown): Record<string, unknown> | null {
   if (!result || typeof result !== "object") return null;
@@ -21,13 +22,22 @@ function parseMcpJson(result: unknown): Record<string, unknown> | null {
   return r;
 }
 
-function countRulesInResponse(result: unknown): number {
+function extractRuleArray(result: unknown): unknown[] {
   const parsed = parseMcpJson(result);
-  if (!parsed) return 0;
+  if (!parsed) return [];
   for (const v of Object.values(parsed)) {
-    if (Array.isArray(v)) return v.length;
+    if (Array.isArray(v)) return v;
   }
-  return 0;
+  return [];
+}
+
+// total = every rule of this type the API returned for the module; active =
+// the subset isActiveWorkflow's generic active/enabled/status check treats
+// as turned on. A rule with no such field defaults to active (same
+// "unknown means on" fallback isActiveWorkflow uses for workflows).
+function statForResponse(result: unknown): RuleTypeStat {
+  const items = extractRuleArray(result);
+  return { total: items.length, active: items.filter(isActiveWorkflow).length };
 }
 
 type PerModuleKey = "validation" | "layout" | "assignment" | "approval";
@@ -92,7 +102,7 @@ export function useRuleCoverage(
 
     fetchedTick.current = refreshTick;
     void (async () => {
-      const buckets: Record<PerModuleKey, Record<string, number>> = {
+      const buckets: Record<PerModuleKey, Record<string, RuleTypeStat>> = {
         validation: {}, layout: {}, assignment: {}, approval: {},
       };
 
@@ -102,7 +112,7 @@ export function useRuleCoverage(
           const input = { query_params: { module: apiName } };
           try {
             const output = await executeTool(config, tool.name, input);
-            buckets[key][apiName] = countRulesInResponse(output);
+            buckets[key][apiName] = statForResponse(output);
             onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
           } catch (e: unknown) {
             onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });

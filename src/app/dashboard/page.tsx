@@ -185,9 +185,6 @@ export default function DashboardPage() {
             <div className="evo-loader-progress-fill" style={{ width: `${loaderPct}%` }} />
           </div>
           <div className="evo-loader-progress-pct">{loaderPct}%</div>
-          <div className="evo-loader-status">
-            Loading {resolvedLoadSteps}/{TOTAL_LOAD_STEPS} data sources
-          </div>
         </div>
       </div>
     );
