@@ -2994,7 +2994,11 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .crmov-card.selected.kpi-warning, .crmov-card.selected.config-warning { border-left-color: var(--bv-warning); }
 .crmov-card.selected.kpi-critical, .crmov-card.selected.config-critical { border-left-color: var(--bv-critical); }
 
-.crmov-detail-panel { min-width: 0; display: flex; flex-direction: column; }
+/* min-height is a floor, not a fight with the stretch-to-match-left-column
+   rule above - a short left list (e.g. only a few cards resolved yet)
+   otherwise left the right panel just as short, which read as cramped once
+   a table with real rows was open inside it. */
+.crmov-detail-panel { min-width: 0; min-height: 640px; display: flex; flex-direction: column; }
 /* The single conditionally-rendered child (.kpi-drilldown for almost every
    selected card, .crmov-detail-placeholder when nothing's selected) fills
    the stretched panel height from the grid rule above, rather than the
@@ -3063,7 +3067,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .kpi-drilldown-stat-clickable.selected { box-shadow: 0 0 0 1.5px currentColor inset; }
 .kpi-drilldown-table {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-content: start;
-  gap: 6px; max-height: 420px; overflow-y: auto;
+  gap: 6px; max-height: 640px; overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--color-border-strong) transparent;
 }
