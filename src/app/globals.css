@@ -2917,7 +2917,12 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   display: grid;
   grid-template-columns: minmax(280px, 340px) 1fr;
   gap: 14px;
-  align-items: start;
+  /* Right panel (the selected card's drilldown) stretches to match the left
+     card list's height instead of only sizing to its own content - the list
+     usually runs much taller than a short drilldown (e.g. Profiles), which
+     otherwise left the right panel looking cut short with unused space next
+     to it. */
+  align-items: stretch;
 }
 @media (max-width: 900px) {
   .crmov-master-detail { grid-template-columns: 1fr; }
@@ -2983,7 +2988,12 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .crmov-card.selected.kpi-warning, .crmov-card.selected.config-warning { border-left-color: var(--bv-warning); }
 .crmov-card.selected.kpi-critical, .crmov-card.selected.config-critical { border-left-color: var(--bv-critical); }
 
-.crmov-detail-panel { min-width: 0; }
+.crmov-detail-panel { min-width: 0; display: flex; flex-direction: column; }
+/* The single conditionally-rendered child (.kpi-drilldown for almost every
+   selected card, .crmov-detail-placeholder when nothing's selected) fills
+   the stretched panel height from the grid rule above, rather than the
+   panel just being taller than its own content with blank space below it. */
+.crmov-detail-panel > * { flex: 1; }
 .crmov-detail-placeholder {
   height: 100%;
   min-height: 160px;
@@ -3730,6 +3740,32 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   font-size: 12px;
   color: var(--color-text-secondary);
   line-height: 1.4;
+}
+
+/* Both preview items and "+N more" render as <button>s now (they jump to
+   that item's full entry in the Zia Recommendations panel below) - reset
+   the native button chrome so they still read as plain list text at rest,
+   with a hover/focus cue to signal they're actually clickable. */
+.crm-report-preview-item-clickable, .crm-report-more-clickable {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.crm-report-preview-item-clickable:hover .crm-report-preview-text,
+.crm-report-more-clickable:hover {
+  color: var(--color-brand);
+  text-decoration: underline;
+}
+.crm-report-preview-item-clickable:focus-visible,
+.crm-report-more-clickable:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 1px;
 }
 
 .crm-dot {

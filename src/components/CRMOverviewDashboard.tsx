@@ -20,7 +20,6 @@ import type { Section } from "@/lib/sections";
 import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames, isSystemGeneratedRule, resolveUsableModuleApiNames } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
-import { isScheduleTool } from "@/lib/useRuleCoverage";
 import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, checkFunctionMetadata, ISSUE_CATEGORY_LABELS, type FunctionIssue } from "@/lib/functionAnalysis";
 
 function parseMcpJson(result: unknown): Record<string, unknown> | null {
@@ -47,6 +46,12 @@ interface FunctionHealth {
   suspiciousNames: string[];
   failuresChecked: boolean;
   failureCount: number;
+  // Scheduled Functions are just functions with category=="Schedule" - there
+  // is no separate schedule-listing tool anywhere in Zoho's real MCP
+  // catalogue (confirmed live), so this rides the same functions fetch
+  // instead of a dedicated one. See computeScheduleBreakdown.
+  scheduleTotal: number;
+  scheduleInactive: number;
 }
 
 // Placeholder/test names left over from building or copy-pasting a function -
@@ -222,7 +227,7 @@ function generateRecommendations(
     recs.push({
       id: "inactive-blueprints",
       title: `${inactiveBps.length} Inactive Blueprint Process${inactiveBps.length > 1 ? "es" : ""}`,
-      description: `${inactiveBps.length} blueprint${inactiveBps.length > 1 ? "s are" : " is"} inactive. Reactivate needed processes or archive them to reduce confusion in process management.`,
+      description: `${inactiveBps.length} blueprint${inactiveBps.length > 1 ? "s are" : " is"} inactive. Reactivate needed processes or delete the ones you no longer need.`,
       severity: "medium", category: "changes", icon: "◈",
     });
   }
@@ -680,15 +685,35 @@ function generateRecommendations(
   }
 
   // Schedules have no dedicated listing tool anywhere in Zoho's real MCP
-  // catalogue (see isScheduleTool in useRuleCoverage.ts) - this can never be
-  // confirmed one way or the other, so it's a generic suggestion rather than
-  // a number-backed claim.
-  recs.push({
-    id: "schedules",
-    title: "Use Schedules to Automate Recurring Tasks",
-    description: "Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence - e.g. nightly data cleanup or a weekly digest email - without needing a person to trigger them by hand.",
-    severity: "low", category: "architecture", icon: "◷",
-  });
+  // catalogue, but a Scheduled Function is just a Deluge function with
+  // category=="Schedule" - confirmed live against a real org - so this reads
+  // functionHealth's schedule counts (sourced from the same function list
+  // the Functions recs above use) instead of always falling back to a
+  // generic, unconfirmed suggestion.
+  if (functionHealth && functionHealth.scheduleTotal > 0) {
+    if (functionHealth.scheduleInactive > 0) {
+      recs.push({
+        id: "schedules",
+        title: `${functionHealth.scheduleInactive} of ${functionHealth.scheduleTotal} Schedules Are Inactive`,
+        description: `${functionHealth.scheduleInactive} Schedule-category function${functionHealth.scheduleInactive !== 1 ? "s are" : " is"} disabled. Last run/next run/frequency aren't exposed by the Functions API, so this can only confirm active state - reactivate what's still needed, or delete the rest.`,
+        severity: "medium", category: "architecture", icon: "◷",
+      });
+    } else {
+      recs.push({
+        id: "schedules",
+        title: `${functionHealth.scheduleTotal} Schedule${functionHealth.scheduleTotal !== 1 ? "s" : ""} Found, All Active`,
+        description: `All ${functionHealth.scheduleTotal} Schedule-category function${functionHealth.scheduleTotal !== 1 ? "s are" : " is"} active. Last run/next run/frequency aren't exposed by the Functions API, so staleness can't be checked - only that they're currently enabled.`,
+        severity: "low", category: "architecture", icon: "◷",
+      });
+    }
+  } else {
+    recs.push({
+      id: "schedules",
+      title: "Use Schedules to Automate Recurring Tasks",
+      description: "Schedules run workflows, functions, or blueprint actions automatically on a recurring cadence - e.g. nightly data cleanup or a weekly digest email - without needing a person to trigger them by hand.",
+      severity: "low", category: "architecture", icon: "◷",
+    });
+  }
 
   return recs;
 }
@@ -1175,113 +1200,101 @@ function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState
 }
 
 // ─── Schedules drill-down ───────────────────────────────────────────────────────
-// useRuleCoverage.ts already fetches a flat schedule *count* for the KPI's
-// collapsed state, but discards the actual items - active/inactive and last-run
-// need the real records, fetched lazily here only once the tile is clicked, same
-// on-demand pattern as useActivityRecords above.
-function scheduleStatusText(item: unknown): string {
-  if (!item || typeof item !== "object") return "";
-  const r = item as Record<string, unknown>;
-  return String(r.status ?? r.Status ?? r.state ?? r.State ?? "").toLowerCase();
+// Zoho's MCP catalogue has no dedicated schedule-listing tool at all (see the
+// old isScheduleTool, permanently false) - but Scheduled Functions in Zoho
+// CRM are just regular Deluge functions with category=="Schedule", and
+// useFunctionRecords below already fetches every function (all categories)
+// eagerly on load. So "Schedules" isn't its own fetch - it's simply that
+// list filtered by category, confirmed live against a real org via
+// getFunctions (787 functions, 12 of them category=="Schedule"). getFunctions
+// never returns last-run/next-run/frequency for any function - "frequency"
+// below is a best-effort guess from the schedule's own name text, always
+// labeled as such, never presented as confirmed API data.
+interface ScheduleBreakdownRow { id: string; name: string; active: boolean; frequency: string; duplicate: boolean; }
+
+// Word-token matched, not a raw substring test - a substring check for "min"
+// would also match "min" inside "Admin" (verified: "Admin Test user Create"
+// and "Admin_Get_Pipeline_and_Put_in_zohoanalytics" both contain "admin" and
+// would false-positive as "Interval" under a naive .includes("min") check,
+// even though neither has anything to do with interval scheduling).
+function deriveScheduleFrequency(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes("daily") || lower.includes("every_day")) return "Daily";
+  if (lower.includes("weekly")) return "Weekly";
+  if (lower.includes("monthly")) return "Monthly";
+  const tokens = lower.split(/[^a-z0-9]+/);
+  const hasIntervalToken = ["min", "mins", "minute", "minutes", "hour", "hours", "hourly"].some(t => tokens.includes(t));
+  if (hasIntervalToken || lower.includes("every_")) return "Interval";
+  return "N/A (not exposed by API)";
 }
 
-function isActiveSchedule(item: unknown): boolean {
-  if (!item || typeof item !== "object") return true;
-  const r = item as Record<string, unknown>;
-  if (r.enabled === false || r.active === false) return false;
-  const s = scheduleStatusText(item);
-  return !(s === "inactive" || s === "disabled" || s === "false" || s === "paused" || s === "stopped");
-}
-
-function scheduleLastRun(item: unknown): string | null {
-  if (!item || typeof item !== "object") return null;
-  const r = item as Record<string, unknown>;
-  const raw = r.last_run_time ?? r.Last_Run_Time ?? r.last_executed_time ?? r.lastRunTime ?? r.last_run ?? r.Last_Run;
-  return typeof raw === "string" && raw.trim() !== "" ? raw : null;
-}
-
-function useScheduleRecords(config: McpConfig | null, tools: McpTool[], active: boolean, onLog: (log: ExecutionLog) => void) {
-  const [state, setState] = useState<ActivityFetchState>(ACTIVITY_FETCH_INIT);
-  const fetchedRef = useRef(false);
-
-  useEffect(() => {
-    if (!active || fetchedRef.current) return;
-    if (!config || tools.length === 0) return;
-    fetchedRef.current = true;
-
-    const scheduleTool = tools.find(t => isScheduleTool(t.name));
-    if (!scheduleTool) {
-      // Surfaces in the Audit Logs panel so it's visible without DevTools -
-      // either the near-miss candidates the regex almost matched (fix the
-      // pattern to include them), or confirmation the server truly has no
-      // schedule-listing tool under any name containing "sched"/"cron"/"recur".
-      const candidates = tools.filter(t => /sched|cron|recur/i.test(t.name)).map(t => t.name);
-      onLog({
-        id: crypto.randomUUID(), tool: "schedule-tool-lookup", input: {},
-        output: { totalToolsConnected: tools.length, possibleScheduleTools: candidates },
-        status: candidates.length > 0 ? "success" : "error",
-        errorMessage: candidates.length > 0 ? undefined : "No connected tool name contains 'sched', 'cron', or 'recur' - this MCP server may not expose schedule data at all.",
-        durationMs: 0, timestamp: new Date(),
-      });
-      setState(prev => ({ ...prev, unavailable: true }));
-      return;
-    }
-
-    void (async () => {
-      setState(prev => ({ ...prev, loading: true }));
-      const pageLoc = findParam(findParamLocations(scheduleTool), /^page$/i);
-      let items: unknown[] = [];
-      for (let page = 1; page <= ACTIVITY_MAX_PAGES; page++) {
-        const start = Date.now();
-        const input: Record<string, unknown> = {};
-        if (page > 1 && pageLoc) setParam(input, pageLoc, page);
-        try {
-          const output = await executeTool(config as McpConfig, scheduleTool.name, input);
-          const pageItems = extractArray(output);
-          items = items.concat(pageItems);
-          onLog({ id: crypto.randomUUID(), tool: scheduleTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
-          if (!pageLoc || pageItems.length === 0) break;
-        } catch (e: unknown) {
-          onLog({ id: crypto.randomUUID(), tool: scheduleTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
-          break;
-        }
-      }
-      setState({ items, loading: false, fetched: true, unavailable: false });
-    })();
-  }, [active, config, tools, onLog]);
-
-  return state;
-}
-
-interface ScheduleBreakdownRow {
-  id: string;
-  name: string;
-  active: boolean;
-  lastRun: string | null;
-}
-
-function computeScheduleBreakdown(items: unknown[]): ScheduleBreakdownRow[] {
-  return items
-    .map((s, i) => ({
-      id: String((s as Record<string, unknown> | null)?.id ?? i),
-      name: getItemName(s, i),
-      active: isActiveSchedule(s),
-      lastRun: scheduleLastRun(s),
+function computeScheduleBreakdown(functionItems: FunctionItem[]): ScheduleBreakdownRow[] {
+  const scheduleFns = functionItems.filter(f => f.category === "Schedule");
+  const nameCounts = new Map<string, number>();
+  for (const f of scheduleFns) {
+    const key = f.name.trim().toLowerCase();
+    if (key) nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+  }
+  return scheduleFns
+    .map(f => ({
+      id: f.id, name: f.name, active: f.active,
+      frequency: deriveScheduleFrequency(f.name),
+      duplicate: (nameCounts.get(f.name.trim().toLowerCase()) ?? 0) > 1,
     }))
-    .sort((a, b) => Number(a.active) - Number(b.active) || Number(!!a.lastRun) - Number(!!b.lastRun));
+    .sort((a, b) => Number(a.active) - Number(b.active));
 }
 
-// "Not used" = inactive, or active but has never actually run - both read as
-// automation nobody would notice if it disappeared.
+// Same "same display name reused elsewhere" signal as duplicateRuleGroups
+// above, but written directly against ScheduleBreakdownRow instead of being
+// forced through RuleRow's module-grouping shape - a schedule has no module
+// to group by, so reporting "(Unknown, Unknown)" the way the rule cards do
+// would be noise rather than signal here.
+function scheduleDuplicateGroups(rows: ScheduleBreakdownRow[]): { name: string; count: number }[] {
+  const byKey = new Map<string, { name: string; count: number }>();
+  for (const r of rows) {
+    const key = r.name.trim().toLowerCase();
+    if (!key) continue;
+    const g = byKey.get(key);
+    if (g) g.count += 1;
+    else byKey.set(key, { name: r.name, count: 1 });
+  }
+  return [...byKey.values()].filter(g => g.count > 1);
+}
+
+function scheduleNameExamples(rows: ScheduleBreakdownRow[], limit = 3): string {
+  const shown = rows.slice(0, limit).map(r => r.name).join(", ");
+  return rows.length > limit ? `e.g. ${shown}, etc.` : `e.g. ${shown}.`;
+}
+
+// Always returns real points (never a bare "all clear" summary) - the
+// never-triggered/trigger-history line is a fixed, always-true explanation
+// (getFunctions exposes no last-run/next-run/frequency field for any
+// function, so trigger history can never be confirmed here, healthy org or
+// not), not something conditional on this org's data the way inactive/
+// duplicate counts are.
 function buildZiaScheduleInsight(rows: ScheduleBreakdownRow[]): ZiaInsight {
-  if (rows.length === 0) return { summary: "No schedules found - nothing to evaluate yet.", points: [] };
-  const inactive = rows.filter(r => !r.active).length;
-  const neverRun = rows.filter(r => r.active && !r.lastRun).length;
-  const points: string[] = [];
-  if (inactive > 0) points.push(cap(`${inactive} schedule${inactive !== 1 ? "s are" : " is"} inactive.`));
-  if (neverRun > 0) points.push(cap(`${neverRun} active schedule${neverRun !== 1 ? "s have" : " has"} never actually run.`));
-  if (points.length === 0) return { summary: "Every schedule is active and has run at least once - nothing sitting unused.", points: [] };
-  return { summary: "", points, action: "These schedules aren't doing anything right now - reactivate what's still needed, or delete the rest so it's not mistaken for working automation." };
+  if (rows.length === 0) return { summary: "No Schedule-category functions found - nothing to evaluate yet.", points: [] };
+  const inactive = rows.filter(r => !r.active);
+  const dupGroups = scheduleDuplicateGroups(rows);
+  const points: string[] = [
+    cap(`Never Triggered can't be confirmed for any schedule here - the Functions API exposes no last-run, next-run, or frequency field, so trigger/execution history is simply not available, not "never fired."`),
+    cap(`Frequency shown per schedule is a best-effort guess from the name text (e.g. "monthly", "every_30_min") - not real API data, since Zoho doesn't expose it. Anything without a naming hint reads as N/A rather than a guessed cadence.`),
+  ];
+  if (inactive.length > 0) {
+    points.push(cap(`${inactive.length} of ${rows.length} schedule${rows.length !== 1 ? "s are" : " is"} inactive - remove or clean these up if they're no longer needed: ${scheduleNameExamples(inactive)}`));
+  }
+  if (dupGroups.length > 0) {
+    points.push(cap(`${dupGroups.length} schedule name${dupGroups.length !== 1 ? "s are" : " is"} reused by more than one function - a duplicate/generic name doesn't fit a schedule, since nobody can tell which job actually ran from the name alone: ${dupGroups.slice(0, 3).map(g => `"${g.name}" (${g.count}x)`).join(", ")}${dupGroups.length > 3 ? ", etc." : "."}`));
+  }
+  if (inactive.length === 0 && dupGroups.length === 0) {
+    points.push(cap(`All ${rows.length} schedule${rows.length !== 1 ? "s are" : " is"} active with unique names.`));
+  }
+  return {
+    summary: "", points,
+    action: (inactive.length > 0 || dupGroups.length > 0)
+      ? "Delete or reactivate the inactive ones, and rename the duplicates so each schedule is unambiguous."
+      : undefined,
+  };
 }
 
 // ─── Functions: list, duplicates, active/inactive, code fetch + analysis ──────
@@ -1794,17 +1807,63 @@ function namedItemExamples(items: unknown[], limit = 3): string {
   return items.length > limit ? `e.g. ${shown}, etc.` : `e.g. ${shown}.`;
 }
 
+// A flattened, uniform shape for one rule/process, shared by all four rule
+// types' drilldown tables and duplicate-name detection below - Layout/
+// Validation Rules arrive grouped one API call per module (see
+// useModuleRuleScan) with no module field on the item itself, while
+// Assignment/Approval Rules arrive as one flat list with the module nested
+// on each item, so each type needs its own conversion into this common shape.
+interface RuleRow { item: unknown; name: string; module: string; active: boolean; }
+
+function itemsToRuleRows(items: unknown[]): RuleRow[] {
+  return items.map((item, idx) => ({ item, name: getItemName(item, idx), module: workflowModuleLabel(item), active: isActiveWorkflow(item) }));
+}
+
+function moduleGroupsToRuleRows(perModule: ModuleRuleGroup[]): RuleRow[] {
+  return perModule.flatMap(m => m.items.map((item, idx) => ({ item, name: getItemName(item, idx), module: m.apiName, active: isActiveWorkflow(item) })));
+}
+
+// Same "same display name reused elsewhere" signal Workflows already flags
+// (see computeWorkflowDuplicateGroups above) - shared here across the four
+// rule types instead of four near-identical copies. Case-insensitive and
+// org-wide rather than scoped to one module: the earlier full-org rules
+// audit found layout rules literally named "HIDE"/"Hide"/"hide" reused
+// across three unrelated modules, which is exactly this kind of duplicate -
+// scoping to "within the same module only" would have missed it entirely.
+function duplicateRuleGroups(rows: RuleRow[]): { name: string; modules: string[] }[] {
+  const byKey = new Map<string, { name: string; modules: string[] }>();
+  for (const r of rows) {
+    const key = r.name.trim().toLowerCase();
+    if (!key) continue;
+    const g = byKey.get(key);
+    if (g) g.modules.push(r.module || "Unknown");
+    else byKey.set(key, { name: r.name, modules: [r.module || "Unknown"] });
+  }
+  return [...byKey.values()].filter(g => g.modules.length > 1);
+}
+
+function duplicateRuleNameSet(groups: { name: string }[]): Set<string> {
+  return new Set(groups.map(g => g.name.trim().toLowerCase()));
+}
+
+function duplicateGroupExamples(groups: { name: string; modules: string[] }[], limit = 3): string {
+  const shown = groups.slice(0, limit).map(g => `"${g.name}" (${g.modules.join(", ")})`).join("; ");
+  return groups.length > limit ? `e.g. ${shown}, etc.` : `${shown}.`;
+}
+
 function buildZiaLayoutRuleInsight(perModule: ModuleRuleGroup[], scanned: boolean): ZiaInsight {
   if (!scanned) return { summary: "Layout rules haven't finished scanning yet.", points: [] };
   const all = perModule.flatMap(m => m.items);
   if (all.length === 0) return { summary: "No custom layout rules found across the modules scanned.", points: [] };
   const inactive = all.filter(i => !isActiveWorkflow(i));
   const allInactiveModules = perModule.filter(m => m.items.length > 0 && m.items.every(i => !isActiveWorkflow(i)));
+  const dupGroups = duplicateRuleGroups(moduleGroupsToRuleRows(perModule));
   const points: string[] = [];
   if (inactive.length > 0) points.push(cap(`${inactive.length} of ${all.length} layout rule${all.length !== 1 ? "s are" : " is"} inactive.`));
   if (allInactiveModules.length > 0) points.push(cap(`${allInactiveModules.length} module${allInactiveModules.length !== 1 ? "s have" : " has"} layout rules configured but none currently active - ${allInactiveModules.slice(0, 3).map(m => m.apiName).join(", ")}${allInactiveModules.length > 3 ? ", etc." : "."}`));
-  if (points.length === 0) return { summary: `All ${all.length} layout rule${all.length !== 1 ? "s are" : " is"} active across ${perModule.filter(m => m.items.length > 0).length} module${perModule.filter(m => m.items.length > 0).length !== 1 ? "s" : ""} - looks healthy.`, points: [] };
-  return { summary: "", points, action: "Reactivate the ones still needed, or delete the rest so layout behavior stays easy to audit." };
+  if (dupGroups.length > 0) points.push(cap(`${dupGroups.length} rule name${dupGroups.length !== 1 ? "s are" : " is"} reused across more than one module - ${duplicateGroupExamples(dupGroups)}`));
+  if (points.length === 0) return { summary: `All ${all.length} layout rule${all.length !== 1 ? "s are" : " is"} active across ${perModule.filter(m => m.items.length > 0).length} module${perModule.filter(m => m.items.length > 0).length !== 1 ? "s" : ""} with no duplicate names - looks healthy.`, points: [] };
+  return { summary: "", points, action: "Reactivate the ones still needed, rename or delete the duplicates, and clear out the rest so layout behavior stays easy to audit." };
 }
 
 function buildZiaValidationRuleInsight(perModule: ModuleRuleGroup[], scanned: boolean): ZiaInsight {
@@ -1813,21 +1872,24 @@ function buildZiaValidationRuleInsight(perModule: ModuleRuleGroup[], scanned: bo
   if (all.length === 0) return { summary: "No custom validation rules found across the modules scanned - nothing is enforcing data quality at the field level.", points: [] };
   const inactive = all.filter(i => !isActiveWorkflow(i));
   const allInactiveModules = perModule.filter(m => m.items.length > 0 && m.items.every(i => !isActiveWorkflow(i)));
+  const dupGroups = duplicateRuleGroups(moduleGroupsToRuleRows(perModule));
   const points: string[] = [];
   if (inactive.length > 0) points.push(cap(`${inactive.length} of ${all.length} validation rule${all.length !== 1 ? "s are" : " is"} inactive - data can save without whatever check that rule was meant to enforce.`));
   if (allInactiveModules.length > 0) points.push(cap(`${allInactiveModules.length} module${allInactiveModules.length !== 1 ? "s have" : " has"} validation rules configured but none currently active - ${allInactiveModules.slice(0, 3).map(m => m.apiName).join(", ")}${allInactiveModules.length > 3 ? ", etc." : "."}`));
-  if (points.length === 0) return { summary: `All ${all.length} validation rule${all.length !== 1 ? "s are" : " is"} active across ${perModule.filter(m => m.items.length > 0).length} module${perModule.filter(m => m.items.length > 0).length !== 1 ? "s" : ""} - data quality enforcement looks healthy.`, points: [] };
-  return { summary: "", points, action: "Reactivate the ones still needed, or delete the rest so a passing record actually means what the rule implies." };
+  if (dupGroups.length > 0) points.push(cap(`${dupGroups.length} rule name${dupGroups.length !== 1 ? "s are" : " is"} reused across more than one module - ${duplicateGroupExamples(dupGroups)}`));
+  if (points.length === 0) return { summary: `All ${all.length} validation rule${all.length !== 1 ? "s are" : " is"} active across ${perModule.filter(m => m.items.length > 0).length} module${perModule.filter(m => m.items.length > 0).length !== 1 ? "s" : ""} with no duplicate names - data quality enforcement looks healthy.`, points: [] };
+  return { summary: "", points, action: "Reactivate the ones still needed, rename or delete the duplicates, and clear out the rest so a passing record actually means what the rule implies." };
 }
 
 // Assignment rules carry no active/enabled flag at all on any known Zoho MCP
 // server response - unlike every other rule type here, so this deliberately
 // never frames them as "active/inactive" (that would just be reporting
 // isActiveWorkflow's default-true fallback as if it were real data). Instead
-// this flags coverage and same-module concentration, which the raw list can
-// actually support.
+// this flags coverage, same-module concentration, and duplicate names, which
+// the raw list can actually support.
 function buildZiaAssignmentRuleInsight(items: unknown[]): ZiaInsight {
   if (items.length === 0) return { summary: "No custom assignment rules found - new records rely on default/manual owner assignment everywhere.", points: [] };
+  const rows = itemsToRuleRows(items);
   const byModule = new Map<string, unknown[]>();
   items.forEach((item, i) => {
     const mod = workflowModuleLabel(item) || "Unknown";
@@ -1835,21 +1897,25 @@ function buildZiaAssignmentRuleInsight(items: unknown[]): ZiaInsight {
     void i;
   });
   const crowded = [...byModule.entries()].filter(([, v]) => v.length >= 3).sort((a, b) => b[1].length - a[1].length);
+  const dupGroups = duplicateRuleGroups(rows);
   const points: string[] = [];
   points.push(cap(`${items.length} assignment rule${items.length !== 1 ? "s span" : " spans"} ${byModule.size} module${byModule.size !== 1 ? "s" : ""} - ${[...byModule.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 3).map(([m, v]) => `${m} (${v.length})`).join(", ")}${byModule.size > 3 ? ", etc." : "."}`));
+  if (dupGroups.length > 0) points.push(cap(`${dupGroups.length} rule name${dupGroups.length !== 1 ? "s are" : " is"} reused across more than one module - ${duplicateGroupExamples(dupGroups)}`));
   if (crowded.length > 0) points.push(cap(`${crowded.map(([m]) => m).join(", ")} ${crowded.length !== 1 ? "each carry" : "carries"} 3+ assignment rules - worth confirming their criteria don't overlap, since only the first matching rule assigns the record.`));
-  return { summary: "", points, action: crowded.length > 0 ? "Review the crowded modules' rule order and criteria for real conflicts." : undefined };
+  return { summary: "", points, action: (crowded.length > 0 || dupGroups.length > 0) ? "Rename or delete the duplicates, and review the crowded modules' rule order and criteria for real conflicts." : undefined };
 }
 
 function buildZiaApprovalRuleInsight(items: unknown[]): ZiaInsight {
   if (items.length === 0) return { summary: "No custom approval processes found - records save without an approval step anywhere in the org.", points: [] };
   const inactive = items.filter(i => !isActiveWorkflow(i));
   const emptyRules = items.filter(i => Number((i as Record<string, unknown> | null)?.rules_count ?? 0) === 0);
+  const dupGroups = duplicateRuleGroups(itemsToRuleRows(items));
   const points: string[] = [];
   if (inactive.length > 0) points.push(cap(`${inactive.length} of ${items.length} approval process${items.length !== 1 ? "es are" : " is"} inactive - configured but not currently enforcing anything: ${namedItemExamples(inactive)}`));
   if (emptyRules.length > 0) points.push(cap(`${emptyRules.length} approval process${emptyRules.length !== 1 ? "es have" : " has"} zero rules configured, so it can never actually trigger: ${namedItemExamples(emptyRules)}`));
-  if (points.length === 0) return { summary: `All ${items.length} approval process${items.length !== 1 ? "es are" : " is"} active with at least one rule - approval enforcement looks healthy.`, points: [] };
-  return { summary: "", points, action: "Reactivate the ones still needed, or delete the rest so the approval trail stays trustworthy." };
+  if (dupGroups.length > 0) points.push(cap(`${dupGroups.length} process name${dupGroups.length !== 1 ? "s are" : " is"} reused across more than one module - ${duplicateGroupExamples(dupGroups)}`));
+  if (points.length === 0) return { summary: `All ${items.length} approval process${items.length !== 1 ? "es are" : " is"} active with at least one rule and no duplicate names - approval enforcement looks healthy.`, points: [] };
+  return { summary: "", points, action: "Reactivate the ones still needed, rename or delete the duplicates, and clear out the rest so the approval trail stays trustworthy." };
 }
 
 interface WorkflowDetailState { criteria: unknown; actions: unknown; unavailable: boolean; }
@@ -1981,6 +2047,7 @@ function buildFunctionZiaSummary(
 }
 
 interface FunctionKpiSummary { total: number; active: number; inactive: number; fetched: boolean; }
+interface ScheduleKpiSummary { total: number; active: number; fetched: boolean; }
 
 // "Total CRM Items"/"total items across N sources" sums every entity's raw
 // item count - except modules, where the raw count includes Zoho's internal
@@ -2000,7 +2067,7 @@ function kpiSource(state: EntityState, count: number): string {
   return state.toolUsed ? `Source: ${state.toolUsed} - ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found for this data";
 }
 
-function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverage: RuleCoverage | null, functionSummary: FunctionKpiSummary): KpiItem[] {
+function computeKpis(entityData: Record<CrmEntityType, EntityState>, functionSummary: FunctionKpiSummary, scheduleSummary: ScheduleKpiSummary): KpiItem[] {
   const modules = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
   const blueprints = entityData.blueprints.items;
   const users = entityData.users.items;
@@ -2054,16 +2121,19 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, ruleCoverag
       source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} - fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
     },
     {
-      // No MCP tool exists for listing schedules at all (not in Zoho's real
-      // catalogue) - this must read the same as any other "couldn't verify"
-      // tile (a dash, not a number), never a fake "0"/"1" from a
-      // spuriously-loose tool-name match.
-      key: "schedules", label: "Schedules", value: 0,
-      severity: "unknown",
-      note: ruleCoverage === null ? "Loading…" : "Couldn't verify: no matching tool found",
-      clickable: false,
-      unknown: ruleCoverage !== null,
-      source: "Source: no matching tool found",
+      // No dedicated schedule-listing tool exists anywhere in Zoho's real MCP
+      // catalogue, but Scheduled Functions are just Deluge functions with
+      // category=="Schedule" - confirmed live against a real org (787
+      // functions, 12 category=="Schedule") - so this rides the same
+      // eagerly-fetched function list the Functions tile below already uses,
+      // instead of the old permanent "couldn't verify" placeholder.
+      key: "schedules", label: "Schedules", value: scheduleSummary.active,
+      severity: !scheduleSummary.fetched ? "warning" : scheduleSummary.total === 0 ? "critical" : (scheduleSummary.total - scheduleSummary.active) > 0 ? "warning" : "good",
+      note: !scheduleSummary.fetched ? "Loading…"
+        : scheduleSummary.total === 0 ? "No Schedule-category functions found"
+        : `${scheduleSummary.total - scheduleSummary.active} inactive of ${scheduleSummary.total} - click to see which`,
+      clickable: scheduleSummary.total > 0,
+      source: `Source: function list, filtered to category=="Schedule" - ${scheduleSummary.total} record${scheduleSummary.total !== 1 ? "s" : ""}`,
     },
     {
       key: "functions", label: "Functions", value: functionSummary.active,
@@ -2309,6 +2379,15 @@ function ModuleRuleScanPanel({ title, ziaTitle, ziaInsight, scan, search, onSear
   matchesSearch: (...values: (string | null | undefined)[]) => boolean;
   onClose: () => void;
 }) {
+  // Local, not lifted to the parent like drilldownSearch - each of the two
+  // panels using this component (Layout/Validation Rules) unmounts when its
+  // card closes, so a fresh "all" filter on reopen is the right default
+  // rather than something that needs to persist across cards.
+  const [filter, setFilter] = useState<"all" | "active" | "inactive" | "duplicate">("all");
+  const rows = moduleGroupsToRuleRows(scan.perModule);
+  const dupNames = duplicateRuleNameSet(duplicateRuleGroups(rows));
+  const activeCount = rows.filter(r => r.active).length;
+  const duplicateCount = rows.filter(r => dupNames.has(r.name.trim().toLowerCase())).length;
   return (
     <div className="kpi-drilldown">
       <div className="kpi-drilldown-header">
@@ -2335,23 +2414,46 @@ function ModuleRuleScanPanel({ title, ziaTitle, ziaInsight, scan, search, onSear
           <input
             type="text"
             className="kpi-drilldown-search"
-            placeholder="Search modules…"
+            placeholder="Search rules…"
             value={search}
             onChange={e => onSearchChange(e.target.value)}
           />
+          <div className="kpi-drilldown-summary">
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${filter === "active" ? "selected" : ""}`}
+              onClick={() => setFilter(prev => (prev === "active" ? "all" : "active"))}
+            >
+              {activeCount} Active
+            </button>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${filter === "inactive" ? "selected" : ""}`}
+              onClick={() => setFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+            >
+              {rows.length - activeCount} Inactive
+            </button>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${filter === "duplicate" ? "selected" : ""}`}
+              onClick={() => setFilter(prev => (prev === "duplicate" ? "all" : "duplicate"))}
+            >
+              {duplicateCount} Duplicate
+            </button>
+            {filter !== "all" && (
+              <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setFilter("all")}>Show All</button>
+            )}
+          </div>
           <div className="kpi-drilldown-table kpi-drilldown-table-single">
-            {scan.perModule.filter(m => matchesSearch(m.apiName)).map(m => {
-              const active = m.items.filter(isActiveWorkflow).length;
-              const inactive = m.items.length - active;
-              return (
-                <div key={m.apiName} className="kpi-drilldown-row">
-                  <span className="kpi-drilldown-module">{m.apiName}</span>
-                  <span className="kpi-drilldown-badge neutral">{m.items.length} rule{m.items.length !== 1 ? "s" : ""}</span>
-                  {active > 0 && <span className="kpi-drilldown-badge status-active">{active} active</span>}
-                  {inactive > 0 && <span className="kpi-drilldown-badge status-inactive">{inactive} inactive</span>}
+            {rows
+              .map(row => ({ ...row, duplicate: dupNames.has(row.name.trim().toLowerCase()) }))
+              .filter(row => filter === "all" || (filter === "duplicate" ? row.duplicate : (filter === "active") === row.active))
+              .filter(row => matchesSearch(row.name, row.module))
+              .map((row, idx) => (
+                <div key={row.module + row.name + idx} className="kpi-drilldown-row">
+                  <span className="kpi-drilldown-name">{row.name}</span>
+                  <span className="kpi-drilldown-module">{row.module || "-"}</span>
+                  {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip="Same rule name used elsewhere in the org">duplicate</span>}
+                  <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
                 </div>
-              );
-            })}
+              ))}
           </div>
           <div className="zia-rec zia-rec-medium activity-zia-rec">
             <div className="zia-rec-header">
@@ -2397,6 +2499,17 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                | "pipelines" | "workflows" | "profiles" | "activity";
   const [selectedCard, setSelectedCard] = useState<CardKey | null>("modules");
   const detailPanelRef = useRef<HTMLDivElement>(null);
+  // Lets a Downloadable Reports card's preview item/"+N more" jump straight
+  // to that item's full entry in the Zia Recommendations panel below,
+  // instead of just sitting there inert - opens the matching tab, expands
+  // the list (so a rec past the collapsed height isn't hidden right after
+  // scrolling to it), and scrolls only that panel into view.
+  const ziaRecsSectionRef = useRef<HTMLDivElement>(null);
+  function jumpToRecommendations(cat: ReportTab) {
+    setActiveTab(cat);
+    setZiaRecsExpanded(true);
+    ziaRecsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   const isFirstCardRender = useRef(true);
   useEffect(() => {
     // Cards further down the left-hand list can sit well below the fold;
@@ -2411,7 +2524,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
   const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never" | "long-trigger" | "duplicate" | "overlapping">("all");
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
-  const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
   const workflowDetails = useWorkflowDetails(config, tools, entityData.workflows.items, selectedCard === "workflows", onLog);
   // Unlike Schedules/Functions/Workflows above (deliberately deferred until
@@ -2424,8 +2536,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // scan every module" until they do.
   const layoutRuleScan = useModuleRuleScan(config, tools, entityData.modules.items, /getlayoutrules$/i, true, onLog);
   const validationRuleScan = useModuleRuleScan(config, tools, entityData.modules.items, /getvalidationrules$/i, true, onLog);
-  const [assignmentRuleFilter, setAssignmentRuleFilter] = useState<"all" | "active" | "inactive">("all");
-  const [approvalRuleFilter, setApprovalRuleFilter] = useState<"all" | "active" | "inactive">("all");
+  const [assignmentRuleFilter, setAssignmentRuleFilter] = useState<"all" | "active" | "inactive" | "duplicate">("all");
+  const [approvalRuleFilter, setApprovalRuleFilter] = useState<"all" | "active" | "inactive" | "duplicate">("all");
   // Duplicate-name groups show their matched functions immediately, same as
   // the Workflow card's "Duplicate Match Details" panel (expanded by default)
   // - this tracks which groups a user has manually collapsed, rather than
@@ -2613,6 +2725,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const functionActiveCount = functionRecords.items.filter(f => f.active).length;
   const functionInactiveCount = functionRecords.items.length - functionActiveCount;
   const functionSuspiciousNames = functionRecords.items.filter(f => SUSPICIOUS_FUNCTION_NAME.test(f.name.trim())).map(f => f.name);
+  // Cheap - just a filter over the already-eagerly-fetched function list, not
+  // a separate fetch - so unlike moduleBreakdown/blueprintBreakdown/
+  // userBreakdown below, this doesn't need to be gated behind selectedCard.
+  const scheduleBreakdown = computeScheduleBreakdown(functionRecords.items);
   // Adapter so generateRecommendations (unchanged below) keeps reading the
   // same FunctionHealth shape it always has - now sourced from the new hook's
   // full items instead of the old names-only fetch, so duplicate/suspicious
@@ -2624,6 +2740,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     suspiciousNames: functionSuspiciousNames,
     failuresChecked: functionRecords.failureCount !== null,
     failureCount: functionRecords.failureCount ?? 0,
+    scheduleTotal: scheduleBreakdown.length,
+    scheduleInactive: scheduleBreakdown.filter(r => !r.active).length,
   } : null;
 
   const recommendations = generateRecommendations(entityData, tools, ruleCoverage, functionHealth);
@@ -2636,14 +2754,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const loadedCount = CRM_ENTITIES.filter(e => entityData[e.type].lastFetched !== null).length;
   const ziaTool = findZiaTool(tools);
 
-  const kpis = computeKpis(entityData, ruleCoverage, {
+  const kpis = computeKpis(entityData, {
     total: functionRecords.items.length, active: functionActiveCount, inactive: functionInactiveCount,
+    fetched: functionRecords.listState.fetched,
+  }, {
+    total: scheduleBreakdown.length, active: scheduleBreakdown.filter(r => r.active).length,
     fetched: functionRecords.listState.fetched,
   });
   const moduleBreakdown = selectedCard === "modules" ? computeModuleBreakdown(entityData) : [];
   const blueprintBreakdown = selectedCard === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
-  const scheduleBreakdown = selectedCard === "schedules" ? computeScheduleBreakdown(scheduleRecords.items) : [];
-  const ziaScheduleInsight = selectedCard === "schedules" ? buildZiaScheduleInsight(scheduleBreakdown) : null;
+  const ziaScheduleInsight = buildZiaScheduleInsight(scheduleBreakdown);
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
 
   // Metadata issues (e.g. missing description) come straight from the
@@ -3321,16 +3441,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "schedules" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Schedules: Active / Inactive / Last Run</h4>
+            <h4>Schedules (Schedule-category Functions)</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
-          {scheduleRecords.unavailable && (
-            <p className="business-view-hint">No schedule-listing tool is connected - schedule activity can't be checked from here.</p>
-          )}
-          {scheduleRecords.loading && (
-            <p className="kpi-drilldown-progress"><span className="spinner" /> Fetching schedules…</p>
-          )}
-          {!scheduleRecords.unavailable && !scheduleRecords.loading && scheduleRecords.fetched && (
+          {!functionRecords.listState.fetched ? (
+            <p className="kpi-drilldown-progress"><span className="spinner" /> Fetching functions…</p>
+          ) : scheduleBreakdown.length === 0 ? (
+            <p className="business-view-hint">No Schedule-category functions found.</p>
+          ) : (
             <>
               <input
                 type="text"
@@ -3342,26 +3460,25 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <div className="kpi-drilldown-summary">
                 <span className="kpi-drilldown-stat good">{scheduleBreakdown.filter(r => r.active).length} Active</span>
                 <span className="kpi-drilldown-stat bad">{scheduleBreakdown.filter(r => !r.active).length} Inactive</span>
-                <span className="kpi-drilldown-stat neutral">{scheduleBreakdown.filter(r => !r.lastRun).length} Never Run</span>
               </div>
-              <div className="kpi-drilldown-table">
+              <div className="kpi-drilldown-table kpi-drilldown-table-single">
                 {scheduleBreakdown.filter(row => matchesSearch(row.name)).map(row => (
                   <div key={row.id} className="kpi-drilldown-row">
                     <span className="kpi-drilldown-name">{row.name}</span>
-                    <span className={`kpi-drilldown-date ${!row.lastRun ? "never" : ""}`}>{formatLastTriggered(row.lastRun)}</span>
+                    <span className="kpi-drilldown-badge status-hidden" data-tooltip="Not exposed by the Functions API - guessed from the schedule's own name text (e.g. 'monthly', 'every_30_min'). Never a confirmed value.">Frequency: {row.frequency}</span>
+                    <span className="kpi-drilldown-badge status-hidden" data-tooltip="Not exposed by the Functions API - there's no last-run/execution-history field, so this can't be confirmed true or false.">Never Triggered: Unknown</span>
+                    {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip="Same schedule name used by another function - can't tell which job actually ran from the name alone.">Duplicate</span>}
                     <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
                   </div>
                 ))}
               </div>
-              {ziaScheduleInsight && (
-                <div className="zia-rec zia-rec-medium activity-zia-rec">
-                  <div className="zia-rec-header">
-                    <span className="zia-rec-icon">✦</span>
-                    <span className="zia-rec-title">Zia Recommendation - Unused Schedules</span>
-                  </div>
-                  <ZiaRecBody {...ziaScheduleInsight} />
+              <div className="zia-rec zia-rec-medium activity-zia-rec">
+                <div className="zia-rec-header">
+                  <span className="zia-rec-icon">✦</span>
+                  <span className="zia-rec-title">Zia Recommendation - Schedules</span>
                 </div>
-              )}
+                <ZiaRecBody {...ziaScheduleInsight} />
+              </div>
             </>
           )}
         </div>
@@ -3876,36 +3993,51 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               value={drilldownSearch}
               onChange={e => setDrilldownSearch(e.target.value)}
             />
-            <div className="kpi-drilldown-summary">
-              <button
-                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${assignmentRuleFilter === "active" ? "selected" : ""}`}
-                onClick={() => setAssignmentRuleFilter(prev => (prev === "active" ? "all" : "active"))}
-              >
-                {entityData.assignmentRules.items.filter(isActiveWorkflow).length} Active
-              </button>
-              <button
-                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${assignmentRuleFilter === "inactive" ? "selected" : ""}`}
-                onClick={() => setAssignmentRuleFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
-              >
-                {entityData.assignmentRules.items.filter(i => !isActiveWorkflow(i)).length} Inactive
-              </button>
-              {assignmentRuleFilter !== "all" && (
-                <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setAssignmentRuleFilter("all")}>Show All</button>
-              )}
-            </div>
-            <div className="kpi-drilldown-table kpi-drilldown-table-single">
-              {entityData.assignmentRules.items
-                .map((item, idx) => ({ item, name: getItemName(item, idx), module: workflowModuleLabel(item), active: isActiveWorkflow(item) }))
-                .filter(row => assignmentRuleFilter === "all" || (assignmentRuleFilter === "active") === row.active)
-                .filter(row => matchesSearch(row.name, row.module))
-                .map((row, idx) => (
-                  <div key={row.name + idx} className="kpi-drilldown-row">
-                    <span className="kpi-drilldown-name">{row.name}</span>
-                    <span className="kpi-drilldown-module">{row.module || "-"}</span>
-                    <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
-                  </div>
-                ))}
-            </div>
+            {(() => {
+              const assignmentRuleRows = itemsToRuleRows(entityData.assignmentRules.items);
+              const assignmentDupNames = duplicateRuleNameSet(duplicateRuleGroups(assignmentRuleRows));
+              return (
+                <>
+                <div className="kpi-drilldown-summary">
+                  <button
+                    className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${assignmentRuleFilter === "active" ? "selected" : ""}`}
+                    onClick={() => setAssignmentRuleFilter(prev => (prev === "active" ? "all" : "active"))}
+                  >
+                    {assignmentRuleRows.filter(r => r.active).length} Active
+                  </button>
+                  <button
+                    className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${assignmentRuleFilter === "inactive" ? "selected" : ""}`}
+                    onClick={() => setAssignmentRuleFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+                  >
+                    {assignmentRuleRows.filter(r => !r.active).length} Inactive
+                  </button>
+                  <button
+                    className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${assignmentRuleFilter === "duplicate" ? "selected" : ""}`}
+                    onClick={() => setAssignmentRuleFilter(prev => (prev === "duplicate" ? "all" : "duplicate"))}
+                  >
+                    {assignmentRuleRows.filter(r => assignmentDupNames.has(r.name.trim().toLowerCase())).length} Duplicate
+                  </button>
+                  {assignmentRuleFilter !== "all" && (
+                    <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setAssignmentRuleFilter("all")}>Show All</button>
+                  )}
+                </div>
+                <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                  {assignmentRuleRows
+                    .map(row => ({ ...row, duplicate: assignmentDupNames.has(row.name.trim().toLowerCase()) }))
+                    .filter(row => assignmentRuleFilter === "all" || (assignmentRuleFilter === "duplicate" ? row.duplicate : (assignmentRuleFilter === "active") === row.active))
+                    .filter(row => matchesSearch(row.name, row.module))
+                    .map((row, idx) => (
+                      <div key={row.name + idx} className="kpi-drilldown-row">
+                        <span className="kpi-drilldown-name">{row.name}</span>
+                        <span className="kpi-drilldown-module">{row.module || "-"}</span>
+                        {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip="Same rule name used elsewhere in the org">duplicate</span>}
+                        <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+                      </div>
+                    ))}
+                </div>
+                </>
+              );
+            })()}
             <div className="zia-rec zia-rec-medium activity-zia-rec">
               <div className="zia-rec-header">
                 <span className="zia-rec-icon">✦</span>
@@ -3935,36 +4067,51 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               value={drilldownSearch}
               onChange={e => setDrilldownSearch(e.target.value)}
             />
-            <div className="kpi-drilldown-summary">
-              <button
-                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${approvalRuleFilter === "active" ? "selected" : ""}`}
-                onClick={() => setApprovalRuleFilter(prev => (prev === "active" ? "all" : "active"))}
-              >
-                {entityData.approvalRules.items.filter(isActiveWorkflow).length} Active
-              </button>
-              <button
-                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${approvalRuleFilter === "inactive" ? "selected" : ""}`}
-                onClick={() => setApprovalRuleFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
-              >
-                {entityData.approvalRules.items.filter(i => !isActiveWorkflow(i)).length} Inactive
-              </button>
-              {approvalRuleFilter !== "all" && (
-                <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setApprovalRuleFilter("all")}>Show All</button>
-              )}
-            </div>
-            <div className="kpi-drilldown-table kpi-drilldown-table-single">
-              {entityData.approvalRules.items
-                .map((item, idx) => ({ item, name: getItemName(item, idx), module: workflowModuleLabel(item), active: isActiveWorkflow(item) }))
-                .filter(row => approvalRuleFilter === "all" || (approvalRuleFilter === "active") === row.active)
-                .filter(row => matchesSearch(row.name, row.module))
-                .map((row, idx) => (
-                  <div key={row.name + idx} className="kpi-drilldown-row">
-                    <span className="kpi-drilldown-name">{row.name}</span>
-                    <span className="kpi-drilldown-module">{row.module || "-"}</span>
-                    <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
-                  </div>
-                ))}
-            </div>
+            {(() => {
+              const approvalRuleRows = itemsToRuleRows(entityData.approvalRules.items);
+              const approvalDupNames = duplicateRuleNameSet(duplicateRuleGroups(approvalRuleRows));
+              return (
+                <>
+                <div className="kpi-drilldown-summary">
+                  <button
+                    className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${approvalRuleFilter === "active" ? "selected" : ""}`}
+                    onClick={() => setApprovalRuleFilter(prev => (prev === "active" ? "all" : "active"))}
+                  >
+                    {approvalRuleRows.filter(r => r.active).length} Active
+                  </button>
+                  <button
+                    className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${approvalRuleFilter === "inactive" ? "selected" : ""}`}
+                    onClick={() => setApprovalRuleFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+                  >
+                    {approvalRuleRows.filter(r => !r.active).length} Inactive
+                  </button>
+                  <button
+                    className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${approvalRuleFilter === "duplicate" ? "selected" : ""}`}
+                    onClick={() => setApprovalRuleFilter(prev => (prev === "duplicate" ? "all" : "duplicate"))}
+                  >
+                    {approvalRuleRows.filter(r => approvalDupNames.has(r.name.trim().toLowerCase())).length} Duplicate
+                  </button>
+                  {approvalRuleFilter !== "all" && (
+                    <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setApprovalRuleFilter("all")}>Show All</button>
+                  )}
+                </div>
+                <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                  {approvalRuleRows
+                    .map(row => ({ ...row, duplicate: approvalDupNames.has(row.name.trim().toLowerCase()) }))
+                    .filter(row => approvalRuleFilter === "all" || (approvalRuleFilter === "duplicate" ? row.duplicate : (approvalRuleFilter === "active") === row.active))
+                    .filter(row => matchesSearch(row.name, row.module))
+                    .map((row, idx) => (
+                      <div key={row.name + idx} className="kpi-drilldown-row">
+                        <span className="kpi-drilldown-name">{row.name}</span>
+                        <span className="kpi-drilldown-module">{row.module || "-"}</span>
+                        {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip="Same process name used elsewhere in the org">duplicate</span>}
+                        <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+                      </div>
+                    ))}
+                </div>
+                </>
+              );
+            })()}
             <div className="zia-rec zia-rec-medium activity-zia-rec">
               <div className="zia-rec-header">
                 <span className="zia-rec-icon">✦</span>
@@ -4101,7 +4248,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       </div>
 
       {/* ── Zia Recommendations ─────────────────────────────────────────────── */}
-      <div className="crm-recs-section">
+      <div className="crm-recs-section" ref={ziaRecsSectionRef}>
         <div className="crm-right">
           <div className="crm-right-header">
             <p className="crm-panel-label">Zia Recommendations</p>
@@ -4266,13 +4413,19 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 </div>
                 <ul className="crm-report-preview">
                   {catRecs.slice(0, 3).map(r => (
-                    <li key={r.id} className="crm-report-preview-item">
-                      <span className={`crm-dot dot-${r.severity}`} />
-                      <span className="crm-report-preview-text">{r.title}</span>
+                    <li key={r.id}>
+                      <button type="button" className="crm-report-preview-item crm-report-preview-item-clickable" onClick={() => jumpToRecommendations(cat)}>
+                        <span className={`crm-dot dot-${r.severity}`} />
+                        <span className="crm-report-preview-text">{r.title}</span>
+                      </button>
                     </li>
                   ))}
                   {catRecs.length > 3 && (
-                    <li className="crm-report-more">+{catRecs.length - 3} more items</li>
+                    <li>
+                      <button type="button" className="crm-report-more crm-report-more-clickable" onClick={() => jumpToRecommendations(cat)}>
+                        +{catRecs.length - 3} more items
+                      </button>
+                    </li>
                   )}
                 </ul>
                 <button className="btn-secondary crm-report-btn" onClick={() => downloadReport(cat)}>

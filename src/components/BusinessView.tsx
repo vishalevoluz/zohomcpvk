@@ -92,7 +92,6 @@ function IssueCard({
               Effort: {action.effort}
             </span>
             <span className="owner-badge">Owner: {action.owner}</span>
-            <span className="time-badge">{action.timeToValue}</span>
           </div>
         </div>
       )}
@@ -120,7 +119,7 @@ function IssueCard({
           </div>
           {action && (
             <p className="priority-action-detail-owner">
-              Best handled by <strong>{action.owner}</strong> - usually takes about {action.timeToValue}.
+              Best handled by <strong>{action.owner}</strong>.
             </p>
           )}
         </div>

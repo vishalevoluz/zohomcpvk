@@ -24,12 +24,25 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     // below DO exist on this org's MCP server - required alongside the rest
     // instead of being tucked away as merely "nice to have."
     // deleteApprovalProcess is deliberately left out - this wizard only lists
-    // tools the audit actually reads from, never mutation tools.
+    // tools the audit actually reads from, never mutation tools. Same reason
+    // createZiaRecommendation/createZiaSimilarity were removed from this list -
+    // both are create-only (no matching read/list tool exists anywhere in
+    // Zoho's real catalogue, see the Zia Recommendation audit gap noted
+    // elsewhere), nothing in this app ever calls either one, and a user
+    // reported enabling them didn't even make them show as available in the
+    // MCP console's own tool picker - the same "showed red forever" problem
+    // getScheduledJobs/getEmailTemplates/etc. had above.
     // Note: WorkflowAudit.tsx's "Connected" tab separately gates itself on a
     // flat "getConnectedWorkflows" list tool that isn't in this org's real
     // catalogue (only the module-scoped getConnectedWorkflowRules is), so
     // that tab may still read as unavailable even with these enabled until
     // that gate is fixed to use the real tool.
+    // The four Zia Conversation Summary / Session tools below are a
+    // deliberate exception to the "never mutation tools" rule above - added
+    // by explicit request ahead of any feature actually calling them yet
+    // (unlike createZiaRecommendation/createZiaSimilarity, which were removed
+    // for being unused). If no dashboard feature ends up reading/writing
+    // through them, revisit removing these the same way.
     label: "Core structure & automation (required)",
     tools: [
       "ZohoCRM_getModules", "ZohoCRM_getFields", "ZohoCRM_getLayouts", "ZohoCRM_getWorkflowRules",
@@ -48,7 +61,8 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
       "ZohoCRM_getConnectedWorkflowRules", "ZohoCRM_getConnectedWorkflowRuleById",
       "ZohoCRM_getConnectedWorkflowById", "ZohoCRM_getConnectedWorkflowConfigurations",
       "ZohoCRM_getConnectedWorkflowActionsCount",
-      "ZohoCRM_createZiaRecommendation", "ZohoCRM_createZiaSimilarity",
+      "ZohoCRM_generateZiaConversationSummary", "ZohoCRM_getZiaConversationSummary",
+      "ZohoCRM_getZiaSessionMessages", "ZohoCRM_createZiaSessionMessage",
     ],
   },
   {
