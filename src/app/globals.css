@@ -3072,6 +3072,11 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   scrollbar-color: var(--color-border-strong) transparent;
 }
 .kpi-drilldown-table-single { grid-template-columns: 1fr; }
+.kpi-drilldown-pagination {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  margin-top: 10px; font-size: 12px; color: var(--color-text-secondary);
+}
+.kpi-drilldown-pagination button:disabled { opacity: 0.5; cursor: default; }
 .kpi-drilldown-table::-webkit-scrollbar { width: 8px; }
 .kpi-drilldown-table::-webkit-scrollbar-track { background: transparent; }
 .kpi-drilldown-table::-webkit-scrollbar-thumb {

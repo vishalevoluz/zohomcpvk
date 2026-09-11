@@ -20,7 +20,7 @@ import type { Section } from "@/lib/sections";
 import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames, isSystemGeneratedRule, resolveUsableModuleApiNames } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
-import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, checkFunctionMetadata, ISSUE_CATEGORY_LABELS, type FunctionIssue } from "@/lib/functionAnalysis";
+import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, checkFunctionMetadata, ISSUE_CATEGORY_LABELS, type FunctionIssue, type FunctionIssueCategory } from "@/lib/functionAnalysis";
 
 function parseMcpJson(result: unknown): Record<string, unknown> | null {
   if (!result || typeof result !== "object") return null;
@@ -2077,6 +2077,29 @@ function enrichWorkflowsWithDetail(items: unknown[], detailByWfId: Record<string
 interface FunctionIssueRow { key: string; id: string; functionName: string; category: string; issue: FunctionIssue; }
 const FUNCTION_SEVERITY_ORDER: Record<FunctionIssue["severity"], number> = { high: 0, medium: 1, low: 2 };
 
+// One row per FUNCTION instead of one row per issue - a function with 4
+// flagged issues used to repeat its name across 4 separate rows in the
+// list, burying how many distinct functions actually need attention behind
+// how many issues they happen to have. Sorted by worst issue severity first,
+// same convention sortedFunctionIssueRows already used per-issue.
+interface FunctionIssueGroup { id: string; functionName: string; moduleCategory: string; issues: FunctionIssue[]; worstSeverity: FunctionIssue["severity"]; }
+
+function groupFunctionIssuesByFunction(rows: FunctionIssueRow[]): FunctionIssueGroup[] {
+  const byId = new Map<string, FunctionIssueGroup>();
+  for (const row of rows) {
+    const g = byId.get(row.id);
+    if (g) {
+      g.issues.push(row.issue);
+      if (FUNCTION_SEVERITY_ORDER[row.issue.severity] < FUNCTION_SEVERITY_ORDER[g.worstSeverity]) g.worstSeverity = row.issue.severity;
+    } else {
+      byId.set(row.id, { id: row.id, functionName: row.functionName, moduleCategory: row.category, issues: [row.issue], worstSeverity: row.issue.severity });
+    }
+  }
+  return [...byId.values()].sort((a, b) => FUNCTION_SEVERITY_ORDER[a.worstSeverity] - FUNCTION_SEVERITY_ORDER[b.worstSeverity]);
+}
+
+const FUNCTION_ISSUES_PAGE_SIZE = 8;
+
 function buildFunctionZiaSummary(
   functionsWithIssuesPct: number, scannedCount: number, duplicates: FunctionDuplicateGroup[],
   suspiciousCount: number, failureCount: number | null,
@@ -2615,11 +2638,21 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [functionsListExpanded, setFunctionsListExpanded] = useState(false);
   type FunctionsSubTab = "issues" | "duplicates" | "all";
   const [functionsSubTab, setFunctionsSubTab] = useState<FunctionsSubTab>("issues");
+  // Issues tab: filter by criteria/type (clickable, at the top), paginated
+  // by function instead of a hard slice(0, 15) + "N more" line, and each
+  // function collapsed by default - click its name to see its own issues as
+  // a bullet list instead of one flat row per issue repeating the name.
+  const [issueTypeFilter, setIssueTypeFilter] = useState<FunctionIssueCategory | "all">("all");
+  const [issuePage, setIssuePage] = useState(1);
+  const [expandedIssueFunctions, setExpandedIssueFunctions] = useState<Set<string>>(new Set());
   // One search box per drill-down panel - cleared whenever a different card
   // (or function sub-tab) is opened so a stale query from "Modules" doesn't
   // silently hide everything the next time "Blueprints" is opened.
   const [drilldownSearch, setDrilldownSearch] = useState("");
   useEffect(() => { setDrilldownSearch(""); }, [selectedCard, functionsSubTab]);
+  // Otherwise a filter/search change while sitting on page 3 can leave the
+  // view stuck on a now-out-of-range page showing nothing.
+  useEffect(() => { setIssuePage(1); }, [issueTypeFilter, drilldownSearch, functionsSubTab]);
   const drilldownQuery = drilldownSearch.trim().toLowerCase();
   function matchesSearch(...values: (string | null | undefined)[]): boolean {
     if (!drilldownQuery) return true;
@@ -2849,6 +2882,22 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       ])
     : [];
   const sortedFunctionIssueRows = [...functionIssueRows].sort((a, b) => FUNCTION_SEVERITY_ORDER[a.issue.severity] - FUNCTION_SEVERITY_ORDER[b.issue.severity]);
+  // Only the categories actually present get a filter button - a fixed list
+  // of all 13 would show a dozen dead buttons for an org with 2 real issue
+  // types. Order follows ISSUE_CATEGORY_LABELS' own declared order, not
+  // count, so the button row doesn't reshuffle itself as issues get fixed.
+  const presentIssueCategories = (Object.keys(ISSUE_CATEGORY_LABELS) as FunctionIssueCategory[])
+    .filter(cat => functionIssueRows.some(r => r.issue.category === cat));
+  const functionIssueGroups = groupFunctionIssuesByFunction(sortedFunctionIssueRows);
+  const filteredIssueGroups = functionIssueGroups
+    .filter(g => issueTypeFilter === "all" || g.issues.some(i => i.category === issueTypeFilter))
+    .filter(g => matchesSearch(g.functionName, g.moduleCategory));
+  const issueTotalPages = Math.max(1, Math.ceil(filteredIssueGroups.length / FUNCTION_ISSUES_PAGE_SIZE));
+  const issueCurrentPage = Math.min(issuePage, issueTotalPages);
+  const pagedIssueGroups = filteredIssueGroups.slice(
+    (issueCurrentPage - 1) * FUNCTION_ISSUES_PAGE_SIZE,
+    issueCurrentPage * FUNCTION_ISSUES_PAGE_SIZE,
+  );
   const scannedFnIds = Object.keys(functionRecords.issuesByFnId);
   const scannedFnCount = scannedFnIds.length;
   const functionsWithIssuesCount = scannedFnIds.filter(id => (functionRecords.issuesByFnId[id]?.length ?? 0) > 0).length;
@@ -3641,53 +3690,106 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               {!functionRecords.scanProgress.loading && sortedFunctionIssueRows.length === 0 && scannedFnCount > 0 && (
                 <p className="business-view-hint">No issues flagged in the functions scanned.</p>
               )}
-              {sortedFunctionIssueRows.length > 0 && (() => {
-                const filteredIssueRows = sortedFunctionIssueRows.filter(row => matchesSearch(row.functionName, row.category));
-                return (
-                <div className="kpi-drilldown-table kpi-drilldown-table-single">
-                  {filteredIssueRows.slice(0, 15).map(row => (
-                    <div key={row.key} className="kpi-drilldown-row kpi-drilldown-row-layouts">
-                      <div className="kpi-drilldown-row-top">
-                        <span className="kpi-drilldown-name">{row.functionName}</span>
-                        <span className="kpi-drilldown-module">{row.category}</span>
-                        <span className={`kpi-drilldown-badge status-${row.issue.severity === "high" ? "inactive" : row.issue.severity === "medium" ? "draft" : "active"}`}>
-                          {ISSUE_CATEGORY_LABELS[row.issue.category]}
-                        </span>
-                        <button className="btn-secondary function-preview-btn" onClick={() => toggleFunctionPreview(row.id)}>
-                          {previewFunctionId === row.id ? "Hide Code" : "Preview Code"}
+              {sortedFunctionIssueRows.length > 0 && (
+                <>
+                  {/* Criteria/type filter, clickable, at the top - only categories
+                      actually present get a button, so this never shows a dozen
+                      dead filters for an org with just a couple real issue types. */}
+                  <div className="kpi-drilldown-summary">
+                    <button
+                      className={`kpi-drilldown-stat kpi-drilldown-stat-clickable ${issueTypeFilter === "all" ? "selected" : ""}`}
+                      onClick={() => setIssueTypeFilter("all")}
+                    >
+                      {functionIssueGroups.length} All
+                    </button>
+                    {presentIssueCategories.map(cat => {
+                      const count = functionIssueGroups.filter(g => g.issues.some(i => i.category === cat)).length;
+                      return (
+                        <button
+                          key={cat}
+                          className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${issueTypeFilter === cat ? "selected" : ""}`}
+                          onClick={() => setIssueTypeFilter(prev => (prev === cat ? "all" : cat))}
+                        >
+                          {count} {ISSUE_CATEGORY_LABELS[cat]}
                         </button>
-                      </div>
-                      <p className="function-issue-message">{row.issue.message}</p>
-                      {previewFunctionId === row.id && (
-                        <div className="function-code-preview">
-                          {functionRecords.codeByFnId[row.id]?.loading && (
-                            <p className="kpi-drilldown-progress"><span className="spinner" /> Downloading code from Zoho…</p>
-                          )}
-                          {functionRecords.codeByFnId[row.id]?.unavailable && (
-                            <p className="business-view-hint">Code not available for this function.</p>
-                          )}
-                          {functionRecords.codeByFnId[row.id]?.code && (
+                      );
+                    })}
+                  </div>
+                  <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                    {pagedIssueGroups.map(group => {
+                      const isExpanded = expandedIssueFunctions.has(group.id);
+                      // When a type filter is active, only that function's
+                      // matching issues show once expanded - not every issue it
+                      // has, which would contradict the filter someone just clicked.
+                      const visibleIssues = issueTypeFilter === "all" ? group.issues : group.issues.filter(i => i.category === issueTypeFilter);
+                      return (
+                        <div key={group.id} className="kpi-drilldown-row kpi-drilldown-row-layouts">
+                          <button
+                            className="function-dup-toggle"
+                            onClick={() => setExpandedIssueFunctions(prev => {
+                              const next = new Set(prev);
+                              if (next.has(group.id)) next.delete(group.id); else next.add(group.id);
+                              return next;
+                            })}
+                          >
+                            <span className="kpi-drilldown-name">{group.functionName}</span>
+                            <span className="kpi-drilldown-module">{group.moduleCategory}</span>
+                            <span className={`kpi-drilldown-badge status-${group.worstSeverity === "high" ? "inactive" : group.worstSeverity === "medium" ? "draft" : "active"}`}>
+                              {visibleIssues.length} issue{visibleIssues.length !== 1 ? "s" : ""}
+                            </span>
+                            <span className="function-dup-caret">{isExpanded ? "▾" : "▸"}</span>
+                          </button>
+                          {isExpanded && (
                             <>
-                              <pre className="function-code-block"><code>{functionRecords.codeByFnId[row.id]!.code}</code></pre>
-                              <div className="zia-rec zia-rec-low activity-zia-rec">
-                                <div className="zia-rec-header">
-                                  <span className="zia-rec-icon">✦</span>
-                                  <span className="zia-rec-title">Zia Recommendation - Formatting &amp; Comments</span>
+                              <ul className="function-code-issues">
+                                {visibleIssues.map((iss, i) => (
+                                  <li key={i}>
+                                    <span className={`kpi-drilldown-badge status-${iss.severity === "high" ? "inactive" : iss.severity === "medium" ? "draft" : "active"}`}>
+                                      {ISSUE_CATEGORY_LABELS[iss.category]}
+                                    </span> {iss.message}
+                                  </li>
+                                ))}
+                              </ul>
+                              <button className="btn-secondary function-preview-btn" onClick={() => toggleFunctionPreview(group.id)}>
+                                {previewFunctionId === group.id ? "Hide Code" : "Preview Code"}
+                              </button>
+                              {previewFunctionId === group.id && (
+                                <div className="function-code-preview">
+                                  {functionRecords.codeByFnId[group.id]?.loading && (
+                                    <p className="kpi-drilldown-progress"><span className="spinner" /> Downloading code from Zoho…</p>
+                                  )}
+                                  {functionRecords.codeByFnId[group.id]?.unavailable && (
+                                    <p className="business-view-hint">Code not available for this function.</p>
+                                  )}
+                                  {functionRecords.codeByFnId[group.id]?.code && (
+                                    <>
+                                      <pre className="function-code-block"><code>{functionRecords.codeByFnId[group.id]!.code}</code></pre>
+                                      <div className="zia-rec zia-rec-low activity-zia-rec">
+                                        <div className="zia-rec-header">
+                                          <span className="zia-rec-icon">✦</span>
+                                          <span className="zia-rec-title">Zia Recommendation - Formatting &amp; Comments</span>
+                                        </div>
+                                        <ZiaRecBody {...reviewCodeQuality(functionRecords.codeByFnId[group.id]!.code!)} />
+                                      </div>
+                                    </>
+                                  )}
                                 </div>
-                                <ZiaRecBody {...reviewCodeQuality(functionRecords.codeByFnId[row.id]!.code!)} />
-                              </div>
+                              )}
                             </>
                           )}
                         </div>
-                      )}
+                      );
+                    })}
+                  </div>
+                  {issueTotalPages > 1 && (
+                    <div className="kpi-drilldown-pagination">
+                      <button className="btn-secondary" disabled={issueCurrentPage <= 1} onClick={() => setIssuePage(p => Math.max(1, p - 1))}>← Prev</button>
+                      <span>Page {issueCurrentPage} of {issueTotalPages} ({filteredIssueGroups.length} function{filteredIssueGroups.length !== 1 ? "s" : ""})</span>
+                      <button className="btn-secondary" disabled={issueCurrentPage >= issueTotalPages} onClick={() => setIssuePage(p => Math.min(issueTotalPages, p + 1))}>Next →</button>
                     </div>
-                  ))}
-                  {filteredIssueRows.length > 15 && (
-                    <p className="business-view-hint">+{filteredIssueRows.length - 15} more issues found</p>
                   )}
-                </div>
-                );
-              })()}
+                </>
+              )}
             </>
           )}
 
