@@ -111,7 +111,12 @@ export function computeTopActions(
   mandatoryFields: MandatoryFieldsState = { count: 0, fieldLabels: [], perModule: [], loading: false, error: null, lastFetched: null },
 ): { actions: PriorityAction[]; allActions: PriorityAction[]; allResolved: boolean; overflowCount: number; allLowImpact: boolean; currentScore: number; uncertain: UncertainFinding[] } {
   const mandatoryFieldCount = mandatoryFields.lastFetched !== null ? mandatoryFields.count : null;
-  const currentScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount).total;
+  // See computeHealthScore's matching param - pipelineStages.pipelineCount is
+  // the real getLayouts -> getPipelines count, not the generic zero-param
+  // getPipelines() entityData.pipelines, which can fail outright on servers
+  // that require a layout_id.
+  const pipelineCountOverride = pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null;
+  const currentScore = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount, pipelineCountOverride).total;
   const { findings, loadingIds, uncertain } = evaluateFindings({
     entityData, recordSamples, pipelineStages, ruleCoverage, moduleRecordCounts, currencySymbol: null, mandatoryFields,
   });
@@ -137,7 +142,7 @@ export function computeTopActions(
       id: f.id, title: copy.title, why: copy.why(f), owner: copy.owner, timeToValue: copy.timeToValue,
       impact: f.impact, effort: f.effort, quickWin: f.impact === "High" && f.effort === "Easy",
       targetSection: f.targetSection, offenders: f.offenders, stakeLabel: f.stakeLabel, honesty: f.honesty,
-      projectedGain: estimateScoreGain(f.id, entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount),
+      projectedGain: estimateScoreGain(f.id, entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount, pipelineCountOverride),
       rank: i + 1,
     };
   });

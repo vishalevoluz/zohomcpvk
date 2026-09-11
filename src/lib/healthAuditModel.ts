@@ -373,9 +373,9 @@ function processCompletenessChecklist(
   ];
 }
 
-function processCompletenessReason(entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number, outOfOrderStageCount: number): string {
+function processCompletenessReason(entityData: Record<CrmEntityType, EntityState>, pipelineStageCount: number, outOfOrderStageCount: number, pipelineCountOverride: number | null): string {
   const missing: string[] = [];
-  if (entityData.pipelines.items.length === 0) missing.push("no sales pipeline");
+  if ((pipelineCountOverride ?? entityData.pipelines.items.length) === 0) missing.push("no sales pipeline");
   if (entityData.blueprints.items.length === 0) missing.push("no blueprint process");
   if (pipelineStageCount === 0) missing.push("no defined pipeline stages");
   else if (outOfOrderStageCount > 0) missing.push(`${outOfOrderStageCount} pipeline stage${outOfOrderStageCount !== 1 ? "s" : ""} sequenced after Closed Won/Lost`);
@@ -671,7 +671,7 @@ export function buildHealthAuditModel(
   mandatoryFieldsResolved = true,
   mandatoryFieldsPerModule: { apiName: string; count: number; labels: string[] }[] = [],
 ): HealthAuditModel {
-  const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount);
+  const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount, pipelineCountOverride);
   const resolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t])) && pipelineStagesResolved && mandatoryFieldsResolved;
 
   const dimensions: DimensionCard[] = DIMENSION_ORDER.map(key => {
@@ -687,7 +687,7 @@ export function buildHealthAuditModel(
         break;
       case "processCompleteness":
         checklist = processCompletenessChecklist(entityData, pipelineStageCount, outOfOrderStageCount, pipelineCountOverride);
-        reason = processCompletenessReason(entityData, pipelineStageCount, outOfOrderStageCount);
+        reason = processCompletenessReason(entityData, pipelineStageCount, outOfOrderStageCount, pipelineCountOverride);
         break;
       case "accessSecurity":
         checklist = accessSecurityChecklist(entityData);

@@ -62,9 +62,9 @@ function scoreAutomationCoverage(modules: unknown[], workflows: unknown[], ruleC
   return Math.round(totalPoints);
 }
 
-function scoreProcessCompleteness(pipelines: unknown[], blueprints: unknown[], pipelineStageCount: number, outOfOrderStageCount: number): number {
+function scoreProcessCompleteness(pipelineCount: number, blueprints: unknown[], pipelineStageCount: number, outOfOrderStageCount: number): number {
   let score = 20;
-  if (pipelines.length === 0) score -= 7;
+  if (pipelineCount === 0) score -= 7;
   if (blueprints.length === 0) score -= 7;
   if (pipelineStageCount === 0) score -= 7;
   // A pipeline with stages sequenced after Closed Won/Lost is misconfigured
@@ -197,10 +197,17 @@ export function computeHealthScore(
   // callers that haven't wired it through yet, same pattern pipelineStageCount
   // uses above.
   mandatoryFieldCount: number | null = null,
+  // The generic zero-param getPipelines() entityData.pipelines comes from can
+  // fail outright on servers that require a layout_id (verified live) -
+  // pipelineCountOverride is the real count from the getLayouts ->
+  // getPipelines chain (usePipelineStages.ts), same override pattern as
+  // pipelineStageCount/mandatoryFieldCount above. Defaults to null ("not yet
+  // known") for existing callers that haven't wired it through.
+  pipelineCountOverride: number | null = null,
 ): HealthScoreResult {
   const dimensions: HealthScoreDimensions = {
     automationCoverage: scoreAutomationCoverage(entityData.modules.items, entityData.workflows.items, ruleCoverage),
-    processCompleteness: scoreProcessCompleteness(entityData.pipelines.items, entityData.blueprints.items, pipelineStageCount, outOfOrderStageCount),
+    processCompleteness: scoreProcessCompleteness(pipelineCountOverride ?? entityData.pipelines.items.length, entityData.blueprints.items, pipelineStageCount, outOfOrderStageCount),
     accessSecurity: scoreAccessSecurity(entityData.profiles.items, entityData.users.items, entityData.roles.items),
     dataArchitecture: scoreDataArchitecture(mandatoryFieldCount, entityData.modules.items),
     automationHealth: scoreAutomationHealth(entityData.workflows.items),
@@ -235,11 +242,14 @@ export function estimateScoreGain(
   outOfOrderStageCount = 0,
   // See computeHealthScore's matching param - the real layout-based count.
   mandatoryFieldCount: number | null = null,
+  // See computeHealthScore's matching param - the real pipeline count.
+  pipelineCountOverride: number | null = null,
 ): number | null {
-  const before = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount).total;
+  const before = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount, pipelineCountOverride).total;
   let mutated: Record<CrmEntityType, EntityState>;
   let mutatedPipelineStageCount = pipelineStageCount;
   let mutatedMandatoryFieldCount = mandatoryFieldCount;
+  let mutatedPipelineCountOverride = pipelineCountOverride;
 
   switch (findingId) {
     case "no-email-workflow": {
@@ -265,6 +275,7 @@ export function estimateScoreGain(
     case "no-pipeline": {
       mutated = withEntity(entityData, "pipelines", [{ id: "projected", default: true }]);
       mutatedPipelineStageCount = Math.max(pipelineStageCount, 1);
+      mutatedPipelineCountOverride = Math.max(pipelineCountOverride ?? 0, 1);
       break;
     }
     case "workflows-inactive": {
@@ -307,7 +318,7 @@ export function estimateScoreGain(
       return null;
   }
 
-  const after = computeHealthScore(mutated, mutatedPipelineStageCount, ruleCoverage, outOfOrderStageCount, mutatedMandatoryFieldCount).total;
+  const after = computeHealthScore(mutated, mutatedPipelineStageCount, ruleCoverage, outOfOrderStageCount, mutatedMandatoryFieldCount, mutatedPipelineCountOverride).total;
   return Math.max(0, Math.round(after) - Math.round(before));
 }
 

@@ -189,14 +189,22 @@ function generateRecommendations(
   entityData: Record<CrmEntityType, EntityState>,
   tools: McpTool[],
   ruleCoverage: RuleCoverage | null,
-  functionHealth: FunctionHealth | null
+  functionHealth: FunctionHealth | null,
+  // The generic zero-param getPipelines() entityData.pipelines comes from can
+  // fail outright on servers that require a layout_id (verified live - see
+  // computeHealthScore's matching param) - pipelineCount is the real count
+  // from the getLayouts -> getPipelines chain (usePipelineStages.ts).
+  // Without this override, a server like that always reads as "0 pipelines"
+  // here regardless of the real org, firing a false "no pipeline" critical
+  // recommendation even when one exists.
+  pipelineCountOverride: number | null,
 ): Recommendation[] {
   const recs: Recommendation[] = [];
 
   const wfs      = entityData.workflows.items;
   const bps      = entityData.blueprints.items;
   const mods     = entityData.modules.items.filter(m => !isDeletedModule(m) && !isInternalModule(m) && !isSystemHiddenModule(m));
-  const pipes    = entityData.pipelines.items;
+  const pipeCount = pipelineCountOverride ?? entityData.pipelines.items.length;
   const stages   = entityData.stages.items;
   const layouts  = entityData.layouts.items;
   const tasks    = entityData.tasks.items;
@@ -434,7 +442,7 @@ function generateRecommendations(
     severity: "medium", category: "integrations", icon: "◧",
   });
 
-  if (pipes.length === 0) {
+  if (pipeCount === 0) {
     recs.push({
       id: "zoho-campaigns",
       title: "Bridge Marketing with Zoho Campaigns",
@@ -476,14 +484,14 @@ function generateRecommendations(
 
   // ── RECOMMENDED ARCHITECTURE ───────────────────────────────────────────────
 
-  if (pipes.length > 5) {
+  if (pipeCount > 5) {
     recs.push({
       id: "pipeline-consolidation",
       title: "Consolidate Sales Pipelines",
-      description: `You have ${pipes.length} pipelines. Consider consolidating to 2-3 focused pipelines (e.g. New Business, Expansion, Renewal) to reduce complexity and improve forecast accuracy.`,
+      description: `You have ${pipeCount} pipelines. Consider consolidating to 2-3 focused pipelines (e.g. New Business, Expansion, Renewal) to reduce complexity and improve forecast accuracy.`,
       severity: "medium", category: "architecture", icon: "⇥",
     });
-  } else if (pipes.length === 0) {
+  } else if (pipeCount === 0) {
     recs.push({
       id: "pipeline-setup",
       title: "Define a Structured Sales Pipeline",
@@ -2628,9 +2636,12 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     if (userItems.length > 0) {
       ctxLines.push(`Users (${userItems.length}): ${userItems.slice(0, 3).map((u, i) => getItemName(u, i)).join(", ")}${userItems.length > 3 ? ", …" : ""}`);
     }
-    const pipeItems = entityData.pipelines.items;
-    if (pipeItems.length > 0) {
-      ctxLines.push(`Pipeline Names: ${pipeItems.map((p, i) => getItemName(p, i)).join(", ")}`);
+    // Real getLayouts -> getPipelines names (see computeHealthScore's matching
+    // pipelineCountOverride param) - entityData.pipelines.items is the
+    // generic zero-param fetch that fails outright on servers requiring a
+    // layout_id, which would silently drop this line from Zia's context.
+    if (pipelineStages.pipelines.length > 0) {
+      ctxLines.push(`Pipeline Names: ${pipelineStages.pipelines.map(p => p.name).join(", ")}`);
     }
     return ctxLines.join("\n");
   }
@@ -2773,7 +2784,11 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     scheduleInactive: scheduleBreakdown.filter(r => !r.active).length,
   } : null;
 
-  const recommendations = generateRecommendations(entityData, tools, ruleCoverage, functionHealth);
+  // Real getLayouts -> getPipelines count (see computeHealthScore's matching
+  // param) - reused below for computeConfigRows too, instead of each caller
+  // re-deriving its own copy.
+  const pipelineCountOverride = pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null;
+  const recommendations = generateRecommendations(entityData, tools, ruleCoverage, functionHealth, pipelineCountOverride);
   const filteredRecs = recommendations.filter(r => r.category === activeTab);
   // Modules get the same deleted/internal-pseudo-module exclusion as the
   // Modules KPI card (see computeKpis) so this total agrees with it instead
@@ -2814,7 +2829,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const configRows = computeConfigRows(
     entityData,
     pipelineStages.items.filter(s => s.outOfOrder).length,
-    pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null,
+    pipelineCountOverride,
     !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null),
     pipelineStages.error,
   );
