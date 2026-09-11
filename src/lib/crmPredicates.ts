@@ -639,10 +639,22 @@ export function isSystemHiddenModule(item: unknown): boolean {
 // doesn't show them either). Subforms and field-tracker entries are the same
 // kind of non-independent, embedded structure. None of these should count
 // toward "how many modules does this org have."
+// Zoho's own built-in navigation/utility tabs, not real data modules - they
+// carry api_supported:false + creatable:false + editable:false just like a
+// genuinely empty custom module would, so isEmptyModule was flagging Reports
+// and Analytics (Zoho's own "Dashboards" tab, api_name "Analytics") as
+// "Empty" even though they're not modules that could ever hold records at
+// all. Verified live against a real org: all five share this exact profile.
+// SalesInbox and Documents happened to also be user_hidden in that org, but
+// that's incidental - they'd still be wrong to count as a real module even
+// visible, same as Home/Reports/Analytics.
+const SYSTEM_UTILITY_TAB_API_NAMES = new Set(["Home", "Reports", "Analytics", "Documents", "SalesInbox"]);
+
 export function isInternalModule(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
   const r = item as Record<string, unknown>;
   if (r.generated_type === "subform" || r.generated_type === "field_tracker") return true;
+  if (SYSTEM_UTILITY_TAB_API_NAMES.has(String(r.api_name ?? ""))) return true;
   return /__s$/.test(String(r.api_name ?? ""));
 }
 
