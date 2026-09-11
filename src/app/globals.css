@@ -1489,8 +1489,14 @@ details[open] .log-summary::before { transform: rotate(90deg); }
    shadow keeps it readable across the whole cycle instead of just some of
    it - the fix .wizard-page-intro's fixed --l-text/--l-muted colors alone
    couldn't provide. */
-.wizard-page-intro h2 { font-size: 20px; font-weight: 650; color: var(--l-text); margin-bottom: 6px; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55); }
-.wizard-page-intro p { font-size: 13.5px; color: var(--l-muted); line-height: 1.55; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6); }
+/* Pure white, not --l-text/--l-muted (near-white and mid-gray respectively) -
+   --l-muted in particular reads as washed-out/blurry once the gradient pans
+   bright, and no single fixed color short of pure white keeps enough
+   contrast across both the near-black and bright-green ends of the
+   animation. The heading/subtitle are told apart by weight and the shadow
+   below, not by a lightness difference between them anymore. */
+.wizard-page-intro h2 { font-size: 20px; font-weight: 650; color: #fff; margin-bottom: 6px; text-shadow: 0 2px 14px rgba(0, 0, 0, 0.55); }
+.wizard-page-intro p { font-size: 13.5px; color: #fff; line-height: 1.55; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.6); }
 
 /* Single row, never wraps — a wrapped pill used to strand its leading
    connector line dangling above the row below it (disconnected from any

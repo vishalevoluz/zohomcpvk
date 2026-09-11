@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
+import { isEntityResolved } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
 import type { RecordSampleStageId, RecordSampleState, PipelineStagesState } from "@/lib/flowMapModel";
 import { RECORDS_SAMPLE_SIZE } from "@/lib/flowMapModel";
@@ -8,7 +8,7 @@ import {
   hasEmailAction, isActiveUser, isAdminProfile, isActiveWorkflow,
   moduleApiName, unreferencedModules, isDeletedModule, isInternalModule, isSystemHiddenModule,
   isDealStale, isDealUnforecastable, dealAmount, dealCurrencySymbol,
-  hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent, userLastLoginDate,
+  hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent,
 } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
 import type { MandatoryFieldsState } from "@/lib/useMandatoryFields";
@@ -27,7 +27,12 @@ export type FindingEffort = "Easy" | "Medium" | "Hard";
 
 export interface Finding {
   id: string;
-  /** Real, named offenders - module/workflow/user/deal names. Never "several". */
+  /** Always empty - no finding names a real module/workflow/user/deal record
+   *  anywhere in the app (a report built from this data can be screenshotted
+   *  or shared, and record/entity names are the org's own data, not this
+   *  tool's to display). Every card/action shows a count instead; kept as a
+   *  field rather than deleted since presentation layers still branch on
+   *  "is there a 'where this shows up' list to render". */
   offenders: string[];
   count: number;
   /** Pre-formatted quantified stake, e.g. "₹4,50,000 of pipeline value" or "12 seats". */
@@ -74,12 +79,6 @@ interface FindingDef {
   build: (ctx: FindingContext) => FindingDynamic | null;
 }
 
-function moduleLabelOf(m: unknown): string {
-  if (!m || typeof m !== "object") return "";
-  const r = m as Record<string, unknown>;
-  return String(r.plural_label ?? r.singular_label ?? r.module_name ?? r.api_name ?? "");
-}
-
 function recordEmail(r: unknown): string | null {
   if (!r || typeof r !== "object") return null;
   const email = (r as Record<string, unknown>).Email ?? (r as Record<string, unknown>).email;
@@ -101,10 +100,6 @@ function sampleHonesty(itemsLength: number, label: string): string {
   return isFullPopulation(itemsLength)
     ? `Confirmed from all ${itemsLength} ${label}${itemsLength !== 1 ? "s" : ""} in your CRM.`
     : `Based on a sample of ${itemsLength} ${label}s - treat this as indicative, not exhaustive.`;
-}
-
-function formatShortDate(d: Date): string {
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 function groupByEmail(records: unknown[]): Map<string, unknown[]> {
@@ -141,13 +136,8 @@ const FINDING_DEFS: FindingDef[] = [
     requires: [], requiresMandatoryFields: true,
     build: ({ mandatoryFields }) => {
       if (mandatoryFields.count <= 20) return null;
-      const offenders = [...mandatoryFields.perModule]
-        .sort((a, b) => b.count - a.count)
-        .filter(m => m.count > 0)
-        .slice(0, 5)
-        .map(m => `${m.apiName} (${m.count})`);
       return {
-        offenders, count: mandatoryFields.count,
+        offenders: [], count: mandatoryFields.count,
         honesty: `Confirmed from the layouts of your core Leads, Contacts, Deals, and Accounts modules.`,
       };
     },
@@ -171,7 +161,7 @@ const FINDING_DEFS: FindingDef[] = [
       const inactive = wfs.filter(w => !isActiveWorkflow(w));
       if (inactive.length / wfs.length <= 0.3) return null;
       return {
-        offenders: inactive.map((w, i) => getItemName(w, i)).filter(Boolean).slice(0, 5),
+        offenders: [],
         count: inactive.length,
         note: `${inactive.length} of ${wfs.length}`,
         honesty: `Confirmed from all ${wfs.length} workflows in your CRM.`,
@@ -200,10 +190,9 @@ const FINDING_DEFS: FindingDef[] = [
       const tooManyAdmins = adminCount > 2;
       if (!singleProfile && !allAdmin && !tooManyAdmins) return null;
       const isUniform = singleProfile || allAdmin;
-      const offenders = (isUniform ? profiles : profiles.filter(isAdminProfile)).map((p, i) => getItemName(p, i)).filter(Boolean);
       const evidenceCount = isUniform ? profiles.length : adminCount;
       return {
-        offenders: offenders.slice(0, 5),
+        offenders: [],
         count: evidenceCount,
         note: isUniform ? "uniform-access" : "too-many-admins",
         honesty: singleProfile
@@ -224,14 +213,14 @@ const FINDING_DEFS: FindingDef[] = [
         const confirmedZero = candidates.filter(m => moduleRecordCounts.counts[moduleApiName(m)] === 0);
         if (confirmedZero.length === 0) return null;
         return {
-          offenders: confirmedZero.map(moduleLabelOf).filter(Boolean).slice(0, 5),
+          offenders: [],
           count: confirmedZero.length,
           honesty: "Confirmed 0 records via a direct record-count check, for modules also unused by any workflow or blueprint.",
         };
       }
       if (candidates.length <= 3) return null;
       return {
-        offenders: candidates.map(moduleLabelOf).filter(Boolean).slice(0, 5),
+        offenders: [],
         count: candidates.length,
         honesty: `${candidates.length} modules aren't referenced by any workflow or blueprint - record counts couldn't be confirmed on this CRM connection, so this is based on configuration only, not confirmed emptiness.`,
       };
@@ -250,19 +239,8 @@ const FINDING_DEFS: FindingDef[] = [
       // (every record has one) over the org-level lookup, which depends on
       // getOrganizations being authorized on this MCP connection at all.
       const symbol = stale.map(dealCurrencySymbol).find(Boolean) ?? currencySymbol;
-      // Per-deal amount alongside each name - the total above is a sum a
-      // reader can't otherwise verify, so "Where this shows up" needs to
-      // show the actual numbers being added, not just which deals they came from.
       return {
-        offenders: stale
-          .map((d, i) => {
-            const name = getItemName(d, i);
-            if (!name) return "";
-            const amt = dealAmount(d);
-            return amt !== null ? `${name} (${formatMoney(amt, dealCurrencySymbol(d) ?? symbol)})` : name;
-          })
-          .filter(Boolean)
-          .slice(0, 5),
+        offenders: [],
         count: stale.length,
         stakeLabel: totalValue > 0 ? `${formatMoney(totalValue, symbol)} of pipeline value` : undefined,
         sampleSize: isFullPopulation(items.length) ? undefined : items.length,
@@ -279,7 +257,7 @@ const FINDING_DEFS: FindingDef[] = [
       const bad = items.filter(isDealUnforecastable);
       if (bad.length === 0) return null;
       return {
-        offenders: bad.map((d, i) => getItemName(d, i)).filter(Boolean).slice(0, 5),
+        offenders: [],
         count: bad.length,
         sampleSize: isFullPopulation(items.length) ? undefined : items.length,
         honesty: sampleHonesty(items.length, "deal"),
@@ -298,13 +276,8 @@ const FINDING_DEFS: FindingDef[] = [
       if (!userLoginFieldPresent(activeUsers)) return null; // this MCP server/org doesn't expose login activity - don't guess
       const stale = activeUsers.filter(u => { const age = userLoginAgeDays(u); return age !== null && age > STALE_LOGIN_THRESHOLD_DAYS; });
       if (stale.length === 0) return null;
-      const offenders = stale.slice(0, 5).map((u, i) => {
-        const name = getItemName(u, i) || "Unnamed user";
-        const lastLogin = userLastLoginDate(u);
-        return lastLogin ? `${name} (no login since ${formatShortDate(lastLogin)})` : name;
-      });
       return {
-        offenders,
+        offenders: [],
         count: stale.length,
         stakeLabel: `${stale.length} paid seat${stale.length !== 1 ? "s" : ""}`,
         honesty: `Confirmed from login activity on all ${activeUsers.length} active users in your CRM - flagged when no login in over ${STALE_LOGIN_THRESHOLD_DAYS} days.`,
@@ -324,11 +297,7 @@ const FINDING_DEFS: FindingDef[] = [
       const totalDupRecords = dupGroups.reduce((sum, [, recs]) => sum + recs.length, 0);
       const fullyConfirmed = isFullPopulation(leadItems.length) && isFullPopulation(contactItems.length);
       return {
-        // Named by group size only, never the actual email address - a real
-        // customer's email is personal data that shouldn't be echoed back
-        // into a report someone might screenshot or share, unlike an
-        // internal record/deal/user name.
-        offenders: dupGroups.slice(0, 5).map(([, recs], i) => `Duplicate group ${i + 1}: ${recs.length} records share one email address`),
+        offenders: [],
         count: totalDupRecords,
         sampleSize: fullyConfirmed ? undefined : all.length,
         honesty: fullyConfirmed
