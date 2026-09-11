@@ -735,7 +735,10 @@ function formatRelative(date: Date): string {
 
 type ModuleCategory = "active" | "hidden" | "empty";
 
-const MODULE_FILTER_LABELS: Record<ModuleCategory, string> = { active: "Active", hidden: "Hidden", empty: "Empty" };
+// Display label only - the underlying category key stays "hidden" (matches
+// isHiddenModule/status-hidden CSS etc.) so this is purely a user-facing
+// rename, not a behavior change.
+const MODULE_FILTER_LABELS: Record<ModuleCategory, string> = { active: "Active", hidden: "Inactive", empty: "Empty" };
 
 interface ModuleBreakdownRow {
   apiName: string;
@@ -766,6 +769,30 @@ function computeModuleBreakdown(entityData: Record<CrmEntityType, EntityState>):
       };
     })
     .sort((a, b) => MODULE_CATEGORY_ORDER[a.category] - MODULE_CATEGORY_ORDER[b.category]);
+}
+
+// Same "flag the actionable groups, name a few real ones, praise a healthy
+// org" synthesis as buildZiaWorkflowInsight/buildZiaScheduleInsight above -
+// "hidden" is still the underlying category key (matches isHiddenModule),
+// but described as "inactive" here to match the drilldown's renamed label.
+function buildZiaModuleInsight(rows: ModuleBreakdownRow[]): ZiaInsight {
+  if (rows.length === 0) return { summary: "No modules found - nothing to evaluate yet.", points: [] };
+  const inactive = rows.filter(r => r.category === "hidden");
+  const empty = rows.filter(r => r.category === "empty");
+  const points: string[] = [];
+  if (inactive.length > 0) {
+    points.push(cap(`${inactive.length} of ${rows.length} module${rows.length !== 1 ? "s are" : " is"} inactive (hidden from users) - ${inactive.slice(0, 3).map(m => m.name).join(", ")}${inactive.length > 3 ? ", etc." : "."}`));
+  }
+  if (empty.length > 0) {
+    points.push(cap(`${empty.length} module${empty.length !== 1 ? "s are" : " is"} empty/unused - nobody can create or edit records in ${empty.length !== 1 ? "them" : "it"}: ${empty.slice(0, 3).map(m => m.name).join(", ")}${empty.length > 3 ? ", etc." : "."}`));
+  }
+  if (points.length === 0) {
+    return { summary: `All ${rows.length} module${rows.length !== 1 ? "s are" : " is"} active and in use - looks healthy.`, points: [] };
+  }
+  return {
+    summary: "", points,
+    action: "Re-enable the inactive ones if they're still needed, or clean up the unused/empty ones so the module list stays easy to navigate.",
+  };
 }
 
 interface WorkflowBreakdownRow {
@@ -2806,6 +2833,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     fetched: functionRecords.listState.fetched,
   });
   const moduleBreakdown = selectedCard === "modules" ? computeModuleBreakdown(entityData) : [];
+  const ziaModuleInsight = buildZiaModuleInsight(moduleBreakdown);
   const blueprintBreakdown = selectedCard === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
   const ziaScheduleInsight = buildZiaScheduleInsight(scheduleBreakdown);
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
@@ -3334,7 +3362,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {selectedCard === "modules" && (
         <div className="kpi-drilldown">
           <div className="kpi-drilldown-header">
-            <h4>Modules - Active / Hidden / Empty</h4>
+            <h4>Modules - Active / Inactive / Empty</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
           {entityData.modules.error && entityData.modules.items.length === 0 ? (
@@ -3380,6 +3408,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 <span className={`kpi-drilldown-badge status-${row.category}`}>{MODULE_FILTER_LABELS[row.category]}</span>
               </div>
             ))}
+          </div>
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">Zia Recommendation - Modules</span>
+            </div>
+            <ZiaRecBody {...ziaModuleInsight} />
           </div>
           </>
           )}
