@@ -94,6 +94,13 @@ body {
   font-size: 16px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  /* Safety net against any one element (a long filter-button row, a wide
+     table, etc.) overflowing its container and pushing the whole page into
+     horizontal scroll - which visibly shifts/truncates every card to its
+     left rather than just clipping the one overflowing element locally.
+     Anything that genuinely needs to scroll sideways (e.g. .kpi-drilldown-table)
+     already has its own overflow-x/overflow-y set. */
+  overflow-x: hidden;
 }
 
 /* Layout */
@@ -3054,7 +3061,12 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .kpi-drilldown-search::placeholder { color: var(--color-text-tertiary); }
 .kpi-drilldown-search:focus { outline: none; border-color: var(--color-brand); }
-.kpi-drilldown-summary { display: flex; gap: 8px; margin-bottom: 12px; }
+/* flex-wrap so a long filter row (e.g. Functions' Issues tab, one button per
+   issue category actually present - can run to a dozen) wraps onto extra
+   lines within the card instead of overflowing its right edge and pushing
+   the whole page into a horizontal scroll (every card list/panel to its
+   left visibly shifts/truncates when that happens). */
+.kpi-drilldown-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .kpi-drilldown-stat { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
 .kpi-drilldown-stat.good { background: var(--color-success-bg); color: var(--color-success); }
 .kpi-drilldown-stat.bad { background: var(--color-danger-bg); color: var(--bv-critical); }
