@@ -633,6 +633,10 @@ function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState
       status: ratioPass ? "pass" : "fail",
       detail: total === 0 ? "No workflows configured yet - nothing to break." : `${active} of ${total} workflow${total !== 1 ? "s" : ""} are active.`,
       weight: 14,
+      // Single-signal bullet, same pattern the other dimensions' checklists
+      // use - makes the point contribution explicit as a +/- pill instead of
+      // only implied by the pass/fail icon.
+      signals: total === 0 ? undefined : [{ label: "Active workflow ratio is healthy", on: ratioPass, points: 14 }],
     },
     {
       id: "automation-health-overlap",
@@ -642,6 +646,7 @@ function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState
         ? "No active workflows share the same module and trigger event."
         : `${overlapping.length} active workflow${overlapping.length !== 1 ? "s" : ""} overlap with at least one other on the same module and trigger event.`,
       weight: 3,
+      signals: [{ label: "No workflows share a module + trigger", on: overlapping.length === 0, points: 3 }],
     },
     {
       id: "automation-health-duplicate",
@@ -651,6 +656,7 @@ function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState
         ? "No workflows share the same name and functional signature."
         : `${duplicate.length} workflow${duplicate.length !== 1 ? "s" : ""} ${duplicate.length !== 1 ? "are" : "is"} a near-certain clone of another (same name, same module/trigger).`,
       weight: 3,
+      signals: [{ label: "No near-certain duplicate clones", on: duplicate.length === 0, points: 3 }],
     },
   ];
 }
