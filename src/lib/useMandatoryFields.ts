@@ -31,16 +31,22 @@ function pickLayout(layouts: unknown[]): Record<string, unknown> | null {
 }
 
 // The flat Fields API has no reliable per-org "is this field required"
-// signal: its "mandatory" key never appears as a boolean on a field (only
-// inside editable_properties, a list of which properties an admin may edit).
-// Each LAYOUT's own field config is the one real source for it - but it
-// splits "required" across two separate booleans: "mandatory" (an admin
-// explicitly required this field on the layout) and "system_mandatory"
-// (one of Zoho's own hardcoded required fields, e.g. Deal Name, Last Name,
-// Email, Stage - required regardless of layout config). A rep can't save
-// the record without filling in either kind, so both count here; missing
-// system_mandatory undercounts every module, since its built-in required
-// fields exist on virtually every layout.
+// signal (its "mandatory" key never appears as a boolean on a field, only
+// inside editable_properties, a list of which properties an admin may edit) -
+// each LAYOUT's own field config is the one real source for it instead.
+// Verified live against a real org's getLayouts response: the per-layout
+// field object has no "mandatory" boolean at all (that was a guess in an
+// earlier version of this function, and always false, since the key doesn't
+// exist) - the actual admin-facing "is this field required to save" flag is
+// named "required", and it already covers Zoho's own hardcoded required
+// fields too (Deal Name, Last Name, etc. all showed required:true, not just
+// system_mandatory:true). "required" undercounted nothing that
+// "system_mandatory" caught in that same org's data, but the reverse wasn't
+// true - one org had a field marked required:true that was NOT
+// system_mandatory:true (an admin-added requirement on Contacts), which the
+// old mandatory-or-system_mandatory check silently missed entirely.
+// system_mandatory is kept as an OR for any server variant that omits
+// "required" but still sends "system_mandatory".
 function mandatoryFieldLabelsFromLayout(layout: Record<string, unknown> | null): string[] {
   if (!layout) return [];
   const sections = Array.isArray(layout.sections) ? (layout.sections as unknown[]) : [];
@@ -49,7 +55,7 @@ function mandatoryFieldLabelsFromLayout(layout: Record<string, unknown> | null):
     const fields = Array.isArray((s as Record<string, unknown>).fields) ? ((s as Record<string, unknown>).fields as unknown[]) : [];
     for (const f of fields) {
       const r = f as Record<string, unknown>;
-      if (r.mandatory === true || r.system_mandatory === true) {
+      if (r.required === true || r.system_mandatory === true) {
         const label = String(r.field_label ?? r.api_name ?? "").trim();
         if (label) labels.push(label);
       }

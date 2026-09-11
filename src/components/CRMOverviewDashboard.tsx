@@ -1743,10 +1743,14 @@ function useModuleRuleScan(
   useEffect(() => {
     if (!scanActive || scanFetchedRef.current) return;
     if (moduleItems.length === 0) return;
-    const tool = tools.find(t => toolNamePattern.test(t.name));
-    if (!tool) return;
-    const moduleLoc = findParam(findParamLocations(tool), /module/i);
-    if (!moduleLoc) return;
+    const foundTool = tools.find(t => toolNamePattern.test(t.name));
+    if (!foundTool) return;
+    const foundModuleLoc = findParam(findParamLocations(foundTool), /module/i);
+    if (!foundModuleLoc) return;
+    // Re-bound to non-optional consts - TS doesn't carry the narrowing from
+    // the guards above into the nested `worker` function declaration below.
+    const tool = foundTool;
+    const moduleLoc = foundModuleLoc;
     scanFetchedRef.current = true;
 
     const targets = resolveUsableModuleApiNames(moduleItems);
@@ -1754,26 +1758,41 @@ function useModuleRuleScan(
     setPerModule([]);
     setScanned(false);
 
+    // Fetched with bounded concurrency (a small worker pool) instead of one
+    // module at a time - a sequential await-in-a-loop over 100+ modules made
+    // Layout/Validation Rules visibly lag many seconds behind Assignment/
+    // Approval Rules (a single org-wide call each) even though all four now
+    // auto-start together, since Zoho's API has no "all modules" mode for
+    // these two. Order-independent (results are written by index, not
+    // push order), so this doesn't change what's fetched, only how fast.
+    const RULE_SCAN_CONCURRENCY = 8;
     void (async () => {
-      const results: ModuleRuleGroup[] = [];
-      for (const apiName of targets) {
-        const start = Date.now();
-        const input: Record<string, unknown> = {};
-        setParam(input, moduleLoc, apiName);
-        try {
-          const output = await executeTool(config as McpConfig, tool.name, input);
-          const failed = isRuleFailureResponse(output);
-          const items = failed ? [] : extractRuleItems(output, apiName).filter(item => !isSystemGeneratedRule(item));
-          results.push({ apiName, items });
-          onLog(failed
-            ? { id: crypto.randomUUID(), tool: tool.name, input, output, status: "error", errorMessage: "Tool reported failure", durationMs: Date.now() - start, timestamp: new Date() }
-            : { id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
-        } catch (e: unknown) {
-          results.push({ apiName, items: [] });
-          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+      const results: ModuleRuleGroup[] = new Array(targets.length);
+      let nextIndex = 0;
+      async function worker() {
+        for (;;) {
+          const i = nextIndex++;
+          if (i >= targets.length) return;
+          const apiName = targets[i];
+          const start = Date.now();
+          const input: Record<string, unknown> = {};
+          setParam(input, moduleLoc, apiName);
+          try {
+            const output = await executeTool(config as McpConfig, tool.name, input);
+            const failed = isRuleFailureResponse(output);
+            const items = failed ? [] : extractRuleItems(output, apiName).filter(item => !isSystemGeneratedRule(item));
+            results[i] = { apiName, items };
+            onLog(failed
+              ? { id: crypto.randomUUID(), tool: tool.name, input, output, status: "error", errorMessage: "Tool reported failure", durationMs: Date.now() - start, timestamp: new Date() }
+              : { id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+          } catch (e: unknown) {
+            results[i] = { apiName, items: [] };
+            onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+          }
+          setScanProgress(prev => ({ ...prev, done: prev.done + 1 }));
         }
-        setScanProgress(prev => ({ ...prev, done: prev.done + 1 }));
       }
+      await Promise.all(Array.from({ length: Math.min(RULE_SCAN_CONCURRENCY, targets.length) }, worker));
 
       // Same "module filter isn't really being applied server-side" guard as
       // useRuleCoverage.ts: if 2+ modules came back with a non-empty result
@@ -2255,18 +2274,42 @@ const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Sect
   { type: "tasks",     label: "Activity",  targetSection: "modules" },
 ];
 
-function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOfOrderStageCount: number, pipelineCount: number | null, pipelineStagesResolved: boolean): ConfigRow[] {
+function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOfOrderStageCount: number, pipelineCount: number | null, pipelineStagesResolved: boolean, pipelineStagesError: string | null): ConfigRow[] {
   return CONFIG_ROW_DEFS.map(def => {
     const st = entityData[def.type];
+    // Pipelines is handled entirely on its own real getLayouts -> getPipelines
+    // chain (usePipelineStages.ts), never on this generic zero-param
+    // getPipelines() entity fetch below - that generic call has no layout_id
+    // to scope by, and on some servers layout_id is a hard requirement, so it
+    // fails outright with a "Mandatory query param 'layout_id'" error. That
+    // error used to leak into this row (showing "Couldn't verify" even once
+    // the real chain had a perfectly good count) because the row's error
+    // check only ever looked at this generic fetch's own st.error, never the
+    // real chain's - falling through here instead of into the shared
+    // count-from-st.items path below.
+    if (def.type === "pipelines") {
+      if (!pipelineStagesResolved) {
+        return { key: def.type, label: def.label, value: "…", status: "Loading", severity: "neutral" as const, targetSection: def.targetSection, source: "Loading…" };
+      }
+      if (pipelineCount === null || pipelineCount === 0) {
+        if (pipelineStagesError) {
+          return { key: def.type, label: def.label, value: "-", status: `Couldn't verify - ${pipelineStagesError}`, severity: "unknown" as const, targetSection: def.targetSection, source: "Source: getLayouts -> getPipelines - fetch failed" };
+        }
+        return { key: def.type, label: def.label, value: "0", status: "Not found", severity: "critical" as const, targetSection: def.targetSection, source: "Source: getLayouts -> getPipelines - 0 records" };
+      }
+      const status = outOfOrderStageCount > 0
+        ? `${outOfOrderStageCount} stage${outOfOrderStageCount !== 1 ? "s" : ""} out of order`
+        : "Configured";
+      return {
+        key: def.type, label: def.label, value: String(pipelineCount),
+        status, severity: outOfOrderStageCount > 0 ? "critical" as const : "good" as const,
+        targetSection: def.targetSection, source: `Source: getLayouts -> getPipelines - ${pipelineCount} record${pipelineCount !== 1 ? "s" : ""}`,
+      };
+    }
     if (!isEntityResolved(st)) {
       return { key: def.type, label: def.label, value: "…", status: "Loading", severity: "neutral" as const, targetSection: def.targetSection, source: "Loading…" };
     }
-    // The generic zero-param getPipelines() call this entity state comes from
-    // has no layout_id to scope by, so it can undercount an org with more
-    // than one pipeline on the Deals layout - pipelineCount (from the real
-    // getLayouts -> getPipelines chain in usePipelineStages.ts) is the
-    // authoritative number once it's resolved.
-    const count = def.type === "pipelines" && pipelineCount !== null ? pipelineCount : st.items.length;
+    const count = st.items.length;
     const source = st.toolUsed ? `Source: ${st.toolUsed} - ${count} record${count !== 1 ? "s" : ""}` : "Source: no matching tool found";
     if (count === 0) {
       // A fetch error and a genuinely empty CRM both leave items at [] - only
@@ -2276,7 +2319,10 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOf
       if (st.error) {
         return { key: def.type, label: def.label, value: "-", status: `Couldn't verify - ${st.error}`, severity: "unknown" as const, targetSection: def.targetSection, source: `Source: ${st.toolUsed ?? "no matching tool found"} - fetch failed` };
       }
-      return { key: def.type, label: def.label, value: "N/A", status: "Not found", severity: "critical" as const, targetSection: def.targetSection, source };
+      // "0" here, not "N/A" - this branch is reached only when the fetch
+      // succeeded with no error, so a confirmed empty result is a real,
+      // known value (zero), not something unavailable/not applicable.
+      return { key: def.type, label: def.label, value: "0", status: "Not found", severity: "critical" as const, targetSection: def.targetSection, source };
     }
 
     let status: string;
@@ -2294,23 +2340,6 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOf
       case "profiles":
         status = count === 1 ? "Single profile" : "Configured";
         severity = count === 1 ? "warning" : "good";
-        break;
-      case "pipelines":
-        // outOfOrderStageCount comes from a separate getLayouts -> getPipelines
-        // fetch (usePipelineStages.ts) that can still be mid-flight even after
-        // this generic pipelines entity has resolved - reporting "Configured"
-        // before that settles is what caused this row to flip between
-        // "Configured" and "N stages out of order" on identical data.
-        if (!pipelineStagesResolved) {
-          status = "Checking stage order…";
-          severity = "neutral";
-        } else if (outOfOrderStageCount > 0) {
-          status = `${outOfOrderStageCount} stage${outOfOrderStageCount !== 1 ? "s" : ""} out of order`;
-          severity = "critical";
-        } else {
-          status = "Configured";
-          severity = "good";
-        }
         break;
       default:
         status = "Configured";
@@ -2787,6 +2816,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     pipelineStages.items.filter(s => s.outOfOrder).length,
     pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null,
     !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null),
+    pipelineStages.error,
   );
   // User-requested order: Layout Rules, Assignment Rules, Validation Rules,
   // Approval Rules, then the pre-existing Pipelines/Workflows/Profiles/
