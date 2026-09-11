@@ -10,7 +10,7 @@ import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
 import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, unassignedRoles,
-  usersWithDeletePermission,
+  usersWithDeletePermission, anyProfileHasPermissionData, isSystemAdministratorProfile,
   workflowReferencesModule, ruleCoverageCount, ruleCoverageHasActive, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
   overlappingWorkflows, identicalWorkflows,
@@ -405,6 +405,22 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   const roleCount = entityData.roles.items.length;
   const unassigned = unassignedRoles(entityData.roles.items, entityData.users.items);
   const deleteCapableUsers = usersWithDeletePermission(entityData.users.items, entityData.profiles.items);
+  // Zoho's profile *list* endpoint (what "profiles" is populated from) only
+  // ever returns name/id/type/description - the permissions_details/
+  // categories array lives on the per-profile detail endpoint, which not
+  // every connected MCP server exposes. Without it, deleteCapableUsers is
+  // always empty regardless of the org's real permissions, so that emptiness
+  // must never be read as "verified: nobody can delete records" - see
+  // anyProfileHasPermissionData.
+  const havePermissionData = anyProfileHasPermissionData(entityData.profiles.items);
+  // Even without real per-module permission data, Zoho's system Administrator
+  // profile is a platform guarantee, not an inference (see
+  // isSystemAdministratorProfile) - so its presence among deleteCapableUsers
+  // (added by usersWithDeletePermission's fallback) shouldn't be described as
+  // "unverified" the way a real profile's delete access would be if we had no
+  // data on it. Everything else - Standard, any custom profile - genuinely
+  // can't be verified without the per-profile detail endpoint.
+  const otherProfileCount = entityData.profiles.items.filter(p => !isSystemAdministratorProfile(p)).length;
   return [
     {
       id: "access-admin-count", label: "Admin access is limited", status: activeAdminCount <= 2 ? "pass" : "fail",
@@ -440,9 +456,13 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       // isn't inherently good or bad the way "too many admins" is, and this
       // app has no verified basis for a "too many" threshold here yet.
       status: "pass",
-      detail: deleteCapableUsers.length === 0
-        ? "No active user's profile grants delete access on any module."
-        : `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold a profile with delete access on at least one module:`,
+      detail: deleteCapableUsers.length > 0
+        ? havePermissionData
+          ? `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold a profile with delete access on at least one module:`
+          : `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold the Administrator profile, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying):${otherProfileCount > 0 ? ` Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.` : ""}`
+        : havePermissionData
+          ? "No active user's profile grants delete access on any module."
+          : "Delete-permission data isn't available - the connected profiles tool only returns profile name/id/type, not per-module permissions, so this can't be determined yet.",
       tags: deleteCapableUsers.length > 0 ? deleteCapableUsers.map((u, i) => getItemName(u, i)) : undefined,
       weight: 0,
     },

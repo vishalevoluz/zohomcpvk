@@ -72,13 +72,39 @@ export async function listTools(config: McpConfig): Promise<McpTool[]> {
 // text as if it were real tool output (e.g. one fake "layout" or "rule"
 // record with no real fields), silently miscounting a failed fetch as a
 // confirmed zero instead of surfacing it as the error it actually is.
+// Zoho's own tool-call error payloads (the JSON text embedded in an isError
+// content block) carry a stable {code, message, status:"error"} shape -
+// OAUTH_SCOPE_MISMATCH specifically means the connected MCP server's token
+// isn't authorized to call this particular tool. Left unparsed, that shape
+// surfaces as a raw JSON blob in the UI (see PanelEmptyState) instead of
+// something actionable. Parsed once, centrally, here - rather than every
+// one of the dozens of executeTool call sites needing its own copy of this
+// (BlueprintAudit.tsx/WorkflowAudit.tsx each maintain a near-identical
+// detectApiError for their own non-throwing response shapes, which this
+// doesn't replace).
+function parseZohoApiErrorText(text: string): string | null {
+  try {
+    const p = JSON.parse(text) as Record<string, unknown>;
+    if (p.status !== "error" || !p.code) return null;
+    const code = String(p.code);
+    const message = typeof p.message === "string" ? p.message : "Unknown API error";
+    if (code === "OAUTH_SCOPE_MISMATCH") {
+      return `OAuth scope error: ${message}. This tool isn't authorized on your Zoho MCP server - enable it under "Authorized Tools" for the Zoho CRM connection, then reconnect.`;
+    }
+    return `Zoho API error [${code}]: ${message}`;
+  } catch {
+    return null;
+  }
+}
+
 function toolCallFailureMessage(result: unknown): string | null {
   if (!result || typeof result !== "object") return null;
   const r = result as Record<string, unknown>;
   if (r.isError === true) {
     const content = Array.isArray(r.content) ? (r.content as Record<string, unknown>[]) : [];
     const text = content.find(c => c.type === "text" && typeof c.text === "string")?.text;
-    return typeof text === "string" ? text : "Tool reported an error";
+    if (typeof text !== "string") return "Tool reported an error";
+    return parseZohoApiErrorText(text) ?? text;
   }
   const sc = r.structuredContent as Record<string, unknown> | undefined;
   if (sc) {

@@ -7,7 +7,7 @@ import { moduleApiName, isDeletedModule } from "@/lib/crmPredicates";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type CrmEntityType = "blueprints" | "modules" | "layouts" | "tasks" | "pipelines" | "stages" | "workflows" | "profiles" | "users" | "roles" | "fields";
+export type CrmEntityType = "blueprints" | "modules" | "layouts" | "tasks" | "pipelines" | "stages" | "workflows" | "profiles" | "users" | "roles" | "fields" | "assignmentRules" | "approvalRules";
 
 export interface EntityState {
   items: unknown[];
@@ -32,6 +32,8 @@ export const CRM_ENTITIES: { type: CrmEntityType; label: string; icon: string; p
   { type: "users",      label: "Users",      icon: "◎", plural: "users" },
   { type: "roles",      label: "Roles",      icon: "◒", plural: "roles" },
   { type: "tasks",      label: "Tasks",      icon: "✓", plural: "tasks" },
+  { type: "assignmentRules", label: "Assignment Rules", icon: "➜", plural: "assignment rules" },
+  { type: "approvalRules",   label: "Approval Rules",   icon: "✔", plural: "approval rules" },
 ];
 
 export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns: RegExp[] }> = {
@@ -96,6 +98,17 @@ export const ENTITY_PREFS: Record<CrmEntityType, { preferred: string[]; patterns
     preferred: ["getFields", "getAllFields", "listFields", "getModuleFields", "getCRMFields"],
     patterns: [/getfield(?!byid)/i, /listfield/i, /allfield/i, /getfields/i],
   },
+  assignmentRules: {
+    preferred: ["getAssignmentRules", "getAllAssignmentRules", "listAssignmentRules"],
+    patterns: [/getassignmentrules$/i, /listassignmentrules/i, /allassignmentrules/i],
+  },
+  approvalRules: {
+    // Zoho's real list tool is getApprovalProcess(es) - anchored to end-of-name
+    // so it doesn't also match getApprovalProcessRules (a different, per-
+    // process drill-in tool) or getSingleApprovalProcess (per-id detail).
+    preferred: ["getApprovalProcess", "getApprovalProcesses", "getAllApprovalProcesses", "listApprovalProcesses"],
+    patterns: [/getapprovalprocess(es)?$/i, /listapprovalprocess/i, /allapprovalprocess/i],
+  },
 };
 
 // Zoho's fields endpoint is scoped to one module per call, with no "all
@@ -150,8 +163,8 @@ export function extractArray(output: unknown): unknown[] {
 
   // Try standard response keys (includes new entity keys)
   const keys = ["data", "blueprints", "modules", "layouts", "tasks", "pipelines", "stages",
-                 "workflows", "profiles", "users", "fields", "result", "results", "records",
-                 "items", "list", "response"];
+                 "workflows", "profiles", "users", "fields", "assignment_rules", "approval_process",
+                 "approval_processes", "result", "results", "records", "items", "list", "response"];
   for (const key of keys) {
     if (Array.isArray(r[key])) return r[key] as unknown[];
   }
@@ -262,6 +275,8 @@ function makeInitial(): Record<CrmEntityType, EntityState> {
     users:      { ...INIT_STATE },
     roles:      { ...INIT_STATE },
     fields:     { ...INIT_STATE },
+    assignmentRules: { ...INIT_STATE },
+    approvalRules:   { ...INIT_STATE },
   };
 }
 
@@ -332,6 +347,40 @@ export function useCrmEntities(
     return items;
   }, [config, onLog]);
 
+  // Zoho's profile *list* endpoint (what the generic path below fetches)
+  // only ever returns name/id/type/description - the permissions_details/
+  // categories array needed for checks like "Who can delete records" lives
+  // on the per-profile detail endpoint. When the connected server exposes
+  // one (commonly named getProfileById), fetch each profile's full detail
+  // and merge it into the summary item; servers that don't expose one, or a
+  // single profile's detail call that fails, just keep that profile's
+  // summary-only item - same "keep what worked" stance as fetchScopedFields'
+  // partial-failure handling below.
+  const enrichProfilesWithPermissions = useCallback(async (items: unknown[]) => {
+    const detailTool = tools.find(t => /getprofilebyid/i.test(t.name));
+    if (!detailTool || items.length === 0) return items;
+    const idLoc = findParam(findParamLocations(detailTool), /^id$|^profileId$/i) ?? { group: "path_variables", key: "id" };
+    const enriched: unknown[] = [];
+    for (const item of items) {
+      const id = getItemId(item);
+      if (!id) { enriched.push(item); continue; }
+      const input: Record<string, unknown> = {};
+      setParam(input, idLoc, id);
+      const start = Date.now();
+      try {
+        const output = await executeTool(config!, detailTool.name, input);
+        const detailArr = extractArray(output);
+        const detail = (detailArr[0] ?? output) as Record<string, unknown> | null;
+        onLog({ id: Math.random().toString(36).slice(2), tool: detailTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+        enriched.push(detail && typeof detail === "object" ? { ...(item as Record<string, unknown>), ...detail } : item);
+      } catch (e: unknown) {
+        onLog({ id: Math.random().toString(36).slice(2), tool: detailTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed to fetch profile detail", durationMs: Date.now() - start, timestamp: new Date() });
+        enriched.push(item);
+      }
+    }
+    return enriched;
+  }, [tools, config, onLog]);
+
   const fetchEntity = useCallback(async (type: CrmEntityType, moduleItemsOverride?: unknown[]): Promise<unknown[]> => {
     if (!config) return [];
     const tool = findToolForEntity(tools, type);
@@ -395,6 +444,8 @@ export function useCrmEntities(
         if (!pageLoc || pageItems.length === 0 || !extractPageInfo(output)?.moreRecords) break;
       }
 
+      if (type === "profiles") items = await enrichProfilesWithPermissions(items);
+
       setEntityData(prev => ({
         ...prev,
         [type]: { ...prev[type], loading: false, items, error: null, toolUsed: tool.name, lastFetched: Date.now() },
@@ -421,7 +472,7 @@ export function useCrmEntities(
       }));
       return items;
     }
-  }, [config, tools, onLog, fetchScopedFields]);
+  }, [config, tools, onLog, fetchScopedFields, enrichProfilesWithPermissions]);
 
   const fetchAll = useCallback(() => {
     if (!config) return;

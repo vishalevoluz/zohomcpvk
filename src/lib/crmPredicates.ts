@@ -385,46 +385,100 @@ export function isAdminProfileUser(user: unknown): boolean {
   return /admin/i.test(userProfileName(user));
 }
 
-// Every {key, value} boolean flag found anywhere inside a profile object,
-// however deeply nested - permission data isn't consistently shaped across
-// Zoho MCP server versions (nested sections[].categories[].permissions[]
-// objects, a flat permissions_details[] array, or a flat per-module map like
-// { create: true, edit: true, delete: true, view: false }), so scanning
-// every key/value pair catches whichever shape a given server actually uses
-// instead of guessing one specific nesting and silently finding nothing.
-function deepBooleanFlags(value: unknown, lastKey: string | null, out: { key: string; value: boolean }[]): void {
-  if (typeof value === "boolean") {
-    if (lastKey) out.push({ key: lastKey.toLowerCase(), value });
-    return;
-  }
+// Every permission signal found anywhere inside a profile object, however
+// deeply nested - permission data isn't consistently shaped across Zoho MCP
+// server versions. Two shapes are handled:
+//   A) a flat boolean flag keyed directly by a permission verb, e.g.
+//      { create: true, edit: true, delete: true, view: false }
+//   B) Zoho's actual permissions_details/categories entry shape, a sibling
+//      pair like { name: "delete", enabled: true } (or type/category/label
+//      + enabled/granted/value/allowed) - the boolean itself is keyed
+//      "enabled", not "delete", so a scan that only looked at the boolean's
+//      own key (as an earlier version of this function did) never matched
+//      real Zoho permission data at all, only a hypothetical flat shape.
+// Scanning every object for both shapes catches whichever a given server
+// actually uses instead of guessing one specific nesting and silently
+// finding nothing.
+const PERMISSION_VERB = /\b(view|read|create|add|edit|update|modify|delete|remove|export|import|convert|approve|print|email|clone|share|mass_?delete|change_?owner)\b/i;
+const PERMISSION_BOOL_KEYS = new Set(["enabled", "value", "granted", "allowed", "has_access"]);
+const PERMISSION_NAME_KEYS = new Set(["name", "type", "category", "permission_type", "permission", "label", "display_label", "key"]);
+
+function permissionPairSignal(obj: Record<string, unknown>): { verb: string; granted: boolean } | null {
+  const nameEntry = Object.entries(obj).find(([k, v]) => PERMISSION_NAME_KEYS.has(k.toLowerCase()) && typeof v === "string");
+  if (!nameEntry) return null;
+  const boolEntry = Object.entries(obj).find(([k, v]) => PERMISSION_BOOL_KEYS.has(k.toLowerCase()) && typeof v === "boolean");
+  if (!boolEntry) return null;
+  return { verb: nameEntry[1] as string, granted: boolEntry[1] as boolean };
+}
+
+function collectPermissionSignals(value: unknown, out: { verb: string; granted: boolean }[]): void {
+  if (!value || typeof value !== "object") return;
   if (Array.isArray(value)) {
-    for (const v of value) deepBooleanFlags(v, lastKey, out);
+    for (const v of value) collectPermissionSignals(v, out);
     return;
   }
-  if (value && typeof value === "object") {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) deepBooleanFlags(v, k, out);
+  const obj = value as Record<string, unknown>;
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof v === "boolean" && PERMISSION_VERB.test(k)) out.push({ verb: k, granted: v });
   }
+  const pair = permissionPairSignal(obj);
+  if (pair) out.push(pair);
+  for (const v of Object.values(obj)) collectPermissionSignals(v, out);
 }
 
 // True when this profile grants delete (or "remove") access on at least one
-// module - matches any boolean-true flag anywhere in the profile whose key
-// mentions delete/remove (e.g. "delete", "leads_delete", "can_remove"), a
-// looser but far more resilient match than trusting one specific permission
-// list shape. A flag with no boolean value at all (present but not true/
-// false) is skipped rather than guessed at.
+// module - matches shape (A) and (B) above wherever the verb is delete/
+// remove and the paired boolean is true.
 export function profileHasDeletePermission(profile: unknown): boolean {
   if (!profile || typeof profile !== "object") return false;
-  const flags: { key: string; value: boolean }[] = [];
-  deepBooleanFlags(profile, null, flags);
-  return flags.some(f => /delete|remove/.test(f.key) && f.value === true);
+  const signals: { verb: string; granted: boolean }[] = [];
+  collectPermissionSignals(profile, signals);
+  return signals.some(s => s.granted && /delete|remove/i.test(s.verb));
+}
+
+// True when this profile object carries *any* recognizable permission
+// signal at all, regardless of which verb or whether it's granted - used to
+// tell "permission data says zero delete access" apart from "this server's
+// profile list never included permission data in the first place" (Zoho's
+// list-profiles endpoint returns only name/id/type/description; the full
+// permissions_details/categories array is only on the per-profile detail
+// endpoint). Confidently reporting "no one can delete records" when the
+// real answer is "we don't know" is worse than saying so plainly.
+export function profileHasPermissionData(profile: unknown): boolean {
+  if (!profile || typeof profile !== "object") return false;
+  const signals: { verb: string; granted: boolean }[] = [];
+  collectPermissionSignals(profile, signals);
+  return signals.length > 0;
+}
+
+export function anyProfileHasPermissionData(profiles: unknown[]): boolean {
+  return profiles.some(profileHasPermissionData);
+}
+
+// Zoho's system-seeded "Administrator" profile (custom: false, name exactly
+// "Administrator") always carries every permission, delete included - this
+// can't be reduced or reconfigured away, unlike every other profile whose
+// real access has to come from actual permission data. It's a fixed platform
+// guarantee, not an inference, so it's safe to report even when the
+// connected server's profile list has no permissions_details at all (see
+// profileHasPermissionData above). A custom profile someone happens to name
+// "Administrator" doesn't get this - only the non-custom, platform-seeded one.
+export function isSystemAdministratorProfile(profile: unknown): boolean {
+  if (!profile || typeof profile !== "object") return false;
+  const p = profile as Record<string, unknown>;
+  return p.custom === false && String(p.name ?? "").trim().toLowerCase() === "administrator";
 }
 
 // Active, non-deleted users whose assigned profile grants delete access on
 // at least one module - matched by profile name (Zoho profile names are
-// unique per org), same matching convention isAdminProfileUser uses.
+// unique per org), same matching convention isAdminProfileUser uses. Always
+// includes the system Administrator profile (see isSystemAdministratorProfile)
+// even when no real permission data was returned at all, since that one
+// profile's delete access is a platform guarantee rather than something that
+// needs verifying.
 export function usersWithDeletePermission(users: unknown[], profiles: unknown[]): unknown[] {
   const deleteProfileNames = new Set(
-    profiles.filter(profileHasDeletePermission)
+    profiles.filter(p => profileHasDeletePermission(p) || isSystemAdministratorProfile(p))
       .map(p => String((p as Record<string, unknown> | null)?.name ?? "").toLowerCase())
       .filter(Boolean)
   );
@@ -594,6 +648,25 @@ export function isInternalModule(item: unknown): boolean {
 
 function isReadOnlyModule(r: Record<string, unknown>): boolean {
   return r.api_supported === false || (r.creatable === false && r.editable === false);
+}
+
+// Every module worth scanning per-module config endpoints (layout rules,
+// validation rules, ...) against - excludes the same non-real-module noise
+// isInternalModule/isSystemHiddenModule/isDeletedModule already carve out for
+// module *counting*, plus api_supported === false (a module the API itself
+// refuses to touch, so a per-module rule call on it would just fail). Unlike
+// resolveCoreModuleApiNames in useCrmEntities.ts (hard-matched to just
+// Leads/Contacts/Deals/Accounts), this returns every such module - for a scan
+// the user explicitly wants run org-wide, not just the core lifecycle ones.
+export function resolveUsableModuleApiNames(modules: unknown[]): string[] {
+  return modules
+    .filter(m => {
+      if (isDeletedModule(m) || isInternalModule(m) || isSystemHiddenModule(m)) return false;
+      const r = (m ?? {}) as Record<string, unknown>;
+      return r.api_supported !== false;
+    })
+    .map(moduleApiName)
+    .filter(Boolean);
 }
 
 // "Unused" here means api access disabled, or nobody can create/edit records

@@ -17,7 +17,7 @@ import {
   findToolForEntity,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames, isSystemGeneratedRule, resolveUsableModuleApiNames } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { isScheduleTool } from "@/lib/useRuleCoverage";
@@ -1644,6 +1644,214 @@ function useFunctionRecords(config: McpConfig | null, tools: McpTool[], scanActi
   return { items, listState, failureCount, codeByFnId, issuesByFnId, scanProgress, fetchCode, rescan };
 }
 
+interface ModuleRuleGroup { apiName: string; items: unknown[]; }
+
+// Same tool-reported-failure detection useRuleCoverage.ts relies on for these
+// same tools: Zoho's tool wrapper can report a business-logic failure (e.g. a
+// missing/mismatched "module" param) in structuredContent.status/data.status
+// while the MCP transport call itself still looks like a success - without
+// this, that single error-message text block gets misread as one real rule.
+function isRuleFailureResponse(result: unknown): boolean {
+  if (!result || typeof result !== "object") return false;
+  const sc = (result as Record<string, unknown>).structuredContent as Record<string, unknown> | undefined;
+  if (!sc) return false;
+  const dataStatus = (sc.data as Record<string, unknown> | undefined)?.status;
+  return sc.status === "failure" || dataStatus === "failure";
+}
+
+// Defends against a tool that accepts the module filter argument but doesn't
+// actually apply it server-side (returns every module's rules regardless of
+// what was asked for) - same cross-check useRuleCoverage.ts uses. An item
+// with no discoverable module reference at all is trusted as-is.
+function extractRuleItems(result: unknown, apiName: string): unknown[] {
+  if (isRuleFailureResponse(result)) return [];
+  const parsed = parseMcpJson(result);
+  if (!parsed) return [];
+  let items: unknown[] = [];
+  for (const v of Object.values(parsed)) {
+    if (Array.isArray(v)) { items = v; break; }
+  }
+  return items.filter(item => {
+    const label = workflowModuleLabel(item);
+    return label === "" || label.toLowerCase() === apiName.toLowerCase();
+  });
+}
+
+// A stable identity for a set of rule items - sorted so item order in the
+// response can't hide a real match, falling back to the full JSON of an item
+// with no id/name at all rather than dropping it silently.
+function fingerprintRuleItems(items: unknown[]): string {
+  return items
+    .map(it => {
+      const r = (it ?? {}) as Record<string, unknown>;
+      return String(r.id ?? r.rule_id ?? r.name ?? JSON.stringify(r));
+    })
+    .sort()
+    .join("|");
+}
+
+// Per-module config-rule scan (Layout Rules / Validation Rules) - both are
+// genuinely per-module Zoho endpoints with no "all modules" mode, so this
+// runs one call per usable module (resolveUsableModuleApiNames - every real,
+// non-deleted/internal/system-hidden module in the org, not just the core
+// lifecycle 4), gated behind scanActive (the card being open) exactly like
+// useFunctionRecords' per-function code scan above - this can be 100+ calls
+// and must not fire on every connect.
+//
+// useRuleCoverage.ts already fetches these same tools per-module, but only
+// for the 4 core lifecycle modules and keeping only aggregate stats (for the
+// Health Score's Automation Coverage dimension) - deliberately not reused
+// here to avoid any risk to that score; isRuleFailureResponse/
+// extractRuleItems/fingerprintRuleItems above are a small, intentional
+// duplication of its same proven logic (see the implementation plan).
+function useModuleRuleScan(
+  config: McpConfig | null,
+  tools: McpTool[],
+  moduleItems: unknown[],
+  toolNamePattern: RegExp,
+  scanActive: boolean,
+  onLog: (log: ExecutionLog) => void,
+) {
+  const [perModule, setPerModule] = useState<ModuleRuleGroup[]>([]);
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number; loading: boolean }>({ done: 0, total: 0, loading: false });
+  const [scanned, setScanned] = useState(false);
+  const scanFetchedRef = useRef(false);
+  const wasScanActiveRef = useRef(false);
+  const [scanGeneration, setScanGeneration] = useState(0);
+
+  // Same reset-on-close-then-reopen behavior as useFunctionRecords' scan - a
+  // scan that failed (bad tool match, every call erroring) shouldn't stay
+  // broken for the rest of the session; reopening the card retries fresh.
+  useEffect(() => {
+    if (!scanActive && wasScanActiveRef.current) scanFetchedRef.current = false;
+    wasScanActiveRef.current = scanActive;
+  }, [scanActive]);
+
+  useEffect(() => {
+    if (!scanActive || scanFetchedRef.current) return;
+    if (moduleItems.length === 0) return;
+    const tool = tools.find(t => toolNamePattern.test(t.name));
+    if (!tool) return;
+    const moduleLoc = findParam(findParamLocations(tool), /module/i);
+    if (!moduleLoc) return;
+    scanFetchedRef.current = true;
+
+    const targets = resolveUsableModuleApiNames(moduleItems);
+    setScanProgress({ done: 0, total: targets.length, loading: true });
+    setPerModule([]);
+    setScanned(false);
+
+    void (async () => {
+      const results: ModuleRuleGroup[] = [];
+      for (const apiName of targets) {
+        const start = Date.now();
+        const input: Record<string, unknown> = {};
+        setParam(input, moduleLoc, apiName);
+        try {
+          const output = await executeTool(config as McpConfig, tool.name, input);
+          const failed = isRuleFailureResponse(output);
+          const items = failed ? [] : extractRuleItems(output, apiName).filter(item => !isSystemGeneratedRule(item));
+          results.push({ apiName, items });
+          onLog(failed
+            ? { id: crypto.randomUUID(), tool: tool.name, input, output, status: "error", errorMessage: "Tool reported failure", durationMs: Date.now() - start, timestamp: new Date() }
+            : { id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+        } catch (e: unknown) {
+          results.push({ apiName, items: [] });
+          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+        }
+        setScanProgress(prev => ({ ...prev, done: prev.done + 1 }));
+      }
+
+      // Same "module filter isn't really being applied server-side" guard as
+      // useRuleCoverage.ts: if 2+ modules came back with a non-empty result
+      // that's byte-for-byte identical, trust none of them rather than report
+      // numbers we now have concrete reason to distrust across the board.
+      const nonEmpty = results.filter(r => r.items.length > 0);
+      const fingerprints = nonEmpty.map(r => fingerprintRuleItems(r.items));
+      const filterLooksBroken = nonEmpty.length >= 2 && fingerprints.every(f => f === fingerprints[0]);
+
+      setPerModule(filterLooksBroken ? results.map(r => ({ apiName: r.apiName, items: [] })) : results);
+      setScanProgress(prev => ({ ...prev, loading: false }));
+      setScanned(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanActive, moduleItems, config, tools, onLog, scanGeneration]);
+
+  function rescan() {
+    scanFetchedRef.current = false;
+    setScanGeneration(g => g + 1);
+  }
+
+  return { perModule, scanProgress, scanned, rescan };
+}
+
+// Generic counterpart to namedExamples above (which is typed to
+// WorkflowBreakdownRow specifically) - same "name a few real ones instead of
+// just a bare count" convention, for the raw rule/process items these four
+// builders work with instead.
+function namedItemExamples(items: unknown[], limit = 3): string {
+  const shown = items.slice(0, limit).map((it, i) => getItemName(it, i)).join(", ");
+  return items.length > limit ? `e.g. ${shown}, etc.` : `e.g. ${shown}.`;
+}
+
+function buildZiaLayoutRuleInsight(perModule: ModuleRuleGroup[], scanned: boolean): ZiaInsight {
+  if (!scanned) return { summary: "Layout rules haven't finished scanning yet.", points: [] };
+  const all = perModule.flatMap(m => m.items);
+  if (all.length === 0) return { summary: "No custom layout rules found across the modules scanned.", points: [] };
+  const inactive = all.filter(i => !isActiveWorkflow(i));
+  const allInactiveModules = perModule.filter(m => m.items.length > 0 && m.items.every(i => !isActiveWorkflow(i)));
+  const points: string[] = [];
+  if (inactive.length > 0) points.push(cap(`${inactive.length} of ${all.length} layout rule${all.length !== 1 ? "s are" : " is"} inactive.`));
+  if (allInactiveModules.length > 0) points.push(cap(`${allInactiveModules.length} module${allInactiveModules.length !== 1 ? "s have" : " has"} layout rules configured but none currently active - ${allInactiveModules.slice(0, 3).map(m => m.apiName).join(", ")}${allInactiveModules.length > 3 ? ", etc." : "."}`));
+  if (points.length === 0) return { summary: `All ${all.length} layout rule${all.length !== 1 ? "s are" : " is"} active across ${perModule.filter(m => m.items.length > 0).length} module${perModule.filter(m => m.items.length > 0).length !== 1 ? "s" : ""} - looks healthy.`, points: [] };
+  return { summary: "", points, action: "Reactivate the ones still needed, or delete the rest so layout behavior stays easy to audit." };
+}
+
+function buildZiaValidationRuleInsight(perModule: ModuleRuleGroup[], scanned: boolean): ZiaInsight {
+  if (!scanned) return { summary: "Validation rules haven't finished scanning yet.", points: [] };
+  const all = perModule.flatMap(m => m.items);
+  if (all.length === 0) return { summary: "No custom validation rules found across the modules scanned - nothing is enforcing data quality at the field level.", points: [] };
+  const inactive = all.filter(i => !isActiveWorkflow(i));
+  const allInactiveModules = perModule.filter(m => m.items.length > 0 && m.items.every(i => !isActiveWorkflow(i)));
+  const points: string[] = [];
+  if (inactive.length > 0) points.push(cap(`${inactive.length} of ${all.length} validation rule${all.length !== 1 ? "s are" : " is"} inactive - data can save without whatever check that rule was meant to enforce.`));
+  if (allInactiveModules.length > 0) points.push(cap(`${allInactiveModules.length} module${allInactiveModules.length !== 1 ? "s have" : " has"} validation rules configured but none currently active - ${allInactiveModules.slice(0, 3).map(m => m.apiName).join(", ")}${allInactiveModules.length > 3 ? ", etc." : "."}`));
+  if (points.length === 0) return { summary: `All ${all.length} validation rule${all.length !== 1 ? "s are" : " is"} active across ${perModule.filter(m => m.items.length > 0).length} module${perModule.filter(m => m.items.length > 0).length !== 1 ? "s" : ""} - data quality enforcement looks healthy.`, points: [] };
+  return { summary: "", points, action: "Reactivate the ones still needed, or delete the rest so a passing record actually means what the rule implies." };
+}
+
+// Assignment rules carry no active/enabled flag at all on any known Zoho MCP
+// server response - unlike every other rule type here, so this deliberately
+// never frames them as "active/inactive" (that would just be reporting
+// isActiveWorkflow's default-true fallback as if it were real data). Instead
+// this flags coverage and same-module concentration, which the raw list can
+// actually support.
+function buildZiaAssignmentRuleInsight(items: unknown[]): ZiaInsight {
+  if (items.length === 0) return { summary: "No custom assignment rules found - new records rely on default/manual owner assignment everywhere.", points: [] };
+  const byModule = new Map<string, unknown[]>();
+  items.forEach((item, i) => {
+    const mod = workflowModuleLabel(item) || "Unknown";
+    byModule.set(mod, [...(byModule.get(mod) ?? []), item]);
+    void i;
+  });
+  const crowded = [...byModule.entries()].filter(([, v]) => v.length >= 3).sort((a, b) => b[1].length - a[1].length);
+  const points: string[] = [];
+  points.push(cap(`${items.length} assignment rule${items.length !== 1 ? "s span" : " spans"} ${byModule.size} module${byModule.size !== 1 ? "s" : ""} - ${[...byModule.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 3).map(([m, v]) => `${m} (${v.length})`).join(", ")}${byModule.size > 3 ? ", etc." : "."}`));
+  if (crowded.length > 0) points.push(cap(`${crowded.map(([m]) => m).join(", ")} ${crowded.length !== 1 ? "each carry" : "carries"} 3+ assignment rules - worth confirming their criteria don't overlap, since only the first matching rule assigns the record.`));
+  return { summary: "", points, action: crowded.length > 0 ? "Review the crowded modules' rule order and criteria for real conflicts." : undefined };
+}
+
+function buildZiaApprovalRuleInsight(items: unknown[]): ZiaInsight {
+  if (items.length === 0) return { summary: "No custom approval processes found - records save without an approval step anywhere in the org.", points: [] };
+  const inactive = items.filter(i => !isActiveWorkflow(i));
+  const emptyRules = items.filter(i => Number((i as Record<string, unknown> | null)?.rules_count ?? 0) === 0);
+  const points: string[] = [];
+  if (inactive.length > 0) points.push(cap(`${inactive.length} of ${items.length} approval process${items.length !== 1 ? "es are" : " is"} inactive - configured but not currently enforcing anything: ${namedItemExamples(inactive)}`));
+  if (emptyRules.length > 0) points.push(cap(`${emptyRules.length} approval process${emptyRules.length !== 1 ? "es have" : " has"} zero rules configured, so it can never actually trigger: ${namedItemExamples(emptyRules)}`));
+  if (points.length === 0) return { summary: `All ${items.length} approval process${items.length !== 1 ? "es are" : " is"} active with at least one rule - approval enforcement looks healthy.`, points: [] };
+  return { summary: "", points, action: "Reactivate the ones still needed, or delete the rest so the approval trail stays trustworthy." };
+}
+
 interface WorkflowDetailState { criteria: unknown; actions: unknown; unavailable: boolean; }
 const WORKFLOW_DETAIL_SCAN_CAP = 100;
 
@@ -1950,7 +2158,10 @@ function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): U
 }
 
 interface ConfigRow {
-  key: CrmEntityType;
+  // Layout Rules / Validation Rules aren't CrmEntityType-backed (see
+  // moduleRuleScanConfigRow below) - widened just enough to admit those two
+  // synthetic rows alongside the real entityData-backed ones.
+  key: CrmEntityType | "layoutRules" | "validationRules";
   label: string;
   value: string;
   status: string;
@@ -1959,7 +2170,15 @@ interface ConfigRow {
   source: string;
 }
 
+// Assignment Rules and Approval Rules are prepended (rendered first, right
+// below the Functions KPI tile) rather than appended - both are genuinely
+// org-wide, paginated list endpoints (no per-module scan needed, unlike
+// Layout Rules/Validation Rules below), so they ride this same generic
+// entityData-backed mechanism as Pipelines/Workflows/Profiles/Activity with
+// zero new fetch logic.
 const CONFIG_ROW_DEFS: { type: CrmEntityType; label: string; targetSection: Section | null }[] = [
+  { type: "assignmentRules", label: "Assignment Rules", targetSection: "modules" },
+  { type: "approvalRules",   label: "Approval Rules",   targetSection: "modules" },
   { type: "pipelines", label: "Pipelines", targetSection: "modules" },
   { type: "workflows", label: "Workflows", targetSection: "workflows" },
   { type: "profiles",  label: "Profiles",  targetSection: null },
@@ -1993,7 +2212,9 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOf
     let status: string;
     let severity: Severity | "neutral";
     switch (def.type) {
-      case "workflows": {
+      case "workflows":
+      case "assignmentRules":
+      case "approvalRules": {
         const inactive = st.items.filter(i => !isActiveWorkflow(i)).length;
         if (inactive === 0) { status = "Active"; severity = "good"; }
         else if (inactive === count) { status = `${inactive} inactive`; severity = "critical"; }
@@ -2030,6 +2251,35 @@ function computeConfigRows(entityData: Record<CrmEntityType, EntityState>, outOf
   });
 }
 
+// Layout Rules / Validation Rules aren't entityData-backed (see
+// useModuleRuleScan above) - their config-list row is built directly from
+// the on-demand scan hook's state instead of going through computeConfigRows.
+function moduleRuleScanConfigRow(
+  key: "layoutRules" | "validationRules",
+  label: string,
+  scan: { perModule: ModuleRuleGroup[]; scanProgress: { done: number; total: number; loading: boolean }; scanned: boolean },
+): ConfigRow {
+  if (scan.scanProgress.loading) {
+    return { key, label, value: "…", status: `Scanning… ${scan.scanProgress.done}/${scan.scanProgress.total}`, severity: "neutral", targetSection: "modules", source: "Scanning every module - one call per module" };
+  }
+  if (!scan.scanned) {
+    return { key, label, value: "-", status: "Waiting for modules to load…", severity: "unknown", targetSection: "modules", source: "Not scanned yet" };
+  }
+  const totalRules = scan.perModule.reduce((sum, m) => sum + m.items.length, 0);
+  const modulesWithRules = scan.perModule.filter(m => m.items.length > 0).length;
+  if (totalRules === 0) {
+    return { key, label, value: "0", status: `No rules found across ${scan.perModule.length} modules`, severity: "warning", targetSection: "modules", source: `Scanned ${scan.perModule.length} modules` };
+  }
+  const inactive = scan.perModule.reduce((sum, m) => sum + m.items.filter(i => !isActiveWorkflow(i)).length, 0);
+  return {
+    key, label, value: String(totalRules),
+    status: `${inactive} inactive across ${modulesWithRules} module${modulesWithRules !== 1 ? "s" : ""}`,
+    severity: inactive === 0 ? "good" : inactive === totalRules ? "critical" : "warning",
+    targetSection: "modules",
+    source: `Scanned ${scan.perModule.length} modules`,
+  };
+}
+
 function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label: string; onRetry: () => void }) {
   if (state.loading) {
     return <p className="business-view-hint"><span className="spinner" /> Loading {label.toLowerCase()}…</p>;
@@ -2043,6 +2293,77 @@ function PanelEmptyState({ state, label, onRetry }: { state: EntityState; label:
     );
   }
   return <p className="business-view-hint">No {label.toLowerCase()} found.</p>;
+}
+
+// Shared detail-panel body for Layout Rules and Validation Rules - both are
+// on-demand per-module scans (see useModuleRuleScan) with an identical
+// before/during/after-scan shape, so this is written once and used for both
+// cards instead of duplicating the same ~50 lines twice.
+function ModuleRuleScanPanel({ title, ziaTitle, ziaInsight, scan, search, onSearchChange, matchesSearch, onClose }: {
+  title: string;
+  ziaTitle: string;
+  ziaInsight: ZiaInsight;
+  scan: { perModule: ModuleRuleGroup[]; scanProgress: { done: number; total: number; loading: boolean }; scanned: boolean; rescan: () => void };
+  search: string;
+  onSearchChange: (v: string) => void;
+  matchesSearch: (...values: (string | null | undefined)[]) => boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div className="kpi-drilldown">
+      <div className="kpi-drilldown-header">
+        <h4>{title}</h4>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button className="btn-secondary" onClick={scan.rescan} disabled={scan.scanProgress.loading}>
+            {scan.scanProgress.loading ? <><span className="spinner" /> Scanning…</> : scan.scanned ? "↺ Rescan all modules" : "▶ Scan all modules"}
+          </button>
+          <button className="kpi-drilldown-close" onClick={onClose}>✕</button>
+        </div>
+      </div>
+      {!scan.scanned && !scan.scanProgress.loading && (
+        <p className="business-view-hint">
+          This is a per-module Zoho endpoint with no "list all modules" mode - every real module in the org is scanned automatically, one API call per module. This can take a little while for a large org.
+        </p>
+      )}
+      {scan.scanProgress.loading && (
+        <p className="kpi-drilldown-progress">
+          <span className="spinner" /> Scanning module {scan.scanProgress.done} of {scan.scanProgress.total}…
+        </p>
+      )}
+      {scan.scanned && !scan.scanProgress.loading && (
+        <>
+          <input
+            type="text"
+            className="kpi-drilldown-search"
+            placeholder="Search modules…"
+            value={search}
+            onChange={e => onSearchChange(e.target.value)}
+          />
+          <div className="kpi-drilldown-table kpi-drilldown-table-single">
+            {scan.perModule.filter(m => matchesSearch(m.apiName)).map(m => {
+              const active = m.items.filter(isActiveWorkflow).length;
+              const inactive = m.items.length - active;
+              return (
+                <div key={m.apiName} className="kpi-drilldown-row">
+                  <span className="kpi-drilldown-module">{m.apiName}</span>
+                  <span className="kpi-drilldown-badge neutral">{m.items.length} rule{m.items.length !== 1 ? "s" : ""}</span>
+                  {active > 0 && <span className="kpi-drilldown-badge status-active">{active} active</span>}
+                  {inactive > 0 && <span className="kpi-drilldown-badge status-inactive">{inactive} inactive</span>}
+                </div>
+              );
+            })}
+          </div>
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">{ziaTitle}</span>
+            </div>
+            <ZiaRecBody {...ziaInsight} />
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -2072,6 +2393,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // gate two visually-separate "expand below" sections; now there's only one
   // selection driving one detail slot.
   type CardKey = "modules" | "blueprints" | "users" | "schedules" | "functions"
+               | "layoutRules" | "assignmentRules" | "validationRules" | "approvalRules"
                | "pipelines" | "workflows" | "profiles" | "activity";
   const [selectedCard, setSelectedCard] = useState<CardKey | null>("modules");
   const detailPanelRef = useRef<HTMLDivElement>(null);
@@ -2092,6 +2414,18 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const scheduleRecords = useScheduleRecords(config, tools, selectedCard === "schedules", onLog);
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
   const workflowDetails = useWorkflowDetails(config, tools, entityData.workflows.items, selectedCard === "workflows", onLog);
+  // Unlike Schedules/Functions/Workflows above (deliberately deferred until
+  // their own drilldown card is opened - each fires one call per module/
+  // function/workflow and can be expensive on a large org), Layout Rules and
+  // Validation Rules are cheap enough and requested to auto-scan as soon as
+  // modules resolve, same as the entityData-backed Assignment/Approval Rules
+  // rows - so their real counts are already sitting in the config list
+  // before the user ever opens either card, instead of showing "Click to
+  // scan every module" until they do.
+  const layoutRuleScan = useModuleRuleScan(config, tools, entityData.modules.items, /getlayoutrules$/i, true, onLog);
+  const validationRuleScan = useModuleRuleScan(config, tools, entityData.modules.items, /getvalidationrules$/i, true, onLog);
+  const [assignmentRuleFilter, setAssignmentRuleFilter] = useState<"all" | "active" | "inactive">("all");
+  const [approvalRuleFilter, setApprovalRuleFilter] = useState<"all" | "active" | "inactive">("all");
   // Duplicate-name groups show their matched functions immediately, same as
   // the Workflow card's "Duplicate Match Details" panel (expanded by default)
   // - this tracks which groups a user has manually collapsed, rather than
@@ -2334,11 +2668,33 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     pipelineStages.lastFetched !== null ? pipelineStages.pipelineCount : null,
     !pipelineStages.loading && (pipelineStages.lastFetched !== null || pipelineStages.error !== null),
   );
+  // User-requested order: Layout Rules, Assignment Rules, Validation Rules,
+  // Approval Rules, then the pre-existing Pipelines/Workflows/Profiles/
+  // Activity rows - Layout/Validation Rules are synthetic (scan-hook-backed,
+  // not entityData-backed - see moduleRuleScanConfigRow) so they're spliced
+  // in here rather than living in CONFIG_ROW_DEFS/computeConfigRows.
+  const assignmentRulesRow = configRows.find(r => r.key === "assignmentRules")!;
+  const approvalRulesRow = configRows.find(r => r.key === "approvalRules")!;
+  // Workflows is pulled out of this list entirely (not just reordered within
+  // it) - it's rendered right after the Modules tile up in the main KPI row
+  // instead, per user request, so it doesn't also appear down here.
+  const workflowsRow = configRows.find(r => r.key === "workflows")!;
+  const displayConfigRows: ConfigRow[] = [
+    moduleRuleScanConfigRow("layoutRules", "Layout Rules", layoutRuleScan),
+    assignmentRulesRow,
+    moduleRuleScanConfigRow("validationRules", "Validation Rules", validationRuleScan),
+    approvalRulesRow,
+    ...configRows.filter(r => r.key !== "assignmentRules" && r.key !== "approvalRules" && r.key !== "workflows"),
+  ];
   const enrichedWorkflowItems = enrichWorkflowsWithDetail(entityData.workflows.items, workflowDetails.detailByWfId);
   const workflowBreakdown = computeWorkflowBreakdown(enrichedWorkflowItems);
   const workflowDuplicateGroups = computeWorkflowDuplicateGroups(enrichedWorkflowItems);
   const workflowOverlapGroups = computeWorkflowOverlapGroups(enrichedWorkflowItems);
   const ziaWorkflowInsight = buildZiaWorkflowInsight(workflowBreakdown);
+  const ziaLayoutRuleInsight = buildZiaLayoutRuleInsight(layoutRuleScan.perModule, layoutRuleScan.scanned);
+  const ziaValidationRuleInsight = buildZiaValidationRuleInsight(validationRuleScan.perModule, validationRuleScan.scanned);
+  const ziaAssignmentRuleInsight = buildZiaAssignmentRuleInsight(entityData.assignmentRules.items);
+  const ziaApprovalRuleInsight = buildZiaApprovalRuleInsight(entityData.approvalRules.items);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const profileItems = entityData.profiles.items;
@@ -2750,22 +3106,43 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
       {/* ── Data & Recommendations: card list (left) + detail panel (right) ──── */}
       <div className="crmov-master-detail">
       <div className="crmov-card-list">
-        {kpis.map(k => (
-          <button
-            key={k.key}
-            type="button"
-            className={`crmov-card kpi-${k.severity} ${k.clickable ? "clickable" : ""} ${selectedCard === k.key ? "selected" : ""}`}
-            onClick={k.clickable ? () => setSelectedCard(prev => (prev === k.key ? null : (k.key as CardKey))) : undefined}
-            disabled={!k.clickable}
-            data-tooltip={k.source}
-          >
-            <span className="kpi-tile-label">{k.label}</span>
-            <span className="kpi-tile-value">{k.unknown ? "-" : k.value.toLocaleString()}</span>
-            <span className="kpi-tile-note">{k.note}</span>
-          </button>
-        ))}
+        {kpis.flatMap(k => {
+          const tile = (
+            <button
+              key={k.key}
+              type="button"
+              className={`crmov-card kpi-${k.severity} ${k.clickable ? "clickable" : ""} ${selectedCard === k.key ? "selected" : ""}`}
+              onClick={k.clickable ? () => setSelectedCard(prev => (prev === k.key ? null : (k.key as CardKey))) : undefined}
+              disabled={!k.clickable}
+              data-tooltip={k.source}
+            >
+              <span className="kpi-tile-label">{k.label}</span>
+              <span className="kpi-tile-value">{k.unknown ? "-" : k.value.toLocaleString()}</span>
+              <span className="kpi-tile-note">{k.note}</span>
+            </button>
+          );
+          // Workflows moved up here, right after Modules, instead of sitting
+          // down in the CRM Configuration list with the other config rows -
+          // per user request. Still the same workflowsRow data/severity, just
+          // rendered in the kpi-card visual style since it's now sitting
+          // among the kpi tiles.
+          if (k.key !== "modules") return [tile];
+          return [tile, (
+            <button
+              key="workflows"
+              type="button"
+              className={`crmov-card config-${workflowsRow.severity} ${selectedCard === "workflows" ? "selected" : ""}`}
+              onClick={() => setSelectedCard(prev => (prev === "workflows" ? null : "workflows"))}
+              data-tooltip={workflowsRow.source}
+            >
+              <span className="kpi-tile-label">{workflowsRow.label}</span>
+              <span className="kpi-tile-value">{workflowsRow.value}</span>
+              <span className="kpi-tile-note">{workflowsRow.status}</span>
+            </button>
+          )];
+        })}
         <div className="crmov-card-list-divider">CRM Configuration</div>
-        {configRows.map(row => {
+        {displayConfigRows.map(row => {
           const cardKey: CardKey = row.key === "tasks" ? "activity" : (row.key as CardKey);
           return (
             <button
@@ -3453,6 +3830,150 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             </div>
             <ZiaRecBody {...ziaWorkflowInsight} />
           </div>
+        </div>
+      )}
+
+      {selectedCard === "layoutRules" && (
+        <ModuleRuleScanPanel
+          title="Layout Rules - Active / Inactive by Module"
+          ziaTitle="Zia Recommendation - Layout Rules"
+          ziaInsight={ziaLayoutRuleInsight}
+          scan={layoutRuleScan}
+          search={drilldownSearch}
+          onSearchChange={setDrilldownSearch}
+          matchesSearch={matchesSearch}
+          onClose={() => setSelectedCard(null)}
+        />
+      )}
+
+      {selectedCard === "validationRules" && (
+        <ModuleRuleScanPanel
+          title="Validation Rules - Active / Inactive by Module"
+          ziaTitle="Zia Recommendation - Validation Rules"
+          ziaInsight={ziaValidationRuleInsight}
+          scan={validationRuleScan}
+          search={drilldownSearch}
+          onSearchChange={setDrilldownSearch}
+          matchesSearch={matchesSearch}
+          onClose={() => setSelectedCard(null)}
+        />
+      )}
+
+      {selectedCard === "assignmentRules" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Assignment Rules - Active / Inactive</h4>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+          </div>
+          {entityData.assignmentRules.error && entityData.assignmentRules.items.length === 0 ? (
+            <PanelEmptyState state={entityData.assignmentRules} label="assignment rules" onRetry={() => fetchEntity("assignmentRules")} />
+          ) : (
+            <>
+            <input
+              type="text"
+              className="kpi-drilldown-search"
+              placeholder="Search assignment rules…"
+              value={drilldownSearch}
+              onChange={e => setDrilldownSearch(e.target.value)}
+            />
+            <div className="kpi-drilldown-summary">
+              <button
+                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${assignmentRuleFilter === "active" ? "selected" : ""}`}
+                onClick={() => setAssignmentRuleFilter(prev => (prev === "active" ? "all" : "active"))}
+              >
+                {entityData.assignmentRules.items.filter(isActiveWorkflow).length} Active
+              </button>
+              <button
+                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${assignmentRuleFilter === "inactive" ? "selected" : ""}`}
+                onClick={() => setAssignmentRuleFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+              >
+                {entityData.assignmentRules.items.filter(i => !isActiveWorkflow(i)).length} Inactive
+              </button>
+              {assignmentRuleFilter !== "all" && (
+                <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setAssignmentRuleFilter("all")}>Show All</button>
+              )}
+            </div>
+            <div className="kpi-drilldown-table kpi-drilldown-table-single">
+              {entityData.assignmentRules.items
+                .map((item, idx) => ({ item, name: getItemName(item, idx), module: workflowModuleLabel(item), active: isActiveWorkflow(item) }))
+                .filter(row => assignmentRuleFilter === "all" || (assignmentRuleFilter === "active") === row.active)
+                .filter(row => matchesSearch(row.name, row.module))
+                .map((row, idx) => (
+                  <div key={row.name + idx} className="kpi-drilldown-row">
+                    <span className="kpi-drilldown-name">{row.name}</span>
+                    <span className="kpi-drilldown-module">{row.module || "-"}</span>
+                    <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+                  </div>
+                ))}
+            </div>
+            <div className="zia-rec zia-rec-medium activity-zia-rec">
+              <div className="zia-rec-header">
+                <span className="zia-rec-icon">✦</span>
+                <span className="zia-rec-title">Zia Recommendation - Assignment Rules</span>
+              </div>
+              <ZiaRecBody {...ziaAssignmentRuleInsight} />
+            </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {selectedCard === "approvalRules" && (
+        <div className="kpi-drilldown">
+          <div className="kpi-drilldown-header">
+            <h4>Approval Rules - Active / Inactive</h4>
+            <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
+          </div>
+          {entityData.approvalRules.error && entityData.approvalRules.items.length === 0 ? (
+            <PanelEmptyState state={entityData.approvalRules} label="approval rules" onRetry={() => fetchEntity("approvalRules")} />
+          ) : (
+            <>
+            <input
+              type="text"
+              className="kpi-drilldown-search"
+              placeholder="Search approval rules…"
+              value={drilldownSearch}
+              onChange={e => setDrilldownSearch(e.target.value)}
+            />
+            <div className="kpi-drilldown-summary">
+              <button
+                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${approvalRuleFilter === "active" ? "selected" : ""}`}
+                onClick={() => setApprovalRuleFilter(prev => (prev === "active" ? "all" : "active"))}
+              >
+                {entityData.approvalRules.items.filter(isActiveWorkflow).length} Active
+              </button>
+              <button
+                className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${approvalRuleFilter === "inactive" ? "selected" : ""}`}
+                onClick={() => setApprovalRuleFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+              >
+                {entityData.approvalRules.items.filter(i => !isActiveWorkflow(i)).length} Inactive
+              </button>
+              {approvalRuleFilter !== "all" && (
+                <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setApprovalRuleFilter("all")}>Show All</button>
+              )}
+            </div>
+            <div className="kpi-drilldown-table kpi-drilldown-table-single">
+              {entityData.approvalRules.items
+                .map((item, idx) => ({ item, name: getItemName(item, idx), module: workflowModuleLabel(item), active: isActiveWorkflow(item) }))
+                .filter(row => approvalRuleFilter === "all" || (approvalRuleFilter === "active") === row.active)
+                .filter(row => matchesSearch(row.name, row.module))
+                .map((row, idx) => (
+                  <div key={row.name + idx} className="kpi-drilldown-row">
+                    <span className="kpi-drilldown-name">{row.name}</span>
+                    <span className="kpi-drilldown-module">{row.module || "-"}</span>
+                    <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
+                  </div>
+                ))}
+            </div>
+            <div className="zia-rec zia-rec-medium activity-zia-rec">
+              <div className="zia-rec-header">
+                <span className="zia-rec-icon">✦</span>
+                <span className="zia-rec-title">Zia Recommendation - Approval Rules</span>
+              </div>
+              <ZiaRecBody {...ziaApprovalRuleInsight} />
+            </div>
+            </>
+          )}
         </div>
       )}
 
