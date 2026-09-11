@@ -157,6 +157,18 @@ function CategoryCard({
                       ))}
                     </ul>
                   )}
+                  {item.bullets && item.bullets.length > 0 && (
+                    <ul className="hsd-checklist-signals">
+                      {item.bullets.map((b, i) => (
+                        <li key={i}>
+                          <span className="hsd-checklist-signal-left">
+                            <span className="hsd-checklist-signal-dot" />
+                            <span className="hsd-checklist-signal-label">{b}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   {item.tags && item.tags.length > 0 && (
                     <div className="hsd-checklist-tags">
                       {item.tags.map(tag => <span key={tag} className="hsd-checklist-tag">{tag}</span>)}

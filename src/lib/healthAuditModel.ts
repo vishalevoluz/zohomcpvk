@@ -210,6 +210,12 @@ export interface ChecklistItem {
    * under `detail` instead of crammed into one long comma-separated
    * sentence, which stops scaling once there are more than a few names. */
   tags?: string[];
+  /** Plain dot-bullet lines under `detail`, for a weight:0 informational item
+   * with more than one distinct fact to state (e.g. "who can delete records"
+   * - what IS confirmed vs. what ISN'T) - same dot-bullet look as `signals`
+   * but with no +/- point pill, since an informational item has no point
+   * value to attach one to. */
+  bullets?: string[];
 }
 
 export interface DimensionRecommendation {
@@ -463,18 +469,23 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       // isn't inherently good or bad the way "too many admins" is, and this
       // app has no verified basis for a "too many" threshold here yet.
       status: "pass",
-      detail: deleteCapableUsers.length > 0
-        ? havePermissionData
-          ? `• ${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} a profile with delete access on at least one module.\n• Profile${deleteCapableProfiles(entityData.profiles.items).length !== 1 ? "s" : ""}: ${deleteProfileList}`
-          // Two distinct facts (what IS confirmed vs. what ISN'T) read as one
-          // run-on sentence otherwise - .hsd-checklist-detail already renders
-          // "\n" as a real line break (white-space: pre-line, see the
-          // process-blueprint item above), so a "• " prefix per line is
-          // enough for real bullet points, no new UI needed.
-          : `• ${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} ${deleteProfileList}, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).${otherProfileCount > 0 ? `\n• Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.` : ""}`
-        : havePermissionData
-          ? "No active user's profile grants delete access on any module."
-          : "Delete-permission data isn't available - the connected profiles tool only returns profile name/id/type, not per-module permissions, so this can't be determined yet.",
+      // Two distinct facts (what IS confirmed vs. what ISN'T) read as one
+      // run-on sentence crammed into `detail` - real dot-bullets via
+      // `bullets` instead (same look as `signals`, minus the +/- point pill,
+      // since this item is informational with no point value to attach one
+      // to). Single-fact cases just stay in `detail`, no bullets needed.
+      detail: deleteCapableUsers.length > 0 ? "" : havePermissionData
+        ? "No active user's profile grants delete access on any module."
+        : "Delete-permission data isn't available - the connected profiles tool only returns profile name/id/type, not per-module permissions, so this can't be determined yet.",
+      bullets: deleteCapableUsers.length === 0 ? undefined : havePermissionData
+        ? [
+            `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} a profile with delete access on at least one module.`,
+            `Profile${deleteCapableProfiles(entityData.profiles.items).length !== 1 ? "s" : ""}: ${deleteProfileList}`,
+          ]
+        : [
+            `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} ${deleteProfileList}, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).`,
+            ...(otherProfileCount > 0 ? [`Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.`] : []),
+          ],
       // No tags - a user's real name isn't this app's data to name in a
       // report someone might screenshot or share. The count in `detail`
       // above is the whole finding either way.
