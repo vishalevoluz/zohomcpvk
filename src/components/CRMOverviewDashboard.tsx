@@ -2463,6 +2463,13 @@ function ModuleRuleScanPanel({ title, ziaTitle, ziaInsight, scan, search, onSear
           <button className="kpi-drilldown-close" onClick={onClose}>✕</button>
         </div>
       </div>
+      <div className="zia-rec zia-rec-medium activity-zia-rec">
+        <div className="zia-rec-header">
+          <span className="zia-rec-icon">✦</span>
+          <span className="zia-rec-title">{ziaTitle}</span>
+        </div>
+        <ZiaRecBody {...ziaInsight} />
+      </div>
       {!scan.scanned && !scan.scanProgress.loading && (
         <p className="business-view-hint">
           This is a per-module Zoho endpoint with no "list all modules" mode - every real module in the org is scanned automatically, one API call per module. This can take a little while for a large org.
@@ -2518,13 +2525,6 @@ function ModuleRuleScanPanel({ title, ziaTitle, ziaInsight, scan, search, onSear
                   <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`}>{row.active ? "active" : "inactive"}</span>
                 </div>
               ))}
-          </div>
-          <div className="zia-rec zia-rec-medium activity-zia-rec">
-            <div className="zia-rec-header">
-              <span className="zia-rec-icon">✦</span>
-              <span className="zia-rec-title">{ziaTitle}</span>
-            </div>
-            <ZiaRecBody {...ziaInsight} />
           </div>
         </>
       )}
@@ -3369,6 +3369,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.modules} label="modules" onRetry={() => fetchEntity("modules")} />
           ) : (
           <>
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">Zia Recommendation - Modules</span>
+            </div>
+            <ZiaRecBody {...ziaModuleInsight} />
+          </div>
           <input
             type="text"
             className="kpi-drilldown-search"
@@ -3408,13 +3415,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 <span className={`kpi-drilldown-badge status-${row.category}`}>{MODULE_FILTER_LABELS[row.category]}</span>
               </div>
             ))}
-          </div>
-          <div className="zia-rec zia-rec-medium activity-zia-rec">
-            <div className="zia-rec-header">
-              <span className="zia-rec-icon">✦</span>
-              <span className="zia-rec-title">Zia Recommendation - Modules</span>
-            </div>
-            <ZiaRecBody {...ziaModuleInsight} />
           </div>
           </>
           )}
@@ -3530,6 +3530,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <p className="business-view-hint">No Schedule-category functions found.</p>
           ) : (
             <>
+              <div className="zia-rec zia-rec-medium activity-zia-rec">
+                <div className="zia-rec-header">
+                  <span className="zia-rec-icon">✦</span>
+                  <span className="zia-rec-title">Zia Recommendation - Schedules</span>
+                </div>
+                <ZiaRecBody {...ziaScheduleInsight} />
+              </div>
               <input
                 type="text"
                 className="kpi-drilldown-search"
@@ -3552,13 +3559,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   </div>
                 ))}
               </div>
-              <div className="zia-rec zia-rec-medium activity-zia-rec">
-                <div className="zia-rec-header">
-                  <span className="zia-rec-icon">✦</span>
-                  <span className="zia-rec-title">Zia Recommendation - Schedules</span>
-                </div>
-                <ZiaRecBody {...ziaScheduleInsight} />
-              </div>
             </>
           )}
         </div>
@@ -3580,20 +3580,20 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
             </div>
           </div>
-          <div className="kpi-drilldown-summary">
-            <span className="kpi-drilldown-stat good" data-tooltip="This function is enabled and can be triggered by its associated automation, button, or schedule.">{functionActiveCount} Active</span>
-            <span className="kpi-drilldown-stat bad" data-tooltip="This function is disabled - it exists in Zoho but will not execute until re-enabled.">{functionInactiveCount} Inactive</span>
-            <span className="kpi-drilldown-stat neutral" data-tooltip="Two or more functions share the exact same display name (case-insensitive), even though each has a unique API name underneath - easy to pick the wrong one from a list in Zoho's UI.">{functionDuplicates.length} Duplicate Names</span>
-          </div>
 
           {/* Recommendations stay visible regardless of which tab below is open */}
-          <h5 className="kpi-drilldown-subheading">Recommendations</h5>
           <div className="zia-rec zia-rec-medium activity-zia-rec">
             <div className="zia-rec-header">
               <span className="zia-rec-icon">✦</span>
               <span className="zia-rec-title">Zia Recommendation - Functions</span>
             </div>
             <ZiaRecBody {...functionZiaSummary} />
+          </div>
+
+          <div className="kpi-drilldown-summary">
+            <span className="kpi-drilldown-stat good" data-tooltip="This function is enabled and can be triggered by its associated automation, button, or schedule.">{functionActiveCount} Active</span>
+            <span className="kpi-drilldown-stat bad" data-tooltip="This function is disabled - it exists in Zoho but will not execute until re-enabled.">{functionInactiveCount} Inactive</span>
+            <span className="kpi-drilldown-stat neutral" data-tooltip="Two or more functions share the exact same display name (case-insensitive), even though each has a unique API name underneath - easy to pick the wrong one from a list in Zoho's UI.">{functionDuplicates.length} Duplicate Names</span>
           </div>
 
           <div className="function-tabs">
@@ -3863,6 +3863,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
             </div>
           </div>
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">Zia Recommendation - Workflows</span>
+            </div>
+            <ZiaRecBody {...ziaWorkflowInsight} />
+          </div>
           {workflowDetails.scanProgress.loading && (
             <p className="kpi-drilldown-progress">
               <span className="spinner" /> Verifying real criteria &amp; actions per workflow… {workflowDetails.scanProgress.done} of {workflowDetails.scanProgress.total}
@@ -4020,13 +4027,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               ))}
             </div>
           )}
-          <div className="zia-rec zia-rec-medium activity-zia-rec">
-            <div className="zia-rec-header">
-              <span className="zia-rec-icon">✦</span>
-              <span className="zia-rec-title">Zia Recommendation - Workflows</span>
-            </div>
-            <ZiaRecBody {...ziaWorkflowInsight} />
-          </div>
         </div>
       )}
 
@@ -4066,6 +4066,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.assignmentRules} label="assignment rules" onRetry={() => fetchEntity("assignmentRules")} />
           ) : (
             <>
+            <div className="zia-rec zia-rec-medium activity-zia-rec">
+              <div className="zia-rec-header">
+                <span className="zia-rec-icon">✦</span>
+                <span className="zia-rec-title">Zia Recommendation - Assignment Rules</span>
+              </div>
+              <ZiaRecBody {...ziaAssignmentRuleInsight} />
+            </div>
             <input
               type="text"
               className="kpi-drilldown-search"
@@ -4118,13 +4125,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 </>
               );
             })()}
-            <div className="zia-rec zia-rec-medium activity-zia-rec">
-              <div className="zia-rec-header">
-                <span className="zia-rec-icon">✦</span>
-                <span className="zia-rec-title">Zia Recommendation - Assignment Rules</span>
-              </div>
-              <ZiaRecBody {...ziaAssignmentRuleInsight} />
-            </div>
             </>
           )}
         </div>
@@ -4140,6 +4140,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.approvalRules} label="approval rules" onRetry={() => fetchEntity("approvalRules")} />
           ) : (
             <>
+            <div className="zia-rec zia-rec-medium activity-zia-rec">
+              <div className="zia-rec-header">
+                <span className="zia-rec-icon">✦</span>
+                <span className="zia-rec-title">Zia Recommendation - Approval Rules</span>
+              </div>
+              <ZiaRecBody {...ziaApprovalRuleInsight} />
+            </div>
             <input
               type="text"
               className="kpi-drilldown-search"
@@ -4192,13 +4199,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 </>
               );
             })()}
-            <div className="zia-rec zia-rec-medium activity-zia-rec">
-              <div className="zia-rec-header">
-                <span className="zia-rec-icon">✦</span>
-                <span className="zia-rec-title">Zia Recommendation - Approval Rules</span>
-              </div>
-              <ZiaRecBody {...ziaApprovalRuleInsight} />
-            </div>
             </>
           )}
         </div>
@@ -4210,16 +4210,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <h4>Activity - Email / Task / Call</h4>
             <button className="kpi-drilldown-close" onClick={() => setSelectedCard(null)}>✕</button>
           </div>
-          <div className="activity-subkpi-grid">
-            {activityStats.map(stat => (
-              <div key={stat.key} className="activity-subkpi-tile">
-                <span className="kpi-tile-label">{stat.label}</span>
-                <span className="kpi-tile-value">{stat.loading ? "…" : stat.total.toLocaleString()}</span>
-                <p className="activity-subkpi-suggestion">{stat.suggestion}</p>
-              </div>
-            ))}
-          </div>
-
           <div className="zia-rec zia-rec-medium activity-zia-rec">
             <div className="zia-rec-header">
               <span className="zia-rec-icon">✦</span>
@@ -4243,6 +4233,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </div>
             </div>
             <ZiaRecBody {...ziaActivityInsight} />
+          </div>
+
+          <div className="activity-subkpi-grid">
+            {activityStats.map(stat => (
+              <div key={stat.key} className="activity-subkpi-tile">
+                <span className="kpi-tile-label">{stat.label}</span>
+                <span className="kpi-tile-value">{stat.loading ? "…" : stat.total.toLocaleString()}</span>
+                <p className="activity-subkpi-suggestion">{stat.suggestion}</p>
+              </div>
+            ))}
           </div>
         </div>
       )}
