@@ -7,7 +7,7 @@
 // output; checklist item `weight`s are informational ("potential gain from
 // this one fix"), never summed into a second competing total.
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isEntityResolved, getItemName } from "@/lib/useCrmEntities";
+import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, unassignedRoles,
   usersWithDeletePermission, anyProfileHasPermissionData, isSystemAdministratorProfile,
@@ -383,10 +383,6 @@ function processCompletenessReason(entityData: Record<CrmEntityType, EntityState
   return `Missing: ${missing.join(", ")}.`;
 }
 
-function roleName(role: unknown): string {
-  const r = (role ?? {}) as Record<string, unknown>;
-  return String(r.name ?? r.label ?? "Unnamed role");
-}
 
 function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
   // Deleted accounts are gone from the org and cost nothing - they're
@@ -442,11 +438,10 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
         ? "No roles found."
         : unassigned.length === 0
           ? `All ${roleCount} role${roleCount !== 1 ? "s" : ""} configured ${roleCount !== 1 ? "have" : "has"} at least one user assigned.`
-          : `${unassigned.length} of ${roleCount} role${roleCount !== 1 ? "s" : ""} ${unassigned.length !== 1 ? "have" : "has"} no user assigned:`,
-      // Names shown as their own chip list (see tags on ChecklistItem) rather
-      // than crammed into `detail` as one long comma-separated sentence -
-      // this list can run to a dozen+ roles for orgs with a deep hierarchy.
-      tags: unassigned.length > 0 ? unassigned.map(roleName) : undefined,
+          : `${unassigned.length} of ${roleCount} role${roleCount !== 1 ? "s" : ""} ${unassigned.length !== 1 ? "have" : "has"} no user assigned.`,
+      // No tags - a role name is still the org's own configuration data, not
+      // something this app names in a report someone might screenshot or
+      // share. The count in `detail` above is the whole finding either way.
       weight: 5,
     },
     {
@@ -458,12 +453,14 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       status: "pass",
       detail: deleteCapableUsers.length > 0
         ? havePermissionData
-          ? `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold a profile with delete access on at least one module:`
-          : `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold the Administrator profile, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying):${otherProfileCount > 0 ? ` Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.` : ""}`
+          ? `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold a profile with delete access on at least one module.`
+          : `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold the Administrator profile, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).${otherProfileCount > 0 ? ` Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.` : ""}`
         : havePermissionData
           ? "No active user's profile grants delete access on any module."
           : "Delete-permission data isn't available - the connected profiles tool only returns profile name/id/type, not per-module permissions, so this can't be determined yet.",
-      tags: deleteCapableUsers.length > 0 ? deleteCapableUsers.map((u, i) => getItemName(u, i)) : undefined,
+      // No tags - a user's real name isn't this app's data to name in a
+      // report someone might screenshot or share. The count in `detail`
+      // above is the whole finding either way.
       weight: 0,
     },
   ];
