@@ -429,11 +429,17 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
         ? `${activeAdminCount} of ${activeUserCount} active user${activeUserCount !== 1 ? "s" : ""} ${activeAdminCount !== 1 ? "hold" : "holds"} an admin-named profile${activeAdminCount > 2 ? " (more than 2 increases risk)" : ""}.`
         : "No active users found.",
       weight: 5,
+      // Single-signal bullet, same pattern Data Structure's checklist uses -
+      // makes the +/- point contribution explicit instead of only implied by
+      // the pass/fail icon, consistent across every item in this section
+      // rather than just the multi-fact ones.
+      signals: activeUserCount > 0 ? [{ label: "2 or fewer admin-named profiles held", on: activeAdminCount <= 2, points: 5 }] : undefined,
     },
     {
       id: "access-role-segmentation", label: "Access is split into multiple profiles", status: profileCount > 1 ? "pass" : "fail",
       detail: profileCount > 1 ? `${profileCount} profiles configured.` : "Only one profile exists - everyone shares the same access level.",
       weight: 10,
+      signals: [{ label: "More than one profile configured", on: profileCount > 1, points: 10 }],
     },
     {
       id: "access-unassigned-roles",
@@ -448,6 +454,7 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       // something this app names in a report someone might screenshot or
       // share. The count in `detail` above is the whole finding either way.
       weight: 5,
+      signals: roleCount === 0 ? undefined : [{ label: "Every role has a user assigned", on: unassigned.length === 0, points: 5 }],
     },
     {
       id: "access-delete-permission",
