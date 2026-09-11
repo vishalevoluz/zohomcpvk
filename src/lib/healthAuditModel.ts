@@ -421,7 +421,7 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
     {
       id: "access-admin-count", label: "Admin access is limited", status: activeAdminCount <= 2 ? "pass" : "fail",
       detail: activeUserCount > 0
-        ? `${activeAdminCount} of ${activeUserCount} active user${activeUserCount !== 1 ? "s" : ""} hold an admin-named profile${activeAdminCount > 2 ? " (more than 2 increases risk)" : ""}.`
+        ? `${activeAdminCount} of ${activeUserCount} active user${activeUserCount !== 1 ? "s" : ""} ${activeAdminCount !== 1 ? "hold" : "holds"} an admin-named profile${activeAdminCount > 2 ? " (more than 2 increases risk)" : ""}.`
         : "No active users found.",
       weight: 5,
     },
@@ -453,13 +453,13 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       status: "pass",
       detail: deleteCapableUsers.length > 0
         ? havePermissionData
-          ? `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold a profile with delete access on at least one module.`
+          ? `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} a profile with delete access on at least one module.`
           // Two distinct facts (what IS confirmed vs. what ISN'T) read as one
           // run-on sentence otherwise - .hsd-checklist-detail already renders
           // "\n" as a real line break (white-space: pre-line, see the
           // process-blueprint item above), so a "• " prefix per line is
           // enough for real bullet points, no new UI needed.
-          : `• ${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} hold the Administrator profile, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).${otherProfileCount > 0 ? `\n• Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.` : ""}`
+          : `• ${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} the Administrator profile, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).${otherProfileCount > 0 ? `\n• Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.` : ""}`
         : havePermissionData
           ? "No active user's profile grants delete access on any module."
           : "Delete-permission data isn't available - the connected profiles tool only returns profile name/id/type, not per-module permissions, so this can't be determined yet.",
