@@ -485,6 +485,24 @@ export function usersWithDeletePermission(users: unknown[], profiles: unknown[])
   return users.filter(u => !isDeletedUser(u) && isActiveUser(u) && deleteProfileNames.has(userProfileName(u).toLowerCase()));
 }
 
+// The actual profile records (name + type), not the users holding them - a
+// profile's name/type is org configuration, not personal data, so unlike
+// user names it's fine to name directly in a report. Same delete-capable
+// definition usersWithDeletePermission uses above.
+export function deleteCapableProfiles(profiles: unknown[]): unknown[] {
+  return profiles.filter(p => profileHasDeletePermission(p) || isSystemAdministratorProfile(p));
+}
+
+export function profileNameAndType(profile: unknown): string {
+  if (!profile || typeof profile !== "object") return "Unnamed profile";
+  const p = profile as Record<string, unknown>;
+  const name = String(p.name ?? p.display_label ?? "Unnamed profile");
+  const rawType = String(p.type ?? "").trim();
+  if (!rawType) return name;
+  const humanType = rawType.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  return `${name} (${humanType})`;
+}
+
 // The display name of the role a *user* is assigned - same role: { id, name }
 // nesting Zoho's Users API uses for profile above (see userProfileName).
 export function userRoleName(user: unknown): string {

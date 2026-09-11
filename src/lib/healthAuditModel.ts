@@ -11,6 +11,7 @@ import { isEntityResolved } from "@/lib/useCrmEntities";
 import {
   isActiveWorkflow, isAdminProfile, isAdminProfileUser, isActiveUser, isInactiveUser, isDeletedUser, unassignedRoles,
   usersWithDeletePermission, anyProfileHasPermissionData, isSystemAdministratorProfile,
+  deleteCapableProfiles, profileNameAndType,
   workflowReferencesModule, ruleCoverageCount, ruleCoverageHasActive, blueprintStatus, unreferencedModules, isDeletedModule,
   isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, moduleApiName, blueprintsForModule,
   overlappingWorkflows, identicalWorkflows,
@@ -417,6 +418,10 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   // data on it. Everything else - Standard, any custom profile - genuinely
   // can't be verified without the per-profile detail endpoint.
   const otherProfileCount = entityData.profiles.items.filter(p => !isSystemAdministratorProfile(p)).length;
+  // Profile name + type is org configuration, not personal data - unlike the
+  // users holding it (see the "No tags" note below), it's fine to name
+  // directly instead of just a count.
+  const deleteProfileList = deleteCapableProfiles(entityData.profiles.items).map(profileNameAndType).join(", ");
   return [
     {
       id: "access-admin-count", label: "Admin access is limited", status: activeAdminCount <= 2 ? "pass" : "fail",
@@ -453,13 +458,13 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
       status: "pass",
       detail: deleteCapableUsers.length > 0
         ? havePermissionData
-          ? `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} a profile with delete access on at least one module.`
+          ? `• ${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} a profile with delete access on at least one module.\n• Profile${deleteCapableProfiles(entityData.profiles.items).length !== 1 ? "s" : ""}: ${deleteProfileList}`
           // Two distinct facts (what IS confirmed vs. what ISN'T) read as one
           // run-on sentence otherwise - .hsd-checklist-detail already renders
           // "\n" as a real line break (white-space: pre-line, see the
           // process-blueprint item above), so a "• " prefix per line is
           // enough for real bullet points, no new UI needed.
-          : `• ${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} the Administrator profile, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).${otherProfileCount > 0 ? `\n• Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.` : ""}`
+          : `• ${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} ${deleteProfileList}, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).${otherProfileCount > 0 ? `\n• Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.` : ""}`
         : havePermissionData
           ? "No active user's profile grants delete access on any module."
           : "Delete-permission data isn't available - the connected profiles tool only returns profile name/id/type, not per-module permissions, so this can't be determined yet.",
@@ -539,15 +544,25 @@ function dataArchitectureChecklist(
     .filter(m => m.labels.length > 0)
     .map(m => `${m.apiName}: ${m.labels.join(", ")} (${m.count})`)
     .join(". ");
+  const mandatoryFieldsOverLimit = mandatoryFieldCount !== null && mandatoryFieldCount > 20;
+  const mandatoryFieldsWeight = mandatoryFieldsOverLimit ? Math.min(15, mandatoryFieldCount! - 20) : 15;
   return [
     {
       id: "data-mandatory-fields", label: "Mandatory field count is reasonable",
-      status: mandatoryFieldCount !== null && mandatoryFieldCount > 20 ? "fail" : "pass",
+      status: mandatoryFieldsOverLimit ? "fail" : "pass",
       detail: mandatoryFieldCount === null
         ? `Couldn't fetch layouts for your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldsError ? ` (${mandatoryFieldsError})` : ""} - this isn't a confirmed 0, the count is unknown.`
-        : `${mandatoryFieldCount} mandatory field${mandatoryFieldCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldCount > 20 ? " (over the 20 recommended)." : "."}`
+        : `${mandatoryFieldCount} mandatory field${mandatoryFieldCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldsOverLimit ? " (over the 20 recommended)." : "."}`
           + (perModuleBreakdown ? `\n${perModuleBreakdown}.` : ""),
-      weight: mandatoryFieldCount !== null && mandatoryFieldCount > 20 ? Math.min(15, mandatoryFieldCount - 20) : 15,
+      weight: mandatoryFieldsWeight,
+      // One signal, not five like Automation Coverage - this item only has
+      // one real criterion (≤20 mandatory fields), so the bullet just makes
+      // that single pass/fail's point contribution explicit as a +/- pill,
+      // same visual language as the multi-signal items instead of a
+      // different one-off look for a single-criterion item.
+      signals: mandatoryFieldCount === null ? undefined : [
+        { label: "20 or fewer mandatory fields", on: !mandatoryFieldsOverLimit, points: mandatoryFieldsWeight },
+      ],
     },
     {
       id: "data-module-count", label: "Module count is reasonable", status: tooManyDueToClutter ? "fail" : "pass",
@@ -557,6 +572,9 @@ function dataArchitectureChecklist(
           ? `${moduleCount} modules found - over 15, but all are actively used, so this isn't penalized.`
           : `${moduleCount} module${moduleCount !== 1 ? "s" : ""} found.`,
       weight: 5,
+      signals: [
+        { label: "No unused modules inflating the count", on: !tooManyDueToClutter, points: 5 },
+      ],
     },
   ];
 }
