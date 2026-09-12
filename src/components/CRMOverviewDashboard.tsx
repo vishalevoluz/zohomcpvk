@@ -2169,7 +2169,11 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, functionSum
     {
       key: "users", label: "Active Users", value: activeUsers,
       severity: usersFailed ? "unknown" : activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
-      note: usersFailed ? `Couldn't verify - ${entityData.users.error}` : `${licensedUsers} total licensed - click to see who's active/inactive`,
+      // licensedUsers - activeUsers, not a separate count - it's exactly the
+      // inactive-but-still-licensed bucket (deleted accounts are already
+      // excluded from licensedUsers, see its own comment above), so this can
+      // never disagree with the Zia Recommendation box's own math below.
+      note: usersFailed ? `Couldn't verify - ${entityData.users.error}` : `${licensedUsers} total licensed${licensedUsers > activeUsers ? ` (${licensedUsers - activeUsers} unused)` : ""} - click to see who's active/inactive`,
       clickable: users.length > 0 || usersFailed,
       unknown: usersFailed,
       source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} - fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
@@ -2301,6 +2305,33 @@ function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): U
       };
     })
     .sort((a, b) => USER_BREAKDOWN_SORT_RANK[a.status] - USER_BREAKDOWN_SORT_RANK[b.status]);
+}
+
+// License-cost math, spelled out the same way the example that drove this
+// was phrased: total licensed seats (every non-deleted user - see
+// computeUserBreakdown, which already excludes deleted accounts, since those
+// free up their license) minus ACTIVE users only equals the unused-license
+// count. Inactive users must never be folded into "active" here - they still
+// hold a paid seat (Zoho doesn't free a license until the account is fully
+// deleted, not just disabled), so every one of them is a seat paid for with
+// zero return, which is exactly what this box exists to surface.
+function buildZiaUserInsight(rows: UserBreakdownRow[]): ZiaInsight {
+  if (rows.length === 0) return { summary: "No users found - nothing to evaluate yet.", points: [] };
+  const total = rows.length;
+  const active = rows.filter(r => r.status === "active").length;
+  const inactive = rows.filter(r => r.status === "inactive").length;
+  if (inactive === 0) {
+    return { summary: `All ${total} licensed user${total !== 1 ? "s are" : " is"} active - no unused licenses.`, points: [] };
+  }
+  const inactiveRows = rows.filter(r => r.status === "inactive");
+  return {
+    summary: "",
+    points: [
+      cap(`${total} licensed user${total !== 1 ? "s" : ""} total - ${active} active, ${inactive} inactive.`),
+      cap(`${inactive} unused license${inactive !== 1 ? "s" : ""} - ${inactive !== 1 ? "these accounts hold" : `${inactiveRows[0].name} holds`} a paid seat with nobody using it${inactive > 1 ? `: ${inactiveRows.slice(0, 3).map(r => r.name).join(", ")}${inactive > 3 ? ", etc." : ""}` : ""}.`),
+    ],
+    action: "Deactivate or free up these licenses to cut your Zoho seat cost - each one is a paid seat with zero return.",
+  };
 }
 
 interface ConfigRow {
@@ -2865,6 +2896,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const ziaBlueprintInsight = buildZiaBlueprintInsight(blueprintBreakdown);
   const ziaScheduleInsight = buildZiaScheduleInsight(scheduleBreakdown);
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
+  const ziaUserInsight = buildZiaUserInsight(userBreakdown);
 
   // Metadata issues (e.g. missing description) come straight from the
   // function list, so they show for every function immediately - unlike the
@@ -3511,6 +3543,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.users} label="users" onRetry={() => fetchEntity("users")} />
           ) : (
           <>
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">Zia Recommendation - Licenses</span>
+            </div>
+            <ZiaRecBody {...ziaUserInsight} />
+          </div>
           <input
             type="text"
             className="kpi-drilldown-search"
