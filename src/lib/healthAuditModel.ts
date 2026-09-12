@@ -360,6 +360,10 @@ function processCompletenessChecklist(
       id: "process-pipeline", label: "A sales pipeline exists", status: pipelineCount > 0 ? "pass" : "fail",
       detail: pipelineCount > 0 ? `${pipelineCount} pipeline${pipelineCount !== 1 ? "s" : ""} configured.` : "No sales pipeline is configured.",
       weight: 7,
+      // Single-signal bullet, same pattern the other dimensions' checklists
+      // use - makes the +/- point contribution explicit instead of only
+      // implied by the pass/fail icon.
+      signals: [{ label: "At least one sales pipeline configured", on: pipelineCount > 0, points: 7 }],
     },
     {
       id: "process-blueprint", label: "A blueprint process exists", status: blueprintCount > 0 ? "pass" : "fail",
@@ -367,6 +371,7 @@ function processCompletenessChecklist(
         ? `${blueprintCount} blueprint${blueprintCount !== 1 ? "s" : ""} configured.\n${activeBlueprintCount} active, ${inactiveBlueprintCount} inactive.`
         : "No blueprint process is configured.",
       weight: 7,
+      signals: [{ label: "At least one blueprint process configured", on: blueprintCount > 0, points: 7 }],
     },
     {
       id: "process-stages", label: "Pipeline stages are in a valid order", status: stagesOk ? "pass" : "fail",
@@ -376,6 +381,7 @@ function processCompletenessChecklist(
           ? `${pipelineStageCount} stage${pipelineStageCount !== 1 ? "s" : ""} defined, but ${outOfOrderStageCount} ${outOfOrderStageCount !== 1 ? "are" : "is"} sequenced after a Closed Won/Lost stage.`
           : `${pipelineStageCount} stage${pipelineStageCount !== 1 ? "s" : ""} defined on your Deals layout, in order.`,
       weight: 7,
+      signals: [{ label: "Pipeline stages exist and are in order", on: stagesOk, points: 7 }],
     },
   ];
 }
