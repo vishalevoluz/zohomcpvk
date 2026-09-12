@@ -4809,7 +4809,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .hsd-score-header svg { color: var(--bv-critical); flex-shrink: 0; }
 .hsd-score-header .business-view-section-title { margin: 0; }
 
-.hsd-gauge-wrap { position: relative; width: 100%; max-width: 250px; margin: 18px auto 6px; aspect-ratio: 1; }
+.hsd-gauge-wrap { position: relative; width: 100%; max-width: 300px; margin: 24px auto 18px; aspect-ratio: 1; }
 .hsd-gauge-svg {
   width: 100%; height: 100%; display: block; transform: rotate(-90deg);
   transform-origin: 50% 50%;

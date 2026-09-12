@@ -106,13 +106,20 @@ const GAUGE_RADIUS = 85;
 const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
 const BAND_RADIUS = 102;
 const BAND_CIRCUMFERENCE = 2 * Math.PI * BAND_RADIUS;
+// The "70"/"80" boundary labels sit outside BAND_RADIUS (see pointOnRing
+// below), so the viewBox needs real margin past BAND_RADIUS or an SVG (which
+// clips at its viewBox edge by default, unlike a plain CSS box) silently cuts
+// their text off - this was the whole bug behind "circle below content not
+// visible": labels drawn at radius 116 inside a 220x220 (radius-110) viewBox.
+const GAUGE_CENTER = 135;
+const GAUGE_VIEWBOX = GAUGE_CENTER * 2;
 
 // Position for the "70"/"80" boundary labels on the band ring - 0% is 12
 // o'clock (the SVG is rotated -90deg, same convention the old ScoreRing
 // used), moving clockwise as pct increases.
 function pointOnRing(pct: number, radius: number) {
   const angle = pct * 2 * Math.PI - Math.PI / 2;
-  return { x: 110 + radius * Math.cos(angle), y: 110 + radius * Math.sin(angle) };
+  return { x: GAUGE_CENTER + radius * Math.cos(angle), y: GAUGE_CENTER + radius * Math.sin(angle) };
 }
 
 // ── Reduced-motion-aware count-up (ease-out cubic, ~1.2s) ───────────────────
@@ -191,7 +198,7 @@ function HealthGauge({
 
   return (
     <div className={`hsd-gauge-wrap ${resolved ? "hoverable" : ""}`}>
-      <svg className="hsd-gauge-svg" viewBox="0 0 220 220">
+      <svg className="hsd-gauge-svg" viewBox={`0 0 ${GAUGE_VIEWBOX} ${GAUGE_VIEWBOX}`}>
         {GAUGE_BANDS.map(b => {
           const segLen = BAND_CIRCUMFERENCE * ((b.to - b.from) / 100);
           const startOffset = BAND_CIRCUMFERENCE * (b.from / 100);
@@ -199,17 +206,17 @@ function HealthGauge({
             <circle
               key={b.key}
               className="hsd-gauge-band"
-              cx="110" cy="110" r={BAND_RADIUS}
+              cx={GAUGE_CENTER} cy={GAUGE_CENTER} r={BAND_RADIUS}
               stroke={b.color}
               strokeDasharray={`${segLen} ${BAND_CIRCUMFERENCE - segLen}`}
               strokeDashoffset={-startOffset}
             />
           );
         })}
-        <circle className="hsd-gauge-track" cx="110" cy="110" r={GAUGE_RADIUS} />
+        <circle className="hsd-gauge-track" cx={GAUGE_CENTER} cy={GAUGE_CENTER} r={GAUGE_RADIUS} />
         <circle
           className={`hsd-gauge-fill ${reducedMotion ? "no-motion" : ""}`}
-          cx="110" cy="110" r={GAUGE_RADIUS}
+          cx={GAUGE_CENTER} cy={GAUGE_CENTER} r={GAUGE_RADIUS}
           style={{ stroke: resolved ? band.color : "var(--color-border-strong)" }}
           strokeDasharray={GAUGE_CIRCUMFERENCE}
           strokeDashoffset={offset}
