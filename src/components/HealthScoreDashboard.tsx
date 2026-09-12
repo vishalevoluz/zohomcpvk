@@ -425,9 +425,9 @@ export default function HealthScoreDashboard({
   const model = useMemo(
     () => buildHealthAuditModel(
       entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved,
-      mandatoryFieldCount, mandatoryFields?.error ?? null, mandatoryFieldsResolved, mandatoryFields?.perModule ?? [],
+      mandatoryFieldCount, mandatoryFields?.error ?? null, mandatoryFieldsResolved,
     ),
-    [entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved, mandatoryFieldCount, mandatoryFields?.error, mandatoryFieldsResolved, mandatoryFields?.perModule],
+    [entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, pipelineCount, pipelineStagesResolved, mandatoryFieldCount, mandatoryFields?.error, mandatoryFieldsResolved],
   );
 
   // Drives the gauge sweep, count-ups, and metric bar fills together, once,
@@ -460,37 +460,43 @@ export default function HealthScoreDashboard({
           <SectionTitle text="CRM health score" tooltip="Is my CRM working well or broken? A single score built from automation, sales process setup, security, data structure, and workflow health." />
         </div>
 
-        <HealthGauge
-          score={model.total}
-          resolved={model.resolved}
-          weakestLabel={sortedDimensions[0]?.label ?? null}
-          weakestScore={sortedDimensions[0]?.score ?? null}
-        />
-        <GaugeLegend />
-
-        <VerdictStrip score={model.total} resolved={model.resolved} />
-
-        <div className="hsd-metrics">
-          {sortedDimensions.map(dim => (
-            <MetricRow
-              key={dim.key}
-              dim={dim}
-              expanded={expandedKey === dim.key}
-              onToggle={() => setExpandedKey(prev => (prev === dim.key ? null : dim.key))}
-              resolved={model.resolved}
-              animate={animate}
-            />
-          ))}
-        </div>
-
-        <div className="hsd-kpi-row">
-          <div className="hsd-kpi-tile tone-neutral">
-            <span className="hsd-kpi-value">{model.resolved ? displayCurrent : "-"}</span>
-            <span className="hsd-kpi-label">Current score</span>
+        <div className="hsd-score-body">
+          <div className="hsd-score-left">
+            <div className="hsd-metrics">
+              {sortedDimensions.map(dim => (
+                <MetricRow
+                  key={dim.key}
+                  dim={dim}
+                  expanded={expandedKey === dim.key}
+                  onToggle={() => setExpandedKey(prev => (prev === dim.key ? null : dim.key))}
+                  resolved={model.resolved}
+                  animate={animate}
+                />
+              ))}
+            </div>
           </div>
-          <div className="hsd-kpi-tile tone-healthy">
-            <span className="hsd-kpi-value"><TrendingUp size={14} /> {model.resolved ? `+${displayGain}` : "-"}</span>
-            <span className="hsd-kpi-label">Improvement available</span>
+
+          <div className="hsd-score-right">
+            <HealthGauge
+              score={model.total}
+              resolved={model.resolved}
+              weakestLabel={sortedDimensions[0]?.label ?? null}
+              weakestScore={sortedDimensions[0]?.score ?? null}
+            />
+            <GaugeLegend />
+
+            <VerdictStrip score={model.total} resolved={model.resolved} />
+
+            <div className="hsd-kpi-row">
+              <div className="hsd-kpi-tile tone-neutral">
+                <span className="hsd-kpi-value">{model.resolved ? displayCurrent : "-"}</span>
+                <span className="hsd-kpi-label">Current score</span>
+              </div>
+              <div className="hsd-kpi-tile tone-healthy">
+                <span className="hsd-kpi-value"><TrendingUp size={14} /> {model.resolved ? `+${displayGain}` : "-"}</span>
+                <span className="hsd-kpi-label">Improvement available</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>

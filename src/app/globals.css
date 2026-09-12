@@ -4587,6 +4587,17 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .hsd-score-header svg { color: var(--bv-critical); flex-shrink: 0; }
 .hsd-score-header .business-view-section-title { margin: 0; }
 
+/* Coverage (metric rows) on the left, gauge/verdict/KPIs on the right - the
+   gauge column is a fixed-ish width since it's a self-contained square, the
+   coverage column takes the rest. Stacks to one column (coverage first, then
+   the gauge) once there's no room for two side by side. */
+.hsd-score-body { display: grid; grid-template-columns: 1fr 300px; gap: 20px; align-items: start; margin-top: 14px; }
+@media (max-width: 760px) {
+  .hsd-score-body { grid-template-columns: 1fr; }
+}
+.hsd-score-left { min-width: 0; }
+.hsd-score-right { display: flex; flex-direction: column; }
+
 .hsd-gauge-wrap { position: relative; width: 100%; max-width: 300px; margin: 24px auto 18px; aspect-ratio: 1; }
 .hsd-gauge-svg {
   width: 100%; height: 100%; display: block; transform: rotate(-90deg);

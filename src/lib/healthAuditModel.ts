@@ -429,11 +429,17 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   // "unverified" the way a real profile's delete access would be if we had no
   // data on it. Everything else - Standard, any custom profile - genuinely
   // can't be verified without the per-profile detail endpoint.
-  const otherProfileCount = entityData.profiles.items.filter(p => !isSystemAdministratorProfile(p)).length;
   // Profile name + type is org configuration, not personal data - unlike the
   // users holding it (see the "No tags" note below), it's fine to name
   // directly instead of just a count.
   const deleteProfileList = deleteCapableProfiles(entityData.profiles.items).map(profileNameAndType).join(", ");
+  // Only ever non-empty when havePermissionData is true - a profile only
+  // lands here via profileHasDeletePermission's real, confirmed signals
+  // (isSystemAdministratorProfile is filtered back out), never the "we don't
+  // know" case. The system Administrator profile is expected to have delete
+  // access everywhere; any other profile also having it is the actual
+  // recommendation below - delete access should be Admin-only.
+  const nonAdminDeleteProfiles = deleteCapableProfiles(entityData.profiles.items).filter(p => !isSystemAdministratorProfile(p));
   return [
     {
       id: "access-admin-count", label: "Admin access is limited", status: activeAdminCount <= 2 ? "pass" : "fail",
@@ -471,10 +477,11 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
     {
       id: "access-delete-permission",
       label: "Who can delete records",
-      // Informational, not scored (weight: 0) - who holds delete access
-      // isn't inherently good or bad the way "too many admins" is, and this
-      // app has no verified basis for a "too many" threshold here yet.
-      status: "pass",
+      // Informational, not scored (weight: 0) - but flagged as a fail once
+      // real permission data confirms a non-admin profile also has delete
+      // access, since that specific case IS a known bad practice (delete
+      // should be Admin-only), unlike the general "who holds it" count.
+      status: nonAdminDeleteProfiles.length > 0 ? "fail" : "pass",
       // Two distinct facts (what IS confirmed vs. what ISN'T) read as one
       // run-on sentence crammed into `detail` - real dot-bullets via
       // `bullets` instead (same look as `signals`, minus the +/- point pill,
@@ -487,11 +494,15 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
         ? [
             `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} a profile with delete access on at least one module.`,
             `Profile${deleteCapableProfiles(entityData.profiles.items).length !== 1 ? "s" : ""}: ${deleteProfileList}`,
+            ...(nonAdminDeleteProfiles.length > 0
+              ? [`Delete access should be Admin-only - ${nonAdminDeleteProfiles.length} non-admin profile${nonAdminDeleteProfiles.length !== 1 ? "s" : ""} also grant${nonAdminDeleteProfiles.length !== 1 ? "" : "s"} it: ${nonAdminDeleteProfiles.map(profileNameAndType).join(", ")}.`]
+              : []),
           ]
-        : [
-            `${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} ${deleteProfileList}, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).`,
-            ...(otherProfileCount > 0 ? [`Delete access for ${otherProfileCount} other profile${otherProfileCount !== 1 ? "s" : ""} can't be determined - the connected profiles tool only returns profile name/id/type, not per-module permissions.`] : []),
-          ],
+        // Real permission data isn't available beyond the Administrator
+        // profile's platform-guaranteed access - nothing else can be claimed
+        // about other profiles here, not even "unknown", so there's no
+        // second line.
+        : [`${deleteCapableUsers.length} active user${deleteCapableUsers.length !== 1 ? "s" : ""} ${deleteCapableUsers.length !== 1 ? "hold" : "holds"} ${deleteProfileList}, which always has delete access on every module (a fixed Zoho platform permission, not something that needs verifying).`],
       // No tags - a user's real name isn't this app's data to name in a
       // report someone might screenshot or share. The count in `detail`
       // above is the whole finding either way.
@@ -537,7 +548,6 @@ function dataArchitectureChecklist(
   entityData: Record<CrmEntityType, EntityState>,
   mandatoryFieldCount: number | null,
   mandatoryFieldsError: string | null,
-  mandatoryFieldsPerModule: { apiName: string; count: number; labels: string[] }[] = [],
 ): ChecklistItem[] {
   // null means useMandatoryFields.ts's per-module layout fetch hasn't
   // resolved (or failed) yet - this must never render as a confirmed 0.
@@ -561,13 +571,6 @@ function dataArchitectureChecklist(
   // A high module count only fails this check when it's actually inflated by
   // empty/unused modules - see scoreDataArchitecture's matching condition.
   const tooManyDueToClutter = moduleCount > 15 && emptyModules.length > 0;
-  // "Deals" is the sales module in the Leads/Contacts/Deals/Accounts core
-  // set - called out by name (not just its count) since a bare number gives
-  // no way to sanity-check which fields are actually driving it.
-  const perModuleBreakdown = mandatoryFieldsPerModule
-    .filter(m => m.labels.length > 0)
-    .map(m => `${m.apiName}: ${m.labels.join(", ")} (${m.count})`)
-    .join(". ");
   const mandatoryFieldsOverLimit = mandatoryFieldCount !== null && mandatoryFieldCount > 20;
   const mandatoryFieldsWeight = mandatoryFieldsOverLimit ? Math.min(15, mandatoryFieldCount! - 20) : 15;
   return [
@@ -576,8 +579,7 @@ function dataArchitectureChecklist(
       status: mandatoryFieldsOverLimit ? "fail" : "pass",
       detail: mandatoryFieldCount === null
         ? `Couldn't fetch layouts for your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldsError ? ` (${mandatoryFieldsError})` : ""} - this isn't a confirmed 0, the count is unknown.`
-        : `${mandatoryFieldCount} mandatory field${mandatoryFieldCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldsOverLimit ? " (over the 20 recommended)." : "."}`
-          + (perModuleBreakdown ? `\n${perModuleBreakdown}.` : ""),
+        : `${mandatoryFieldCount} mandatory field${mandatoryFieldCount !== 1 ? "s" : ""} found across your core Leads, Contacts, Deals, and Accounts modules${mandatoryFieldsOverLimit ? " (over the 20 recommended)." : "."}`,
       weight: mandatoryFieldsWeight,
       // One signal, not five like Automation Coverage - this item only has
       // one real criterion (≤20 mandatory fields), so the bullet just makes
@@ -719,7 +721,6 @@ export function buildHealthAuditModel(
   mandatoryFieldCount: number | null = null,
   mandatoryFieldsError: string | null = null,
   mandatoryFieldsResolved = true,
-  mandatoryFieldsPerModule: { apiName: string; count: number; labels: string[] }[] = [],
 ): HealthAuditModel {
   const { total, dimensions: scores, zone, verdict } = computeHealthScore(entityData, pipelineStageCount, ruleCoverage, outOfOrderStageCount, mandatoryFieldCount, pipelineCountOverride);
   const resolved = HEALTH_SCORE_ENTITIES.every(t => isEntityResolved(entityData[t])) && pipelineStagesResolved && mandatoryFieldsResolved;
@@ -744,7 +745,7 @@ export function buildHealthAuditModel(
         reason = accessSecurityReason(entityData);
         break;
       case "dataArchitecture":
-        checklist = dataArchitectureChecklist(entityData, mandatoryFieldCount, mandatoryFieldsError, mandatoryFieldsPerModule);
+        checklist = dataArchitectureChecklist(entityData, mandatoryFieldCount, mandatoryFieldsError);
         reason = dataArchitectureReason(entityData, mandatoryFieldCount, mandatoryFieldsError);
         break;
       case "automationHealth":
