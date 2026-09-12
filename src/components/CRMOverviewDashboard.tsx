@@ -2270,6 +2270,28 @@ function computeBlueprintBreakdown(entityData: Record<CrmEntityType, EntityState
     .sort((a, b) => BP_STATUS_ORDER[a.status] - BP_STATUS_ORDER[b.status]);
 }
 
+// Same "flag the actionable groups, name a few real ones, praise a healthy
+// org" synthesis as buildZiaModuleInsight/buildZiaWorkflowInsight above.
+function buildZiaBlueprintInsight(rows: BlueprintBreakdownRow[]): ZiaInsight {
+  if (rows.length === 0) return { summary: "No blueprints found - nothing to evaluate yet.", points: [] };
+  const inactive = rows.filter(r => r.status === "inactive");
+  const draft = rows.filter(r => r.status === "draft");
+  const points: string[] = [];
+  if (inactive.length > 0) {
+    points.push(cap(`${inactive.length} of ${rows.length} blueprint${rows.length !== 1 ? "s are" : " is"} inactive - not enforcing anything right now: ${inactive.slice(0, 3).map(b => `${b.name} (${b.module})`).join(", ")}${inactive.length > 3 ? ", etc." : "."}`));
+  }
+  if (draft.length > 0) {
+    points.push(cap(`${draft.length} blueprint${draft.length !== 1 ? "s are" : " is"} still in draft - never activated: ${draft.slice(0, 3).map(b => `${b.name} (${b.module})`).join(", ")}${draft.length > 3 ? ", etc." : "."}`));
+  }
+  if (points.length === 0) {
+    return { summary: `All ${rows.length} blueprint${rows.length !== 1 ? "s are" : " is"} active and enforcing their process - looks healthy.`, points: [] };
+  }
+  return {
+    summary: "", points,
+    action: "Activate the ones still needed, or delete the rest so every configured process is actually being enforced.",
+  };
+}
+
 interface UserBreakdownRow {
   id: string;
   name: string;
@@ -2868,6 +2890,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const moduleBreakdown = selectedCard === "modules" ? computeModuleBreakdown(entityData) : [];
   const ziaModuleInsight = buildZiaModuleInsight(moduleBreakdown);
   const blueprintBreakdown = selectedCard === "blueprints" ? computeBlueprintBreakdown(entityData) : [];
+  const ziaBlueprintInsight = buildZiaBlueprintInsight(blueprintBreakdown);
   const ziaScheduleInsight = buildZiaScheduleInsight(scheduleBreakdown);
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
 
@@ -3480,6 +3503,13 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <PanelEmptyState state={entityData.blueprints} label="blueprints" onRetry={() => fetchEntity("blueprints")} />
           ) : (
           <>
+          <div className="zia-rec zia-rec-medium activity-zia-rec">
+            <div className="zia-rec-header">
+              <span className="zia-rec-icon">✦</span>
+              <span className="zia-rec-title">Zia Recommendation - Blueprints</span>
+            </div>
+            <ZiaRecBody {...ziaBlueprintInsight} />
+          </div>
           <input
             type="text"
             className="kpi-drilldown-search"
