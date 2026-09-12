@@ -3258,7 +3258,6 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .activity-zia-item { display: flex; flex-direction: column; gap: 2px; }
 .activity-zia-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-tertiary); }
 .activity-zia-value { font-size: 13px; font-weight: 700; color: var(--color-text); }
-.activity-zia-sub { font-size: 11px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 720px) {
   .activity-subkpi-grid { grid-template-columns: 1fr; }
   .activity-zia-grid { grid-template-columns: 1fr; }

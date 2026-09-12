@@ -1189,14 +1189,16 @@ function buildActivityStats(
 
 interface LatestActivity {
   date: string | null;
-  label: string;
 }
 
 // Scans for whichever date field the item actually carries (varies by MCP
 // server/API version - same defensive fallback-chain pattern as the rest of
-// this file) and keeps the most recent one found.
-function latestActivity(items: unknown[], dateFields: string[], titleFields: string[]): LatestActivity {
-  let best: { date: string; label: string } | null = null;
+// this file) and keeps the most recent one found. Deliberately never reads a
+// subject/title field - real record names/subjects aren't shown anywhere in
+// this section, same redaction policy as the rest of the app's Zia
+// Recommendation and checklist copy.
+function latestActivity(items: unknown[], dateFields: string[]): LatestActivity {
+  let bestDate: string | null = null;
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
     const r = item as Record<string, unknown>;
@@ -1208,16 +1210,9 @@ function latestActivity(items: unknown[], dateFields: string[], titleFields: str
     if (!dateVal) continue;
     const d = new Date(dateVal);
     if (Number.isNaN(d.getTime())) continue;
-    if (!best || d.getTime() > new Date(best.date).getTime()) {
-      let label = "";
-      for (const f of titleFields) {
-        const v = r[f];
-        if (typeof v === "string" && v) { label = v; break; }
-      }
-      best = { date: dateVal, label };
-    }
+    if (!bestDate || d.getTime() > new Date(bestDate).getTime()) bestDate = dateVal;
   }
-  return best ?? { date: null, label: "" };
+  return { date: bestDate };
 }
 
 function daysSince(dateStr: string | null): number | null {
@@ -1237,9 +1232,9 @@ interface ZiaActivityInsight extends ZiaInsight {
 // same "flag the stale ones, praise the healthy ones" tone as the rest of the
 // dashboard's recommendation copy.
 function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState, emails: ActivityFetchState): ZiaActivityInsight {
-  const lastEmail = latestActivity(emails.items, ["sent_time", "Sent_Time", "created_time", "Created_Time", "Modified_Time"], ["subject", "Subject"]);
-  const lastCall = latestActivity(calls.items, ["call_start_time", "Call_Start_Time", "created_time", "Created_Time"], ["subject", "Subject", "description", "Description"]);
-  const lastTaskDue = latestActivity(taskItems, ["due_date", "Due_Date", "closingdate"], ["subject", "Subject", "title", "Title"]);
+  const lastEmail = latestActivity(emails.items, ["sent_time", "Sent_Time", "created_time", "Created_Time", "Modified_Time"]);
+  const lastCall = latestActivity(calls.items, ["call_start_time", "Call_Start_Time", "created_time", "Created_Time"]);
+  const lastTaskDue = latestActivity(taskItems, ["due_date", "Due_Date", "closingdate"]);
 
   const STALE_DAYS = 14;
   const points: string[] = [];
@@ -1261,6 +1256,74 @@ function buildZiaActivityInsight(taskItems: unknown[], calls: ActivityFetchState
     return { lastEmail, lastCall, lastTaskDue, summary: "Recent activity looks healthy across email, calls, and tasks - no gaps flagged.", points: [] };
   }
   return { lastEmail, lastCall, lastTaskDue, summary: "", points, action: "Re-engage before this account goes cold." };
+}
+
+// ─── Activity table (Email / Task / Call combined, filterable by type) ─────
+const ACTIVITY_TABLE_PAGE_SIZE = 10;
+
+type ActivityRowType = "email" | "task" | "call";
+
+interface ActivityTableRow {
+  id: string;
+  type: ActivityRowType;
+  status: string;
+  severity: "good" | "bad" | "neutral";
+  date: string | null;
+}
+
+function activityRowDate(item: unknown, fields: string[]): string | null {
+  if (!item || typeof item !== "object") return null;
+  const r = item as Record<string, unknown>;
+  for (const f of fields) {
+    const v = r[f];
+    if (typeof v === "string" && v) return v;
+  }
+  return null;
+}
+
+// No subject/name is ever read here - real record names aren't shown in this
+// table, same redaction policy as the rest of the app's Zia Recommendation
+// and checklist copy. Only a derived status (Overdue/Missed/Completed/etc.)
+// and a date, both from the same predicates the sub-KPI tiles above already
+// use (isOverdueTask/isMissedCall/isCompletedActivity).
+function computeActivityTableRows(taskItems: unknown[], calls: ActivityFetchState, emails: ActivityFetchState): ActivityTableRow[] {
+  const taskRows: ActivityTableRow[] = taskItems.map((t, i) => {
+    const overdue = isOverdueTask(t);
+    const completed = isCompletedActivity(t);
+    return {
+      id: `task-${(t as Record<string, unknown> | null)?.id ?? i}`,
+      type: "task",
+      status: overdue ? "Overdue" : completed ? "Completed" : "Pending",
+      severity: overdue ? "bad" : completed ? "good" : "neutral",
+      date: activityRowDate(t, ["due_date", "Due_Date", "closingdate"]),
+    };
+  });
+  const callRows: ActivityTableRow[] = calls.items.map((c, i) => {
+    const missed = isMissedCall(c);
+    const completed = isCompletedActivity(c);
+    return {
+      id: `call-${(c as Record<string, unknown> | null)?.id ?? i}`,
+      type: "call",
+      status: missed ? "Missed" : completed ? "Completed" : "Scheduled",
+      severity: missed ? "bad" : completed ? "good" : "neutral",
+      date: activityRowDate(c, ["call_start_time", "Call_Start_Time", "created_time", "Created_Time"]),
+    };
+  });
+  const emailRows: ActivityTableRow[] = emails.items.map((e, i) => {
+    const sent = isCompletedActivity(e);
+    return {
+      id: `email-${(e as Record<string, unknown> | null)?.id ?? i}`,
+      type: "email",
+      status: sent ? "Sent" : "Pending",
+      severity: sent ? "good" : "neutral",
+      date: activityRowDate(e, ["sent_time", "Sent_Time", "created_time", "Created_Time", "Modified_Time"]),
+    };
+  });
+  return [...taskRows, ...callRows, ...emailRows].sort((a, b) => {
+    const ad = a.date ? new Date(a.date).getTime() : -Infinity;
+    const bd = b.date ? new Date(b.date).getTime() : -Infinity;
+    return bd - ad; // most recent first
+  });
 }
 
 // ─── Schedules drill-down ───────────────────────────────────────────────────────
@@ -2774,6 +2837,12 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [issueTypeFilter, setIssueTypeFilter] = useState<FunctionIssueCategory | "all">("all");
   const [issuePage, setIssuePage] = useState(1);
   const [expandedIssueFunctions, setExpandedIssueFunctions] = useState<Set<string>>(new Set());
+  // Same "criteria filter buttons on top, clickable, paginated table" shape
+  // as the Functions Issues tab above, applied to the combined Email/Task/
+  // Call activity table - filter by record type first.
+  const [activityTypeFilter, setActivityTypeFilter] = useState<"all" | "email" | "task" | "call">("all");
+  const [activityPage, setActivityPage] = useState(1);
+  useEffect(() => { setActivityPage(1); }, [activityTypeFilter]);
   // One search box per drill-down panel - cleared whenever a different card
   // (or function sub-tab) is opened so a stale query from "Modules" doesn't
   // silently hide everything the next time "Blueprints" is opened.
@@ -3071,6 +3140,16 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const ziaApprovalRuleInsight = buildZiaApprovalRuleInsight(entityData.approvalRules.items);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
+  const activityTableRows = selectedCard === "activity"
+    ? computeActivityTableRows(entityData.tasks.items, activityRecords.calls, activityRecords.emails)
+    : [];
+  const filteredActivityRows = activityTypeFilter === "all" ? activityTableRows : activityTableRows.filter(r => r.type === activityTypeFilter);
+  const activityTotalPages = Math.max(1, Math.ceil(filteredActivityRows.length / ACTIVITY_TABLE_PAGE_SIZE));
+  const activityCurrentPage = Math.min(activityPage, activityTotalPages);
+  const pagedActivityRows = filteredActivityRows.slice(
+    (activityCurrentPage - 1) * ACTIVITY_TABLE_PAGE_SIZE,
+    activityCurrentPage * ACTIVITY_TABLE_PAGE_SIZE,
+  );
   const profileItems = entityData.profiles.items;
   // Deleted accounts are gone from the org and hold no license - excluded
   // from this list entirely, same as computeUserBreakdown above it.
@@ -4449,17 +4528,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <div className="activity-zia-item">
                 <span className="activity-zia-label">Last Email</span>
                 <span className="activity-zia-value">{ziaActivityInsight.lastEmail.date ? formatLastTriggered(ziaActivityInsight.lastEmail.date) : "None found"}</span>
-                {ziaActivityInsight.lastEmail.label && <span className="activity-zia-sub">{ziaActivityInsight.lastEmail.label}</span>}
               </div>
               <div className="activity-zia-item">
                 <span className="activity-zia-label">Last Call</span>
                 <span className="activity-zia-value">{ziaActivityInsight.lastCall.date ? formatLastTriggered(ziaActivityInsight.lastCall.date) : "None found"}</span>
-                {ziaActivityInsight.lastCall.label && <span className="activity-zia-sub">{ziaActivityInsight.lastCall.label}</span>}
               </div>
               <div className="activity-zia-item">
                 <span className="activity-zia-label">Last Task Due</span>
                 <span className="activity-zia-value">{ziaActivityInsight.lastTaskDue.date ? formatLastTriggered(ziaActivityInsight.lastTaskDue.date) : "None found"}</span>
-                {ziaActivityInsight.lastTaskDue.label && <span className="activity-zia-sub">{ziaActivityInsight.lastTaskDue.label}</span>}
               </div>
             </div>
             <ZiaRecBody {...ziaActivityInsight} />
@@ -4476,6 +4552,41 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </div>
             ))}
           </div>
+
+          {activityTableRows.length > 0 && (
+            <>
+              <div className="kpi-drilldown-summary">
+                {(["all", "email", "task", "call"] as const).map(t => {
+                  const count = t === "all" ? activityTableRows.length : activityTableRows.filter(r => r.type === t).length;
+                  return (
+                    <button
+                      key={t}
+                      className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${activityTypeFilter === t ? "selected" : ""}`}
+                      onClick={() => setActivityTypeFilter(t)}
+                    >
+                      {count} {t === "all" ? "All" : t === "email" ? "Email" : t === "task" ? "Task" : "Call"}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="kpi-drilldown-table kpi-drilldown-table-single">
+                {pagedActivityRows.map(row => (
+                  <div key={row.id} className="kpi-drilldown-row">
+                    <span className="kpi-drilldown-badge status-hidden">{row.type}</span>
+                    <span className={`kpi-drilldown-badge status-${row.severity === "good" ? "active" : row.severity === "bad" ? "inactive" : "hidden"}`}>{row.status}</span>
+                    <span className="kpi-drilldown-module">{row.date ? formatLastTriggered(row.date) : "No date"}</span>
+                  </div>
+                ))}
+              </div>
+              {activityTotalPages > 1 && (
+                <div className="kpi-drilldown-pagination">
+                  <button className="btn-secondary" disabled={activityCurrentPage <= 1} onClick={() => setActivityPage(p => Math.max(1, p - 1))}>← Prev</button>
+                  <span>Page {activityCurrentPage} of {activityTotalPages} ({filteredActivityRows.length} record{filteredActivityRows.length !== 1 ? "s" : ""})</span>
+                  <button className="btn-secondary" disabled={activityCurrentPage >= activityTotalPages} onClick={() => setActivityPage(p => Math.min(activityTotalPages, p + 1))}>Next →</button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
 
