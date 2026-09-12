@@ -162,8 +162,25 @@ function SectionTitle({ text, tooltip }: { text: string; tooltip: string }) {
   );
 }
 
+// Shared with the verdict strip so the two never drift into disagreeing
+// wording about the same score.
+function gapToHealthyText(score: number, resolved: boolean): string {
+  const gapToHealthy = Math.max(0, HEALTHY_LINE - score);
+  const aboveGoal = Math.max(0, score - GOAL_LINE);
+  if (!resolved) return "Reading your CRM setup…";
+  if (score >= GOAL_LINE) return `${aboveGoal} point${aboveGoal !== 1 ? "s" : ""} above the healthy line`;
+  if (score >= HEALTHY_LINE) return "In the fair range, just below the healthy line";
+  return `${gapToHealthy} point${gapToHealthy !== 1 ? "s" : ""} below healthy`;
+}
+
 // ── 1 + 2: header + circular gauge with 3 health bands ──────────────────────
-function HealthGauge({ score, resolved }: { score: number; resolved: boolean }) {
+// Hovering zooms the ring in slightly and pops a callout with an arrow
+// pointing at it (pure CSS - see .hsd-gauge-wrap:hover in globals.css) that
+// names the single weakest real dimension, so the hover reveals a concrete
+// "why" instead of just re-showing the same number.
+function HealthGauge({
+  score, resolved, weakestLabel, weakestScore,
+}: { score: number; resolved: boolean; weakestLabel: string | null; weakestScore: number | null }) {
   const reducedMotion = usePrefersReducedMotion();
   const displayScore = useCountUp(score, resolved, 1200);
   const band = gaugeBandForScore(score);
@@ -173,7 +190,7 @@ function HealthGauge({ score, resolved }: { score: number; resolved: boolean }) 
   const label80 = pointOnRing(GOAL_LINE / 100, BAND_RADIUS + 14);
 
   return (
-    <div className="hsd-gauge-wrap">
+    <div className={`hsd-gauge-wrap ${resolved ? "hoverable" : ""}`}>
       <svg className="hsd-gauge-svg" viewBox="0 0 220 220">
         {GAUGE_BANDS.map(b => {
           const segLen = BAND_CIRCUMFERENCE * ((b.to - b.from) / 100);
@@ -204,6 +221,15 @@ function HealthGauge({ score, resolved }: { score: number; resolved: boolean }) 
         <span className="hsd-gauge-num">{resolved ? displayScore : "-"}</span>
         <span className="hsd-gauge-max">/ 100</span>
       </div>
+      {resolved && (
+        <div className="hsd-gauge-annotation" role="tooltip">
+          <span className="hsd-gauge-annotation-title">{score}/100 · {gapToHealthyText(score, resolved)}</span>
+          {weakestLabel && weakestScore !== null && (
+            <span className="hsd-gauge-annotation-sub">Weakest area: {weakestLabel} ({weakestScore}/20)</span>
+          )}
+          <span className="hsd-gauge-annotation-arrow" />
+        </div>
+      )}
     </div>
   );
 }
@@ -224,15 +250,7 @@ function GaugeLegend() {
 // ── 3: verdict strip ─────────────────────────────────────────────────────────
 function VerdictStrip({ score, resolved }: { score: number; resolved: boolean }) {
   const band = gaugeBandForScore(score);
-  const gapToHealthy = Math.max(0, HEALTHY_LINE - score);
-  const aboveGoal = Math.max(0, score - GOAL_LINE);
-  const text = !resolved
-    ? "Reading your CRM setup…"
-    : score >= GOAL_LINE
-      ? `${aboveGoal} point${aboveGoal !== 1 ? "s" : ""} above the healthy line`
-      : score >= HEALTHY_LINE
-        ? "In the fair range, just below the healthy line"
-        : `${gapToHealthy} point${gapToHealthy !== 1 ? "s" : ""} below healthy`;
+  const text = gapToHealthyText(score, resolved);
 
   return (
     <div className={`hsd-verdict-strip band-${resolved ? band.key : "loading"}`} style={{ borderLeftColor: resolved ? band.color : "var(--color-border-strong)" }}>
@@ -435,7 +453,12 @@ export default function HealthScoreDashboard({
           <SectionTitle text="CRM health score" tooltip="Is my CRM working well or broken? A single score built from automation, sales process setup, security, data structure, and workflow health." />
         </div>
 
-        <HealthGauge score={model.total} resolved={model.resolved} />
+        <HealthGauge
+          score={model.total}
+          resolved={model.resolved}
+          weakestLabel={sortedDimensions[0]?.label ?? null}
+          weakestScore={sortedDimensions[0]?.score ?? null}
+        />
         <GaugeLegend />
 
         <VerdictStrip score={model.total} resolved={model.resolved} />
