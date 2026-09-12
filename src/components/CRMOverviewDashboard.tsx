@@ -68,16 +68,6 @@ function hasMoreRecords(result: unknown): boolean {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ReportTab = "changes" | "integrations" | "architecture";
-type FeedbackCategory = "general" | "feature" | "improvement" | "bug";
-
-interface FeedbackEntry {
-  id: string;
-  name: string;
-  category: FeedbackCategory;
-  rating: number;
-  message: string;
-  timestamp: string;
-}
 
 interface Recommendation {
   id: string;
@@ -130,19 +120,6 @@ interface KpiItem {
 const ZIA_PATTERNS = [/zia/i, /recommend/i, /analy[sz]/i, /insight/i, /suggest/i];
 
 const QUERY_KEYS = ["query", "question", "prompt", "text", "message", "input", "search", "context"];
-
-const FB_CATEGORIES: { value: FeedbackCategory; label: string; icon: string }[] = [
-  { value: "general",     label: "General",         icon: "◎" },
-  { value: "feature",     label: "Feature Request",  icon: "◈" },
-  { value: "improvement", label: "Improvement",      icon: "⊞" },
-  { value: "bug",         label: "Bug Report",       icon: "⚠" },
-];
-
-const FB_RATING_LABELS: Record<number, string> = {
-  1: "Poor", 2: "Fair", 3: "Good", 4: "Great", 5: "Excellent",
-};
-
-const FB_STORAGE_KEY = "zoho-crm-feedback";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -2587,11 +2564,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const [ziaLoading, setZiaLoading] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const chatMessagesRef = useRef<HTMLDivElement>(null);
-  const [feedbackEntries, setFeedbackEntries] = useState<FeedbackEntry[]>([]);
-  const [feedbackForm, setFeedbackForm] = useState<{ name: string; category: FeedbackCategory; rating: number; message: string }>({
-    name: "", category: "general", rating: 0, message: "",
-  });
-  const [feedbackStatus, setFeedbackStatus] = useState<"idle" | "success">("idle");
   const [remediation, setRemediation] = useState<Record<string, {
     loading: boolean;
     text: string;
@@ -2817,7 +2789,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // Remediation answers render inline on the recommendation card itself -
   // routing them into the shared Ask Zia chat (further down the page) meant
   // clicking the button either forced an unwanted scroll or landed the user
-  // among unrelated Reports/Feedback content instead of the actual answer.
+  // among unrelated Reports content instead of the actual answer.
   //
   // This is the only place in the dashboard that calls Claude directly rather
   // than a connected Zia/MCP tool: "how do I fix this" is a pure explain task
@@ -2966,38 +2938,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // Deleted accounts are gone from the org and hold no license - excluded
   // from this list entirely, same as computeUserBreakdown above it.
   const userItemsForPanel = entityData.users.items.filter(u => !isDeletedUser(u));
-
-  // Load persisted feedback on mount
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(FB_STORAGE_KEY);
-      if (stored) setFeedbackEntries(JSON.parse(stored) as FeedbackEntry[]);
-    } catch { /* ignore */ }
-  }, []);
-
-  function submitFeedback() {
-    if (!feedbackForm.message.trim()) return;
-    const entry: FeedbackEntry = {
-      id: Math.random().toString(36).slice(2),
-      name: feedbackForm.name.trim() || "Anonymous",
-      category: feedbackForm.category,
-      rating: feedbackForm.rating,
-      message: feedbackForm.message.trim(),
-      timestamp: new Date().toISOString(),
-    };
-    const updated = [entry, ...feedbackEntries];
-    setFeedbackEntries(updated);
-    try { localStorage.setItem(FB_STORAGE_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
-    setFeedbackForm({ name: "", category: "general", rating: 0, message: "" });
-    setFeedbackStatus("success");
-    setTimeout(() => setFeedbackStatus("idle"), 3000);
-  }
-
-  function deleteFeedback(id: string) {
-    const updated = feedbackEntries.filter(e => e.id !== id);
-    setFeedbackEntries(updated);
-    try { localStorage.setItem(FB_STORAGE_KEY, JSON.stringify(updated)); } catch { /* ignore */ }
-  }
 
   function categoryLabelOf(category: ReportTab): string {
     return category === "changes" ? "Changes" : category === "integrations" ? "Integrations" : "Architecture";
@@ -4648,143 +4588,6 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           })}
         </div>
       </div>
-      {/* ── Feedback ────────────────────────────────────────────────────────── */}
-      <div className="crm-feedback">
-        <div className="crm-feedback-header">
-          <p className="crm-panel-label">Feedback</p>
-          <span className="crm-feedback-sub">Help us improve the Zoho CRM Audit tool</span>
-        </div>
-        <div className="crm-feedback-body">
-
-          {/* Form */}
-          <div className="crm-feedback-form">
-            <h3 className="crm-fb-form-title">Share Your Feedback</h3>
-
-            <div className="crm-fb-field">
-              <label className="crm-fb-label">Category</label>
-              <div className="crm-fb-categories">
-                {FB_CATEGORIES.map(cat => (
-                  <button
-                    key={cat.value}
-                    className={`crm-fb-cat ${feedbackForm.category === cat.value ? "active" : ""}`}
-                    onClick={() => setFeedbackForm(prev => ({ ...prev, category: cat.value }))}
-                  >
-                    <span>{cat.icon}</span>
-                    <span>{cat.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="crm-fb-field">
-              <label className="crm-fb-label">Rating <span className="crm-fb-optional">(optional)</span></label>
-              <div className="crm-fb-stars">
-                {[1, 2, 3, 4, 5].map(star => (
-                  <button
-                    key={star}
-                    className={`crm-fb-star ${feedbackForm.rating >= star ? "filled" : ""}`}
-                    onClick={() => setFeedbackForm(prev => ({
-                      ...prev, rating: prev.rating === star ? 0 : star,
-                    }))}
-                  >★</button>
-                ))}
-                {feedbackForm.rating > 0 && (
-                  <span className="crm-fb-rating-label">{FB_RATING_LABELS[feedbackForm.rating]}</span>
-                )}
-              </div>
-            </div>
-
-            <div className="crm-fb-field">
-              <label className="crm-fb-label">Your Name <span className="crm-fb-optional">(optional)</span></label>
-              <input
-                className="crm-fb-input"
-                type="text"
-                placeholder="Anonymous"
-                value={feedbackForm.name}
-                onChange={e => setFeedbackForm(prev => ({ ...prev, name: e.target.value }))}
-              />
-            </div>
-
-            <div className="crm-fb-field">
-              <label className="crm-fb-label">Message <span className="crm-fb-required">*</span></label>
-              <textarea
-                className="crm-fb-textarea"
-                placeholder="Describe your feedback, suggestion, or issue…"
-                value={feedbackForm.message}
-                onChange={e => setFeedbackForm(prev => ({ ...prev, message: e.target.value }))}
-                rows={4}
-              />
-            </div>
-
-            {feedbackStatus === "success" && (
-              <div className="form-success">
-                Thank you! Your feedback has been recorded.
-                <button className="bp-dismiss" onClick={() => setFeedbackStatus("idle")}>✕</button>
-              </div>
-            )}
-
-            <button
-              className="btn-connect crm-fb-submit"
-              onClick={submitFeedback}
-              disabled={!feedbackForm.message.trim()}
-            >
-              Submit Feedback
-            </button>
-          </div>
-
-          {/* Right column: what this app is, plus any submitted feedback below it.
-              Kept as a single grid child (alongside the form) so the entries
-              list - which only renders once feedback exists - doesn't wrap
-              onto its own row instead of staying in the right column. */}
-          <div className="crm-feedback-side">
-            <div className="crm-feedback-about">
-              <h3 className="crm-fb-form-title">About This App</h3>
-              <p className="crm-fb-about-desc">
-                EvoAudit audits your connected Zoho CRM (modules, workflows, blueprints, fields, functions, and users)
-                against best practices, and surfaces what&rsquo;s costing you leads, licenses, or clean data.
-              </p>
-            </div>
-
-            {/* Entries list */}
-            {feedbackEntries.length > 0 && (
-              <div className="crm-feedback-list">
-                <h3 className="crm-fb-form-title">
-                  Submitted Feedback
-                  <span className="crm-fb-count">{feedbackEntries.length}</span>
-                </h3>
-                <div className="crm-fb-entries">
-                  {feedbackEntries.map(entry => {
-                    const cat = FB_CATEGORIES.find(c => c.value === entry.category);
-                    return (
-                      <div key={entry.id} className="crm-fb-entry">
-                        <div className="crm-fb-entry-header">
-                          <span className="crm-fb-entry-cat">{cat?.icon} {cat?.label}</span>
-                          {entry.rating > 0 && (
-                            <span className="crm-fb-entry-stars">
-                              {"★".repeat(entry.rating)}{"☆".repeat(5 - entry.rating)}
-                            </span>
-                          )}
-                          <span className="crm-fb-entry-author">{entry.name}</span>
-                          <span className="crm-fb-entry-date">
-                            {new Date(entry.timestamp).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
-                          </span>
-                          <button
-                            className="crm-fb-entry-del"
-                            title="Remove"
-                            onClick={() => deleteFeedback(entry.id)}
-                          >✕</button>
-                        </div>
-                        <p className="crm-fb-entry-msg">{entry.message}</p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
     </div>
   );
 }
