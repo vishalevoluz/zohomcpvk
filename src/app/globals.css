@@ -5333,7 +5333,17 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .cost-card-severity.sev-warning { background: var(--color-warning-bg); color: var(--bv-warning); }
 .cost-card-severity.sev-review { background: var(--color-bg-tertiary); color: var(--color-text-tertiary); }
 .cost-card-headline { font-size: 14px; font-weight: 700; margin-top: 8px; color: var(--color-text); }
-.cost-card-body { font-size: 13px; color: var(--color-text-secondary); margin-top: 4px; line-height: 1.5; }
+.cost-card-bullets { list-style: none; display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.cost-card-bullets li {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 13px; color: var(--color-text-secondary); line-height: 1.5;
+}
+.cost-card-bullets li::before {
+  content: "";
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--color-text-tertiary);
+  flex-shrink: 0; margin-top: 7px;
+}
 .cost-card-stake { font-size: 13px; font-weight: 700; color: var(--color-text); margin-top: 6px; }
 .cost-card-honesty { font-size: 11px; color: var(--color-text-tertiary); margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--color-border); }
 .cost-card-fix-link {

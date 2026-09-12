@@ -75,7 +75,9 @@ function IssueCard({
         {card.severity}
       </span>
       <h4 className="cost-card-headline">{card.headline}</h4>
-      <p className="cost-card-body">{card.body}</p>
+      <ul className="cost-card-bullets">
+        {card.bullets.map((b, i) => <li key={i}>{b}</li>)}
+      </ul>
       {card.stakeLabel && <p className="cost-card-stake">{card.stakeLabel}</p>}
       {action && (
         <div className="issue-fix-row">

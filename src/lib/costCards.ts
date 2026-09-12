@@ -11,7 +11,11 @@ export interface CostCardResult {
   id: string;
   icon: string;
   headline: string;
-  body: string;
+  /** The fact + business-consequence broken into separate dot-bullet lines
+   * instead of one run-on sentence, so the visible (unexpanded) card reads at
+   * a glance the same way every other checklist/detail section in this app
+   * does. Always at least one line. */
+  bullets: string[];
   severity: CostCardSeverity;
   offenders: string[];
   stakeLabel?: string;
@@ -35,59 +39,86 @@ function joinWithAnd(items: string[]): string {
 // feeds priorityActions.ts's actionable-fix framing, sharing the `id` so a
 // card and its matching action can never drift apart (see "Fix this ↓" in
 // BusinessView.tsx, which cross-links purely on this shared id).
-const CARD_COPY: Record<string, { icon: string; headline: string; body: (f: Finding) => string }> = {
+const CARD_COPY: Record<string, { icon: string; headline: string; bullets: (f: Finding) => string[] }> = {
   "no-email-workflow": {
     icon: "✉", headline: "Leads Are Being Followed Up Manually",
-    body: () => "Your team is chasing every prospect by hand. You are losing deals to faster competitors.",
+    bullets: () => ["Your team is chasing every prospect by hand.", "You are losing deals to faster competitors."],
   },
   "excessive-mandatory-fields": {
     icon: "▤", headline: "Your Sales Team Is Avoiding the CRM",
-    body: f => `${f.count} mandatory fields${f.offenders.length ? ` - concentrated in ${f.offenders.join(", ")}` : ""} push reps to skip records or enter junk data just to save.`,
+    bullets: f => [
+      `${f.count} mandatory field${f.count !== 1 ? "s" : ""} required to save a record${f.offenders.length ? ` - concentrated in ${f.offenders.join(", ")}` : ""}.`,
+      "Reps skip records or enter junk data just to hit save.",
+    ],
   },
   "no-pipeline": {
     icon: "⇥", headline: "You Cannot Forecast Your Revenue",
-    body: () => "Without a structured pipeline, your sales forecast is a guess. Investors and management cannot rely on it.",
+    bullets: () => ["No structured sales pipeline is configured.", "Your sales forecast is a guess - investors and management cannot rely on it."],
   },
   "workflows-inactive": {
     icon: "⟳", headline: "Part of Your Automation Has Quietly Stopped Working",
-    body: f => `${f.note ?? f.count} workflows have silently stopped running${f.offenders.length ? `, including ${f.offenders.slice(0, 3).join(", ")}` : ""} - leads and tasks may be falling through the gaps.`,
+    bullets: f => [
+      `${f.note ?? f.count} workflows have silently stopped running${f.offenders.length ? `, including ${f.offenders.slice(0, 3).join(", ")}` : ""}.`,
+      "Leads and tasks may be falling through the gaps.",
+    ],
   },
   "no-blueprint": {
     icon: "◈", headline: "Your Sales Process Is Unenforceable",
-    body: () => "There is nothing preventing reps from skipping stages or closing deals without required approvals.",
+    bullets: () => ["No blueprint process is configured.", "Nothing prevents reps from skipping stages or closing deals without required approvals."],
   },
   "access-risk": {
     icon: "◑",
     headline: "Everyone Has Admin-Level Access",
-    body: f => f.note === "too-many-admins"
-      ? `${f.count} profiles${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} carry full admin access - more people than necessary can edit, export, or delete any record.`
-      : "All users share identical, admin-level access. This is a data security and compliance risk.",
+    bullets: f => f.note === "too-many-admins"
+      ? [
+          `${f.count} profile${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${f.offenders.join(", ")})` : ""} carry full admin access.`,
+          "More people than necessary can edit, export, or delete any record.",
+        ]
+      : ["All users share identical, admin-level access.", "This is a data security and compliance risk."],
   },
   "empty-modules": {
     icon: "⊞", headline: "You Are Running Unused Complexity",
-    body: f => `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${joinWithAnd(f.offenders)}${f.count > f.offenders.length ? ", etc." : ""})` : ""} sit empty with zero automation - clutter that slows your team down without adding value.`,
+    bullets: f => [
+      `${f.count} module${f.count !== 1 ? "s" : ""}${f.offenders.length ? ` (${joinWithAnd(f.offenders)}${f.count > f.offenders.length ? ", etc." : ""})` : ""} sit empty with zero automation.`,
+      "Clutter that slows your team down without adding value.",
+    ],
   },
   "stale-deals": {
     icon: "⌛", headline: "Deals Are Going Cold in Your Pipeline",
-    body: f => `${f.stakeLabel ?? `${f.count} open deal${f.count !== 1 ? "s" : ""}`} haven't been touched in over 30 days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} - likely to rot unless followed up.`,
+    bullets: f => [
+      `${f.stakeLabel ?? `${f.count} open deal${f.count !== 1 ? "s" : ""}`} haven't been touched in over 30 days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""}.`,
+      "Likely to rot unless followed up.",
+    ],
   },
   "unforecastable-deals": {
     icon: "❔", headline: "Deals Are Missing Key Forecast Data",
-    body: f => `${f.count} open deal${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "are" : "is"} missing an amount or close date${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} - you can't forecast what you can't measure.`,
+    bullets: f => [
+      `${f.count} open deal${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "are" : "is"} missing an amount or close date${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""}.`,
+      "You can't forecast what you can't measure.",
+    ],
   },
   "stale-user-logins": {
     icon: "⏱", headline: "Active Seats Nobody Is Using",
-    body: f => `${f.stakeLabel ?? `${f.count} user${f.count !== 1 ? "s" : ""}`} marked active haven't logged in for 90+ days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""} - a paid seat with zero use.`,
+    bullets: f => [
+      `${f.stakeLabel ?? `${f.count} user${f.count !== 1 ? "s" : ""}`} marked active haven't logged in for 90+ days${f.offenders.length ? `: ${f.offenders.slice(0, 3).join(", ")}` : ""}.`,
+      "A paid seat with zero use.",
+    ],
   },
   "duplicate-emails": {
     icon: "⧉", headline: "Duplicate Records Are Splitting Your Data",
     // Never echoes the actual email addresses - see "Where this shows up" in
     // the expanded detail for a redacted, group-size-only breakdown instead.
-    body: f => `${f.count} lead/contact records share an email with another record - inflating counts and splitting customer history.`,
+    bullets: f => [
+      `${f.count} lead/contact records share an email with another record.`,
+      "Inflating counts and splitting customer history.",
+    ],
   },
   "no-lead-source": {
     icon: "◫", headline: "You Don't Know What's Working",
-    body: f => `${f.count} lead${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "have" : "has"} no source tagged - you can't tell which marketing actually brings in business.`,
+    bullets: f => [
+      `${f.count} lead${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "have" : "has"} no source tagged.`,
+      "You can't tell which marketing actually brings in business.",
+    ],
   },
 };
 
@@ -124,7 +155,7 @@ export function evaluateCostCards(
     .map(f => {
       const copy = CARD_COPY[f.id];
       return {
-        id: f.id, icon: copy.icon, headline: copy.headline, body: copy.body(f), severity: f.severity,
+        id: f.id, icon: copy.icon, headline: copy.headline, bullets: copy.bullets(f), severity: f.severity,
         offenders: f.offenders, stakeLabel: f.stakeLabel, sampleSize: f.sampleSize, honesty: f.honesty,
       };
     });
