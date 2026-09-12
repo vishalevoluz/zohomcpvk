@@ -43,12 +43,18 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     // (unlike createZiaRecommendation/createZiaSimilarity, which were removed
     // for being unused). If no dashboard feature ends up reading/writing
     // through them, revisit removing these the same way.
-    // getUser (singular, per-user detail) sits alongside getUsers (plural,
-    // the list) - the console lists them as two separate tools. The list
-    // endpoint doesn't reliably carry last_activity_time/last_login_time on
-    // every server; getUser's per-user detail does, and useCrmEntities.ts's
-    // enrichUsersWithLoginDetail merges it into each user so the "unused
-    // license" and stale-user-login checks have a real chance of seeing it.
+    // getUser (singular, per-user detail, distinct from the required
+    // getUsers list below) is deliberately NOT listed as required here - a
+    // live report showed the wizard blocking the whole audit with "getUser
+    // not enabled" even though the user had it enabled (it's grouped under a
+    // different app/prefix in the Zoho MCP Console than ZohoCRM_, so an
+    // exact-string required-tools check against "ZohoCRM_getUser" can never
+    // match it). useCrmEntities.ts's enrichUsersWithLoginDetail already finds
+    // it opportunistically by matching any tool name ending in "getUser"
+    // regardless of prefix, same "use it if present, never require it"
+    // treatment as getRecordCount above - it makes the unused-license/
+    // stale-login checks more accurate when available, but nothing here
+    // should ever block the audit on it.
     label: "Core structure & automation (required)",
     tools: [
       "ZohoCRM_getModules", "ZohoCRM_getFields", "ZohoCRM_getLayouts", "ZohoCRM_getWorkflowRules",
@@ -56,7 +62,7 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
       "ZohoCRM_getWorkflowRulesActionsCount", "ZohoCRM_getWorkflowRulesCount", "ZohoCRM_getFunctions",
       "ZohoCRM_getFunction", "ZohoCRM_getFunctionCode", "ZohoCRM_getAllAutomationFunctions",
       "ZohoCRM_getAutomationFunctions", "ZohoCRM_getAutomationFunctionFailures",
-      "ZohoCRM_getUsers", "ZohoCRM_getUser", "ZohoCRM_getRoles", "ZohoCRM_getProfiles", "ZohoCRM_getPipelines",
+      "ZohoCRM_getUsers", "ZohoCRM_getRoles", "ZohoCRM_getProfiles", "ZohoCRM_getPipelines",
       "ZohoCRM_getBlueprint", "ZohoCRM_getBlueprintId", "ZohoCRM_getBlueprintStateById",
       "ZohoCRM_getBlueprintProcessConfigurationMeta",
       "ZohoCRM_getOrganizations", "ZohoCRM_getValidationRules", "ZohoCRM_getLayoutRules",

@@ -18,7 +18,7 @@ import {
   extractPageInfo,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames, isSystemGeneratedRule, resolveUsableModuleApiNames } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, userLastLoginDate, userLoginFieldPresent, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames, isSystemGeneratedRule, resolveUsableModuleApiNames } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, checkFunctionMetadata, ISSUE_CATEGORY_LABELS, type FunctionIssue, type FunctionIssueCategory } from "@/lib/functionAnalysis";
@@ -2200,6 +2200,18 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, functionSum
   // Deleted accounts don't consume a Zoho license - excluded from the
   // "total licensed" figure, unlike disabled-but-not-deleted users.
   const licensedUsers = users.filter(u => !isDeletedUser(u)).length;
+  // "Used" scoped to users who are NOT inactive (Zoho's inactive flag is its
+  // own already-obvious waste category, covered by licensedUsers-activeUsers
+  // above) - an active-status account that has never actually logged in is a
+  // wasted seat a status check alone would miss. Only claimed once
+  // userLoginFieldPresent confirms at least one real user's login field
+  // actually resolved (see getUser enrichment in useCrmEntities.ts) - an
+  // all-false result with the field absent everywhere would otherwise read
+  // as "everyone unused" when really it's "can't tell".
+  const activeUsersOnly = users.filter(isActiveUser);
+  const loginDataAvailable = userLoginFieldPresent(users);
+  const usedActiveUsers = loginDataAvailable ? activeUsersOnly.filter(u => userLastLoginDate(u) !== null).length : null;
+  const unusedActiveUsers = usedActiveUsers !== null ? activeUsers - usedActiveUsers : null;
 
   return [
     {
@@ -2221,11 +2233,15 @@ function computeKpis(entityData: Record<CrmEntityType, EntityState>, functionSum
     {
       key: "users", label: "Active Users", value: activeUsers,
       severity: usersFailed ? "unknown" : activeUsers <= 1 ? "critical" : activeUsers < 5 ? "warning" : "good",
-      // licensedUsers - activeUsers, not a separate count - it's exactly the
-      // inactive-but-still-licensed bucket (deleted accounts are already
-      // excluded from licensedUsers, see its own comment above), so this can
-      // never disagree with the Zia Recommendation box's own math below.
-      note: usersFailed ? `Couldn't verify - ${entityData.users.error}` : `${licensedUsers} total licensed${licensedUsers > activeUsers ? ` (${licensedUsers - activeUsers} unused)` : ""} - click to see who's active/inactive`,
+      // Same figures the Zia Recommendation box below computes (buildZiaUserInsight),
+      // so this tile can never disagree with its own drilldown: total
+      // licensed, then used/unused among the users who are NOT inactive -
+      // Zoho's inactive flag is its own separate, already-obvious waste
+      // (licensedUsers - activeUsers), not folded into "unused" here.
+      note: usersFailed ? `Couldn't verify - ${entityData.users.error}`
+        : unusedActiveUsers !== null
+          ? `${licensedUsers} total licensed - ${usedActiveUsers} used, ${unusedActiveUsers} unused (active, never logged in) - click for details`
+          : `${licensedUsers} total licensed${licensedUsers > activeUsers ? ` (${licensedUsers - activeUsers} inactive)` : ""} - click to see who's active/inactive`,
       clickable: users.length > 0 || usersFailed,
       unknown: usersFailed,
       source: usersFailed ? `Source: ${entityData.users.toolUsed ?? "no matching tool found"} - fetch failed, count not confirmed` : kpiSource(entityData.users, users.length),
@@ -2331,6 +2347,13 @@ interface UserBreakdownRow {
   profile: string;
   role: string;
   status: UserStatusBucket;
+  // False here means "no login-activity date found for this user" - which
+  // covers both "confirmed never logged in" AND "this server doesn't expose
+  // the field at all". Only trustworthy once userLoginFieldPresent(...) on
+  // the full user list confirms at least one user's field actually resolved
+  // - see loginDataAvailable in buildZiaUserInsight, which gates on that
+  // before ever calling a false here "unused".
+  everLoggedIn: boolean;
 }
 
 const USER_BREAKDOWN_SORT_RANK: Record<UserStatusBucket, number> = { inactive: 0, deleted: 1, active: 2 };
@@ -2354,35 +2377,64 @@ function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): U
         profile,
         role: userRoleName(u) || "-",
         status: userStatusBucket(u),
+        everLoggedIn: userLastLoginDate(u) !== null,
       };
     })
     .sort((a, b) => USER_BREAKDOWN_SORT_RANK[a.status] - USER_BREAKDOWN_SORT_RANK[b.status]);
 }
 
-// License-cost math, spelled out the same way the example that drove this
-// was phrased: total licensed seats (every non-deleted user - see
+// License-cost math: total licensed seats (every non-deleted user - see
 // computeUserBreakdown, which already excludes deleted accounts, since those
-// free up their license) minus ACTIVE users only equals the unused-license
-// count. Inactive users must never be folded into "active" here - they still
-// hold a paid seat (Zoho doesn't free a license until the account is fully
-// deleted, not just disabled), so every one of them is a seat paid for with
-// zero return, which is exactly what this box exists to surface.
-function buildZiaUserInsight(rows: UserBreakdownRow[]): ZiaInsight {
+// free up their license), then Used vs. Unused scoped to users who are NOT
+// inactive (Zoho's own inactive flag is a separate, already-obvious waste
+// category, called out on its own line below) - "unused" here means an
+// active-status account that has never actually logged in, a wasted seat a
+// simple status check alone would miss entirely. Only claimed when
+// loginDataAvailable confirms at least one real user's login field actually
+// resolved (see userLoginFieldPresent in crmPredicates.ts, driven by the
+// getUser per-user detail enrichment in useCrmEntities.ts) - never inferred
+// from an all-false result alone, which could just as easily mean the
+// connected server doesn't expose the field at all.
+function buildZiaUserInsight(rows: UserBreakdownRow[], loginDataAvailable: boolean): ZiaInsight {
   if (rows.length === 0) return { summary: "No users found - nothing to evaluate yet.", points: [] };
   const total = rows.length;
-  const active = rows.filter(r => r.status === "active").length;
-  const inactive = rows.filter(r => r.status === "inactive").length;
-  if (inactive === 0) {
-    return { summary: `All ${total} licensed user${total !== 1 ? "s are" : " is"} active - no unused licenses.`, points: [] };
-  }
   const inactiveRows = rows.filter(r => r.status === "inactive");
+  const activeRows = rows.filter(r => r.status === "active");
+  const active = activeRows.length;
+  const inactive = inactiveRows.length;
+  const unusedActiveRows = loginDataAvailable ? activeRows.filter(r => !r.everLoggedIn) : [];
+  const unusedActive = unusedActiveRows.length;
+  const usedActive = active - unusedActive;
+
+  if (inactive === 0 && (!loginDataAvailable || unusedActive === 0)) {
+    return {
+      summary: loginDataAvailable
+        ? `All ${total} licensed user${total !== 1 ? "s are" : " is"} active and have logged in - no unused licenses.`
+        : `All ${total} licensed user${total !== 1 ? "s are" : " is"} active - no inactive licenses. Active-user login activity isn't available to confirm real usage.`,
+      points: [],
+    };
+  }
+
+  const points: string[] = [
+    cap(`${total} licensed user${total !== 1 ? "s" : ""} total - ${active} active, ${inactive} inactive.`),
+  ];
+  if (inactive > 0) {
+    points.push(cap(`${inactive} inactive license${inactive !== 1 ? "s" : ""} - ${inactive !== 1 ? "these accounts hold" : `${inactiveRows[0].name} holds`} a paid seat with nobody using it${inactive > 1 ? `: ${inactiveRows.slice(0, 3).map(r => r.name).join(", ")}${inactive > 3 ? ", etc." : ""}` : ""}.`));
+  }
+  if (loginDataAvailable) {
+    if (unusedActive > 0) {
+      points.push(cap(`Of ${active} active user${active !== 1 ? "s" : ""}, ${usedActive} ${usedActive !== 1 ? "have" : "has"} logged in and ${unusedActive} ${unusedActive !== 1 ? "have" : "has"} never logged in despite holding a license${unusedActive > 1 ? `: ${unusedActiveRows.slice(0, 3).map(r => r.name).join(", ")}${unusedActive > 3 ? ", etc." : ""}` : `: ${unusedActiveRows[0].name}`}.`));
+    } else {
+      points.push(cap(`All ${active} active user${active !== 1 ? "s" : ""} have logged in at least once - no unused active licenses.`));
+    }
+  } else {
+    points.push("Active-user login activity isn't available from this connection - can't confirm which active licenses are actually being used.");
+  }
+
   return {
     summary: "",
-    points: [
-      cap(`${total} licensed user${total !== 1 ? "s" : ""} total - ${active} active, ${inactive} inactive.`),
-      cap(`${inactive} unused license${inactive !== 1 ? "s" : ""} - ${inactive !== 1 ? "these accounts hold" : `${inactiveRows[0].name} holds`} a paid seat with nobody using it${inactive > 1 ? `: ${inactiveRows.slice(0, 3).map(r => r.name).join(", ")}${inactive > 3 ? ", etc." : ""}` : ""}.`),
-    ],
-    action: "Deactivate or free up these licenses to cut your Zoho seat cost - each one is a paid seat with zero return.",
+    points,
+    action: "Deactivate or free up licenses nobody's using - both inactive accounts and active accounts with no login activity are paid seats with zero return.",
   };
 }
 
@@ -2948,7 +3000,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const ziaBlueprintInsight = buildZiaBlueprintInsight(blueprintBreakdown);
   const ziaScheduleInsight = buildZiaScheduleInsight(scheduleBreakdown);
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
-  const ziaUserInsight = buildZiaUserInsight(userBreakdown);
+  const userLoginDataAvailable = userLoginFieldPresent(entityData.users.items);
+  const ziaUserInsight = buildZiaUserInsight(userBreakdown, userLoginDataAvailable);
 
   // Metadata issues (e.g. missing description) come straight from the
   // function list, so they show for every function immediately - unlike the
@@ -3612,6 +3665,12 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           <div className="kpi-drilldown-summary">
             <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.status === "active").length} Active</span>
             <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => r.status === "inactive").length} Inactive</span>
+            {userLoginDataAvailable && (
+              <>
+                <span className="kpi-drilldown-stat good">{userBreakdown.filter(r => r.status === "active" && r.everLoggedIn).length} Used</span>
+                <span className="kpi-drilldown-stat bad">{userBreakdown.filter(r => r.status === "active" && !r.everLoggedIn).length} Unused (active, never logged in)</span>
+              </>
+            )}
           </div>
           <div className="kpi-drilldown-table">
             {userBreakdown.filter(row => matchesSearch(row.name, row.profile, row.role)).map(row => (
@@ -3619,6 +3678,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 <span className="kpi-drilldown-name">{row.name}</span>
                 <span className="kpi-drilldown-module" data-tooltip={`Profile: ${row.profile}`}>{row.profile}</span>
                 <span className="kpi-drilldown-module" data-tooltip={`Role: ${row.role}`}>{row.role}</span>
+                {userLoginDataAvailable && row.status === "active" && (
+                  <span
+                    className={`kpi-drilldown-badge status-${row.everLoggedIn ? "active" : "inactive"}`}
+                    data-tooltip={row.everLoggedIn ? "This user has logged in at least once." : "This user has never logged in, despite holding an active license."}
+                  >
+                    {row.everLoggedIn ? "used" : "unused"}
+                  </span>
+                )}
                 <span className={`kpi-drilldown-badge status-${row.status}`}>{row.status}</span>
               </div>
             ))}
