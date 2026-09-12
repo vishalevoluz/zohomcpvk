@@ -15,6 +15,7 @@ import {
   getItemStatus,
   isEntityResolved,
   findToolForEntity,
+  extractPageInfo,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
 import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames, isSystemGeneratedRule, resolveUsableModuleApiNames } from "@/lib/crmPredicates";
@@ -962,12 +963,16 @@ interface ZiaInsight {
   action?: string;
 }
 
+// Always a bulleted list, even the single-line "all clear" case - one
+// consistent look across every Zia Recommendation box in the app instead of
+// a plain paragraph for the healthy case and bullets only once something's
+// actually flagged.
 function ZiaRecBody({ summary, points, action }: ZiaInsight) {
-  if (points.length === 0) return <p className="zia-rec-desc">{summary}</p>;
+  const lines = points.length > 0 ? points : [summary];
   return (
     <>
       <ul className="zia-rec-list">
-        {points.map((point, i) => <li key={i}>{point}</li>)}
+        {lines.map((point, i) => <li key={i}>{point}</li>)}
       </ul>
       {action && <p className="zia-rec-action">{action}</p>}
     </>
@@ -1011,10 +1016,17 @@ function buildZiaWorkflowInsight(rows: WorkflowBreakdownRow[]): ZiaInsight {
 }
 
 // ─── Activity (Email / Task / Call) drill-down ─────────────────────────────────
-// Tasks already ride along in entityData (the "tasks" entity), but Calls and
-// Emails aren't fetched anywhere else in this app - pulled in lazily here,
-// only once the Activity tile is opened, so a dashboard load that never
-// opens this panel never pays for two extra API calls' worth of pagination.
+// Tasks already ride along in entityData (the "tasks" entity, fetched via the
+// generic getRecords tool - see fetchTasksViaRecords in useCrmEntities.ts).
+// Calls is a standard Zoho CRM module too (confirmed live: getRecords lists
+// "Calls" as a supported module name), so it's fetched here the exact same
+// way - there is no dedicated per-entity "getCalls" tool anywhere in Zoho's
+// real MCP catalogue, so looking for one by name (the old behavior) always
+// found nothing and permanently misreported real call activity as
+// "no call-logging tool is connected". Emails has no equivalent: Zoho CRM's
+// API only exposes emails per-record (a related list under each Lead/
+// Contact/etc.), never as one flat org-wide module - so it genuinely stays
+// unavailable here, not a bug to "fix" by guessing a tool name.
 interface ActivityFetchState {
   items: unknown[];
   loading: boolean;
@@ -1024,6 +1036,7 @@ interface ActivityFetchState {
 
 const ACTIVITY_FETCH_INIT: ActivityFetchState = { items: [], loading: false, fetched: false, unavailable: false };
 const ACTIVITY_MAX_PAGES = 5;
+const CALLS_RECORD_FIELDS = ["id", "Subject", "Call_Type", "Call_Status", "Call_Start_Time", "Call_Duration", "Description", "Created_Time", "Modified_Time"];
 
 function useActivityRecords(config: McpConfig | null, tools: McpTool[], active: boolean, onLog: (log: ExecutionLog) => void) {
   const [calls, setCalls] = useState<ActivityFetchState>(ACTIVITY_FETCH_INIT);
@@ -1035,34 +1048,67 @@ function useActivityRecords(config: McpConfig | null, tools: McpTool[], active: 
     if (!config || tools.length === 0) return;
     fetchedRef.current = true;
 
-    const callsTool = tools.find(t => /getcalls$/i.test(t.name)) ?? tools.find(t => /listcalls|allcalls/i.test(t.name));
+    const recordsTool = tools.find(t => /getrecords$/i.test(t.name));
     const emailsTool = tools.find(t => /getemails$/i.test(t.name)) ?? tools.find(t => /listemails|allemails|sentemails/i.test(t.name));
 
-    async function fetchOne(tool: McpTool | undefined, setState: React.Dispatch<React.SetStateAction<ActivityFetchState>>) {
-      if (!tool) { setState(prev => ({ ...prev, unavailable: true })); return; }
-      setState(prev => ({ ...prev, loading: true }));
-      const pageLoc = findParam(findParamLocations(tool), /^page$/i);
+    async function fetchCalls() {
+      if (!recordsTool) { setCalls(prev => ({ ...prev, unavailable: true })); return; }
+      setCalls(prev => ({ ...prev, loading: true }));
+      const locations = findParamLocations(recordsTool);
+      const moduleLoc = findParam(locations, /^module$/i) ?? { group: null, key: "module" };
+      const fieldsLoc = findParam(locations, /^fields$/i) ?? { group: null, key: "fields" };
+      const perPageLoc = findParam(locations, /per_?page|page_?size|^limit$|^count$/i);
+      const pageTokenLoc = findParam(locations, /^page_?token$/i);
+      let items: unknown[] = [];
+      let pageToken: string | null = null;
+      for (let page = 1; page <= ACTIVITY_MAX_PAGES; page++) {
+        const start = Date.now();
+        const input: Record<string, unknown> = {};
+        setParam(input, moduleLoc, "Calls");
+        setParam(input, fieldsLoc, CALLS_RECORD_FIELDS.join(","));
+        if (perPageLoc) setParam(input, perPageLoc, 200);
+        if (page > 1 && pageToken && pageTokenLoc) setParam(input, pageTokenLoc, pageToken);
+        try {
+          const output = await executeTool(config as McpConfig, recordsTool.name, input);
+          const pageItems = extractArray(output);
+          items = items.concat(pageItems);
+          onLog({ id: crypto.randomUUID(), tool: recordsTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+          const info = extractPageInfo(output);
+          if (!info?.moreRecords || !pageTokenLoc || !info.nextPageToken) break;
+          pageToken = info.nextPageToken;
+        } catch (e: unknown) {
+          onLog({ id: crypto.randomUUID(), tool: recordsTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+          break;
+        }
+      }
+      setCalls({ items, loading: false, fetched: true, unavailable: false });
+    }
+
+    async function fetchEmails() {
+      if (!emailsTool) { setEmails(prev => ({ ...prev, unavailable: true })); return; }
+      setEmails(prev => ({ ...prev, loading: true }));
+      const pageLoc = findParam(findParamLocations(emailsTool), /^page$/i);
       let items: unknown[] = [];
       for (let page = 1; page <= ACTIVITY_MAX_PAGES; page++) {
         const start = Date.now();
         const input: Record<string, unknown> = {};
         if (page > 1 && pageLoc) setParam(input, pageLoc, page);
         try {
-          const output = await executeTool(config as McpConfig, tool.name, input);
+          const output = await executeTool(config as McpConfig, emailsTool.name, input);
           const pageItems = extractArray(output);
           items = items.concat(pageItems);
-          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+          onLog({ id: crypto.randomUUID(), tool: emailsTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
           if (!pageLoc || pageItems.length === 0) break;
         } catch (e: unknown) {
-          onLog({ id: crypto.randomUUID(), tool: tool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
+          onLog({ id: crypto.randomUUID(), tool: emailsTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed", durationMs: Date.now() - start, timestamp: new Date() });
           break;
         }
       }
-      setState({ items, loading: false, fetched: true, unavailable: false });
+      setEmails({ items, loading: false, fetched: true, unavailable: false });
     }
 
-    void fetchOne(callsTool, setCalls);
-    void fetchOne(emailsTool, setEmails);
+    void fetchCalls();
+    void fetchEmails();
   }, [active, config, tools, onLog]);
 
   return { calls, emails };
@@ -1116,14 +1162,20 @@ function buildActivityStats(
 
   const callTotal = calls.items.length;
   const callMissed = calls.items.filter(isMissedCall).length;
-  const callSuggestion = calls.unavailable ? "No call-logging tool is connected - call activity can't be measured from here."
+  const callSuggestion = calls.unavailable ? "The connected MCP server doesn't expose a records tool - call activity can't be measured from here."
     : calls.loading ? "Fetching…"
     : callTotal === 0 ? "No calls logged against records - outreach may be happening outside the CRM, so you can't measure it."
     : callMissed > 0 ? `${callMissed} of ${callTotal} calls are logged as missed, no-answer, or cancelled - follow up before these leads go cold.`
     : "Calls are being logged consistently - no missed calls outstanding.";
 
   const emailTotal = emails.items.length;
-  const emailSuggestion = emails.unavailable ? "No email-logging tool is connected - email activity can't be measured from here."
+  // Distinct from the calls/tasks "unavailable" case above - this isn't a
+  // missing tool, Zoho CRM's API simply has no org-wide Emails module (unlike
+  // Tasks/Calls). Emails only exist as a per-record related list (e.g. GET
+  // .../Leads/{id}/Emails), so there is no flat "all sent emails" endpoint to
+  // ever call here - stated as a platform limitation, not something a
+  // reconnect or different tool selection could fix.
+  const emailSuggestion = emails.unavailable ? "Zoho CRM has no org-wide Emails endpoint - email activity can only be measured per record, not across the whole org."
     : emails.loading ? "Fetching…"
     : emailTotal === 0 ? "No emails logged against records - you can't verify follow-up actually happened."
     : "Email activity is being tracked against records.";
@@ -4351,7 +4403,9 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               <div key={stat.key} className="activity-subkpi-tile">
                 <span className="kpi-tile-label">{stat.label}</span>
                 <span className="kpi-tile-value">{stat.loading ? "…" : stat.total.toLocaleString()}</span>
-                <p className="activity-subkpi-suggestion">{stat.suggestion}</p>
+                <ul className="activity-subkpi-suggestion">
+                  <li>{stat.suggestion}</li>
+                </ul>
               </div>
             ))}
           </div>

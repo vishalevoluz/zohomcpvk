@@ -181,7 +181,7 @@ export function extractArray(output: unknown): unknown[] {
 // without checking this, fetchEntity would silently only ever see page 1, making
 // anything past record #200 (e.g. a workflow rule for a specific module) invisible
 // to the whole app even though it exists in the org.
-function extractPageInfo(output: unknown): { moreRecords: boolean } | null {
+export function extractPageInfo(output: unknown): { moreRecords: boolean; nextPageToken: string | null } | null {
   if (!output || typeof output !== "object") return null;
   let r = output as Record<string, unknown>;
   if (Array.isArray(r.content)) {
@@ -196,7 +196,12 @@ function extractPageInfo(output: unknown): { moreRecords: boolean } | null {
   }
   const info = r.info as Record<string, unknown> | undefined;
   if (!info) return null;
-  return { moreRecords: info.more_records === true };
+  return {
+    moreRecords: info.more_records === true,
+    // Only the module-records endpoint (getRecords) pages this way past 2000
+    // records - see fetchTasksViaRecords below, the one caller that reads it.
+    nextPageToken: typeof info.next_page_token === "string" ? info.next_page_token : null,
+  };
 }
 
 function nestedName(val: unknown): string | undefined {
@@ -347,6 +352,74 @@ export function useCrmEntities(
     return items;
   }, [config, onLog]);
 
+  // Tasks has no dedicated per-entity list tool anywhere in Zoho's real MCP
+  // catalogue (unlike Workflows/Blueprints/Users/etc.) - Tasks is just a
+  // standard CRM module, only reachable through the generic module-records
+  // tool (ZohoCRM_getRecords, module=Tasks), same mechanism
+  // useCrmRecordSamples.ts already uses for Leads/Contacts/Deals/Accounts.
+  // Before this, findToolForEntity(tools, "tasks") always returned null on
+  // the real server (its name-pattern list - getTasks/getActivities/etc. -
+  // matches nothing that actually exists), which set error: "No matching
+  // tool found" - an error still counts as "resolved" (see
+  // isEntityResolved), so this silently read as a confirmed "0 tasks" real
+  // zero everywhere downstream instead of an honest "couldn't fetch",
+  // verified live against a real org with 200+ real tasks.
+  const TASKS_RECORD_FIELDS = ["id", "Subject", "Status", "Due_Date", "Closing_Date", "Created_Time", "Modified_Time"];
+  const fetchTasksViaRecords = useCallback(async () => {
+    const tool = tools.find(t => /getrecords$/i.test(t.name));
+    if (!tool) {
+      setEntityData(prev => ({ ...prev, tasks: { ...prev.tasks, loading: false, error: "No matching tool found", toolUsed: null } }));
+      return [];
+    }
+    setEntityData(prev => ({ ...prev, tasks: { ...prev.tasks, loading: true, error: null, toolUsed: tool.name } }));
+
+    const locations = findParamLocations(tool);
+    const moduleLoc = findParam(locations, /^module$/i) ?? { group: null, key: "module" };
+    const fieldsLoc = findParam(locations, /^fields$/i) ?? { group: null, key: "fields" };
+    const perPageLoc = findParam(locations, /per_?page|page_?size|^limit$|^count$/i);
+    const pageTokenLoc = findParam(locations, /^page_?token$/i);
+
+    const MAX_PAGES = 10; // 10 * 200 = up to 2000 tasks, same safety cap as the generic path above
+    let items: unknown[] = [];
+    let pageToken: string | null = null;
+    let lastError: string | null = null;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const input: Record<string, unknown> = {};
+      setParam(input, moduleLoc, "Tasks");
+      setParam(input, fieldsLoc, TASKS_RECORD_FIELDS.join(","));
+      if (perPageLoc) setParam(input, perPageLoc, 200);
+      if (page > 1 && pageToken && pageTokenLoc) setParam(input, pageTokenLoc, pageToken);
+      const start = Date.now();
+      try {
+        const output = await executeTool(config!, tool.name, input);
+        const pageItems = extractArray(output);
+        items = items.concat(pageItems);
+        onLog({
+          id: Math.random().toString(36).slice(2),
+          tool: tool.name, input, output, status: "success",
+          durationMs: Date.now() - start, timestamp: new Date(),
+        });
+        const info = extractPageInfo(output);
+        if (!info?.moreRecords || !pageTokenLoc || !info.nextPageToken) break;
+        pageToken = info.nextPageToken;
+      } catch (e: unknown) {
+        lastError = e instanceof Error ? e.message : "Failed to fetch tasks";
+        onLog({
+          id: Math.random().toString(36).slice(2),
+          tool: tool.name, input, output: null, status: "error",
+          errorMessage: lastError, durationMs: Date.now() - start, timestamp: new Date(),
+        });
+        break;
+      }
+    }
+
+    setEntityData(prev => ({
+      ...prev,
+      tasks: { ...prev.tasks, loading: false, items, error: items.length === 0 ? lastError : null, toolUsed: tool.name, lastFetched: Date.now() },
+    }));
+    return items;
+  }, [config, tools, onLog]);
+
   // Zoho's profile *list* endpoint (what the generic path below fetches)
   // only ever returns name/id/type/description - the permissions_details/
   // categories array needed for checks like "Who can delete records" lives
@@ -383,6 +456,11 @@ export function useCrmEntities(
 
   const fetchEntity = useCallback(async (type: CrmEntityType, moduleItemsOverride?: unknown[]): Promise<unknown[]> => {
     if (!config) return [];
+    // No dedicated per-entity tool exists for Tasks on the real server (see
+    // fetchTasksViaRecords above) - skip the name-pattern lookup entirely
+    // rather than let it "succeed" at finding nothing and report a false
+    // confirmed zero.
+    if (type === "tasks") return fetchTasksViaRecords();
     const tool = findToolForEntity(tools, type);
 
     setEntityData(prev => ({
@@ -472,7 +550,7 @@ export function useCrmEntities(
       }));
       return items;
     }
-  }, [config, tools, onLog, fetchScopedFields, enrichProfilesWithPermissions]);
+  }, [config, tools, onLog, fetchScopedFields, enrichProfilesWithPermissions, fetchTasksViaRecords]);
 
   const fetchAll = useCallback(() => {
     if (!config) return;

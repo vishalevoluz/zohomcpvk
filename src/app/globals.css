@@ -2940,7 +2940,16 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 @media (max-width: 900px) {
   .crmov-master-detail { grid-template-columns: 1fr; }
 }
-.crmov-card-list { display: flex; flex-direction: column; gap: 8px; }
+/* Capped to the same 640px floor .crmov-detail-panel already uses, so a long
+   card list (9+ KPI/config rows) scrolls internally instead of growing past
+   the viewport and pushing the paired detail panel's content out of view -
+   the list previously had no height limit at all. */
+.crmov-card-list {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 640px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
 .crmov-card-list-divider {
   margin: 10px 0 2px;
   font-size: 11px;
@@ -3233,7 +3242,17 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   flex-direction: column;
   gap: 4px;
 }
-.activity-subkpi-suggestion { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; margin: 4px 0 0; }
+.activity-subkpi-suggestion { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.activity-subkpi-suggestion li {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 12px; color: var(--color-text-secondary); line-height: 1.5;
+}
+.activity-subkpi-suggestion li::before {
+  content: "";
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--color-text-tertiary);
+  flex-shrink: 0; margin-top: 6px;
+}
 .activity-zia-rec { margin-top: 12px; }
 .activity-zia-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 8px 0 10px; }
 .activity-zia-item { display: flex; flex-direction: column; gap: 2px; }
