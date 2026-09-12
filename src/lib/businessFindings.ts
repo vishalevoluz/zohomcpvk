@@ -102,6 +102,26 @@ function sampleHonesty(itemsLength: number, label: string): string {
     : `Based on a sample of ${itemsLength} ${label}s - treat this as indicative, not exhaustive.`;
 }
 
+// The lead sample this finding reads (recordSamples.leads) is fetched
+// converted-only (see useCrmRecordSamples.ts's applyConvertedFilter, done
+// for the flow map's own conversion-tracking purpose) - every lead in it has
+// already converted into some contact, and Zoho's conversion process
+// deliberately copies the same email onto that new contact record. That's
+// the same person's record at two stages of one normal, Zoho-managed
+// conversion - not two people who happened to get entered twice - so it
+// must never count as a duplicate the way an actual accidental double-entry
+// would. Converted_Contact_Id (requested in that same sample) is the precise
+// link between a lead and the specific contact it became.
+function convertedContactId(lead: unknown): string | null {
+  const r = lead as Record<string, unknown>;
+  const id = r.Converted_Contact_Id;
+  return id !== undefined && id !== null && String(id) !== "" ? String(id) : null;
+}
+
+function recordId(r: unknown): string {
+  return String((r as Record<string, unknown> | null)?.id ?? "");
+}
+
 function groupByEmail(records: unknown[]): Map<string, unknown[]> {
   const map = new Map<string, unknown[]>();
   for (const r of records) {
@@ -292,7 +312,21 @@ const FINDING_DEFS: FindingDef[] = [
       const leadItems = recordSamples.leads?.items ?? [];
       const contactItems = recordSamples.contacts?.items ?? [];
       const all = [...leadItems, ...contactItems];
-      const dupGroups = [...groupByEmail(all).entries()].filter(([, recs]) => recs.length > 1);
+      const dupGroups = [...groupByEmail(all).entries()]
+        .map(([email, recs]): [string, unknown[]] => [
+          email,
+          // Drop a converted lead from its own email group specifically when
+          // the contact it converted into is also sitting in that same
+          // group - that one pairing is expected, not a duplicate. Any other
+          // record still sharing the email (a genuinely unrelated lead or
+          // contact) is untouched and still counts.
+          recs.filter(r => {
+            const cid = convertedContactId(r);
+            if (!cid) return true;
+            return !recs.some(other => other !== r && recordId(other) === cid);
+          }),
+        ])
+        .filter(([, recs]) => recs.length > 1);
       if (dupGroups.length === 0) return null;
       const totalDupRecords = dupGroups.reduce((sum, [, recs]) => sum + recs.length, 0);
       const fullyConfirmed = isFullPopulation(leadItems.length) && isFullPopulation(contactItems.length);
