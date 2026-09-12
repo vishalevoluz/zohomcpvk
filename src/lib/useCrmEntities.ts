@@ -454,6 +454,48 @@ export function useCrmEntities(
     return enriched;
   }, [tools, config, onLog]);
 
+  // Zoho's user *list* endpoint (what the generic path below fetches) doesn't
+  // reliably carry last_activity_time/last_login_time on every server - the
+  // per-user detail endpoint (the console's singular "get user", distinct
+  // from the plural "get all users" already used for the list) returns the
+  // full profile. Same "enrich the summary list with per-item detail" shape
+  // as enrichProfilesWithPermissions above, applied to users so
+  // userLastLoginDate/userLoginAgeDays (crmPredicates.ts) - which drive the
+  // "unused license" / stale-user-logins findings - have a real chance of
+  // finding that field instead of silently having nothing to read. Servers
+  // that don't expose this tool, or a single user's detail call that fails,
+  // just keep that user's summary-only item - same "keep what worked" stance
+  // as fetchScopedFields' partial-failure handling below.
+  const enrichUsersWithLoginDetail = useCallback(async (items: unknown[]) => {
+    // Anchored to end-of-name and excludes the plural "getUsers" (which this
+    // same regex would otherwise match, since "getuser" is a substring of
+    // "getusers") - the console lists them as two distinct tools ("get user"
+    // singular vs. "get all users" plural), and matching the wrong one here
+    // would refetch the whole list once per user instead of one user's detail.
+    const detailTool = tools.find(t => /getuser$/i.test(t.name) && !/getusers$/i.test(t.name));
+    if (!detailTool || items.length === 0) return items;
+    const idLoc = findParam(findParamLocations(detailTool), /^id$|^userId$/i) ?? { group: "path_variables", key: "id" };
+    const enriched: unknown[] = [];
+    for (const item of items) {
+      const id = getItemId(item);
+      if (!id) { enriched.push(item); continue; }
+      const input: Record<string, unknown> = {};
+      setParam(input, idLoc, id);
+      const start = Date.now();
+      try {
+        const output = await executeTool(config!, detailTool.name, input);
+        const detailArr = extractArray(output);
+        const detail = (detailArr[0] ?? output) as Record<string, unknown> | null;
+        onLog({ id: Math.random().toString(36).slice(2), tool: detailTool.name, input, output, status: "success", durationMs: Date.now() - start, timestamp: new Date() });
+        enriched.push(detail && typeof detail === "object" ? { ...(item as Record<string, unknown>), ...detail } : item);
+      } catch (e: unknown) {
+        onLog({ id: Math.random().toString(36).slice(2), tool: detailTool.name, input, output: null, status: "error", errorMessage: e instanceof Error ? e.message : "Failed to fetch user detail", durationMs: Date.now() - start, timestamp: new Date() });
+        enriched.push(item);
+      }
+    }
+    return enriched;
+  }, [tools, config, onLog]);
+
   const fetchEntity = useCallback(async (type: CrmEntityType, moduleItemsOverride?: unknown[]): Promise<unknown[]> => {
     if (!config) return [];
     // No dedicated per-entity tool exists for Tasks on the real server (see
@@ -523,6 +565,7 @@ export function useCrmEntities(
       }
 
       if (type === "profiles") items = await enrichProfilesWithPermissions(items);
+      if (type === "users") items = await enrichUsersWithLoginDetail(items);
 
       setEntityData(prev => ({
         ...prev,
@@ -550,7 +593,7 @@ export function useCrmEntities(
       }));
       return items;
     }
-  }, [config, tools, onLog, fetchScopedFields, enrichProfilesWithPermissions, fetchTasksViaRecords]);
+  }, [config, tools, onLog, fetchScopedFields, enrichProfilesWithPermissions, enrichUsersWithLoginDetail, fetchTasksViaRecords]);
 
   const fetchAll = useCallback(() => {
     if (!config) return;

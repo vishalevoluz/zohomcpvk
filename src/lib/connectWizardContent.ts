@@ -43,6 +43,12 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
     // (unlike createZiaRecommendation/createZiaSimilarity, which were removed
     // for being unused). If no dashboard feature ends up reading/writing
     // through them, revisit removing these the same way.
+    // getUser (singular, per-user detail) sits alongside getUsers (plural,
+    // the list) - the console lists them as two separate tools. The list
+    // endpoint doesn't reliably carry last_activity_time/last_login_time on
+    // every server; getUser's per-user detail does, and useCrmEntities.ts's
+    // enrichUsersWithLoginDetail merges it into each user so the "unused
+    // license" and stale-user-login checks have a real chance of seeing it.
     label: "Core structure & automation (required)",
     tools: [
       "ZohoCRM_getModules", "ZohoCRM_getFields", "ZohoCRM_getLayouts", "ZohoCRM_getWorkflowRules",
@@ -50,7 +56,7 @@ export const CONNECT_WIZARD_TOOL_GROUPS = [
       "ZohoCRM_getWorkflowRulesActionsCount", "ZohoCRM_getWorkflowRulesCount", "ZohoCRM_getFunctions",
       "ZohoCRM_getFunction", "ZohoCRM_getFunctionCode", "ZohoCRM_getAllAutomationFunctions",
       "ZohoCRM_getAutomationFunctions", "ZohoCRM_getAutomationFunctionFailures",
-      "ZohoCRM_getUsers", "ZohoCRM_getRoles", "ZohoCRM_getProfiles", "ZohoCRM_getPipelines",
+      "ZohoCRM_getUsers", "ZohoCRM_getUser", "ZohoCRM_getRoles", "ZohoCRM_getProfiles", "ZohoCRM_getPipelines",
       "ZohoCRM_getBlueprint", "ZohoCRM_getBlueprintId", "ZohoCRM_getBlueprintStateById",
       "ZohoCRM_getBlueprintProcessConfigurationMeta",
       "ZohoCRM_getOrganizations", "ZohoCRM_getValidationRules", "ZohoCRM_getLayoutRules",
