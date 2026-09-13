@@ -2972,35 +2972,42 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   gap: 2px;
   cursor: pointer;
   font-family: inherit;
-  transition: padding 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+  /* No padding transition - padding is fixed at every state now (see the
+     hover rule below), so a card's own box height/width never changes.
+     transform/box-shadow are visual-only (they don't affect layout), so
+     hovering or selecting a card can never push the cards around it. */
+  transition: box-shadow 0.16s ease, border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
 }
 .crmov-card:disabled { cursor: default; opacity: 0.7; }
 .crmov-card.clickable:hover, .crmov-card:not(:disabled):hover {
   border-color: var(--color-border-strong);
   background: var(--color-bg-tertiary);
-  padding: 14px 16px;
   transform: translateY(-1px);
   box-shadow: 0 8px 24px rgba(0,0,0,0.18);
   z-index: 1;
 }
 .crmov-card:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 1px; }
-/* Collapsed by default (label + value only); hover/select reveals the note
-   line so the resting list stays compact and only grows on interaction. */
+/* The note line's height is reserved at all times (fixed min-height +
+   permanent margin-top), so every card is the same height whether or not
+   it's hovered/selected - only its opacity toggles. Previously this
+   collapsed to 0 height at rest and expanded on hover/select, which changed
+   the card's own box height and visibly shoved every card below it up or
+   down each time - the exact "clicking a card moves other cards" bug. */
 .crmov-card .kpi-tile-note {
-  max-height: 0;
+  min-height: 18px;
+  margin-top: 2px;
   opacity: 0;
-  margin-top: 0;
-  overflow: hidden;
-  transition: max-height 0.18s ease, opacity 0.14s ease, margin-top 0.18s ease;
+  transition: opacity 0.14s ease;
 }
 .crmov-card.clickable:hover .kpi-tile-note,
 .crmov-card:not(:disabled):hover .kpi-tile-note,
 .crmov-card.selected .kpi-tile-note {
-  max-height: 40px;
   opacity: 1;
-  margin-top: 2px;
 }
-.crmov-card.selected { border-left-width: 4px; border-color: var(--color-brand); background: var(--color-bg-tertiary); }
+/* Color-only, no border-left-width change - width changes shift the card's
+   inner content and its own rendered box size, same class of bug the
+   padding/kpi-tile-note fix above addresses. */
+.crmov-card.selected { border-color: var(--color-brand); background: var(--color-bg-tertiary); }
 .crmov-card.kpi-good, .crmov-card.config-good { border-left-color: var(--color-success); }
 .crmov-card.kpi-warning, .crmov-card.config-warning { border-left-color: var(--bv-warning); }
 .crmov-card.kpi-critical, .crmov-card.config-critical { border-left-color: var(--bv-critical); }
@@ -3107,7 +3114,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 .kpi-drilldown-table::-webkit-scrollbar-thumb:hover { background-color: var(--color-brand); }
 .kpi-drilldown-row {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 10px;
   border: 0.5px solid var(--color-border); border-radius: var(--radius-md);
   padding: 8px 12px; font-size: 12px;
 }
@@ -3140,7 +3147,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .kpi-drilldown-badge.status-empty { background: var(--color-warning-bg); color: var(--bv-warning); }
 .kpi-drilldown-progress { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--color-text-secondary); margin: 0 0 12px; }
 .kpi-drilldown-row-layouts { flex-direction: column; align-items: stretch; gap: 8px; }
-.kpi-drilldown-row-top { display: flex; align-items: center; gap: 10px; }
+.kpi-drilldown-row-top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .kpi-drilldown-layout-names { display: flex; flex-wrap: wrap; gap: 6px; }
 .kpi-drilldown-layout-chip {
   font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
