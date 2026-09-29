@@ -3879,6 +3879,8 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .crm-report-preview-text {
   flex: 1;
   min-width: 0;
+  font-size: 74%;
+  text-wrap: auto;
   overflow-wrap: break-word;
 }
 
