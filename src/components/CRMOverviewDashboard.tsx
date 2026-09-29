@@ -18,7 +18,7 @@ import {
   extractPageInfo,
 } from "@/lib/useCrmEntities";
 import type { Section } from "@/lib/sections";
-import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, userLastLoginDate, userLoginFieldPresent, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames, isSystemGeneratedRule, resolveUsableModuleApiNames } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isCustomModule, isInactiveUser, isDeletedUser, isActiveUser, userStatusBucket, type UserStatusBucket, userRoleName, userLastLoginDate, userLoginFieldPresent, blueprintStatus, type BlueprintStatus, workflowModuleLabel, workflowLastTriggered, moduleApiName, isDeletedModule, isHiddenModule, isEmptyModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, overlappingWorkflowGroups, workflowCriteriaFieldConditions, workflowTriggerLabel, workflowActionTypeNames, isSystemGeneratedRule, resolveUsableModuleApiNames, workflowMissingDescription } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/businessScore";
 import type { PipelineStagesState } from "@/lib/flowMapModel";
 import { analyzeFunctionScript, sortIssuesBySeverity, reviewCodeQuality, checkFunctionMetadata, ISSUE_CATEGORY_LABELS, type FunctionIssue, type FunctionIssueCategory } from "@/lib/functionAnalysis";
@@ -785,6 +785,10 @@ interface WorkflowBreakdownRow {
   longTrigger: boolean;
   duplicate: boolean;
   overlapping: boolean;
+  // True when the workflow has no description set - same "easy to
+  // mis-identify or misuse later" concern the Functions card's "Missing
+  // Description" issue already flags, mirrored here for workflows.
+  noDescription: boolean;
   // Human-readable explanation of *why* duplicate/overlapping fired: the
   // matched condition (module/trigger/criteria/actions), which other
   // workflow(s) it matched, and how many times that exact condition repeats
@@ -886,6 +890,7 @@ function computeWorkflowBreakdown(items: unknown[]): WorkflowBreakdownRow[] {
         longTrigger: daysSinceTrigger !== null && daysSinceTrigger > LONG_TRIGGER_DAYS,
         duplicate,
         overlapping,
+        noDescription: workflowMissingDescription(w),
         duplicateDetail: duplicateGroup ? workflowNameMatchDetail(id, duplicateGroup) : null,
         overlappingDetail: overlapping && overlappingGroup ? workflowMatchDetail(w, overlappingGroup, false) : null,
       };
@@ -925,18 +930,29 @@ function computeWorkflowOverlapGroups(items: unknown[]): WorkflowDuplicateGroupV
     .sort((a, b) => b.items.length - a.items.length);
 }
 
+type WorkflowFilterKey = "active" | "inactive" | "never" | "long-trigger" | "duplicate" | "overlapping" | "no-description";
+
 // "never" isn't mutually exclusive with active/inactive (an active workflow
-// can genuinely have never fired yet), and duplicate/overlapping are their own
-// independent flags too - so each toggle applies its own predicate rather than
-// assigning one category per row.
-function matchesWorkflowFilter(row: WorkflowBreakdownRow, filter: "all" | "active" | "inactive" | "never" | "long-trigger" | "duplicate" | "overlapping"): boolean {
-  if (filter === "all") return true;
+// can genuinely have never fired yet), and duplicate/overlapping/
+// no-description are their own independent flags too - so each toggle
+// applies its own predicate rather than assigning one category per row.
+function matchesWorkflowFilterKey(row: WorkflowBreakdownRow, filter: WorkflowFilterKey): boolean {
   if (filter === "active") return row.active;
   if (filter === "inactive") return !row.active;
   if (filter === "duplicate") return row.duplicate;
   if (filter === "overlapping") return row.overlapping;
   if (filter === "long-trigger") return row.longTrigger;
-  return !row.lastTriggered;
+  if (filter === "no-description") return row.noDescription;
+  return !row.lastTriggered; // "never"
+}
+
+// Selected chips are OR'd together, not intersected - e.g. picking Active +
+// Duplicate shows every workflow that is either active or a duplicate. These
+// are independent flags rather than mutually exclusive buckets, and OR is
+// what lets combining chips broaden the view instead of usually emptying it.
+function matchesWorkflowFilter(row: WorkflowBreakdownRow, filters: Set<WorkflowFilterKey>): boolean {
+  if (filters.size === 0) return true;
+  return [...filters].some(f => matchesWorkflowFilterKey(row, f));
 }
 
 function formatLastTriggered(iso: string | null): string {
@@ -2446,6 +2462,30 @@ function computeUserBreakdown(entityData: Record<CrmEntityType, EntityState>): U
     .sort((a, b) => USER_BREAKDOWN_SORT_RANK[a.status] - USER_BREAKDOWN_SORT_RANK[b.status]);
 }
 
+interface UserRoleCountRow {
+  role: string;
+  total: number;
+  active: number;
+  inactive: number;
+}
+
+// Counts per role (Manager, CEO, ...) instead of one row per user - an
+// individual name is barely readable once truncated to fit the summary strip,
+// and the full name is already available just below in the Full User List
+// panel, so this view answers the actually useful question ("how many of
+// each role do we have, and how many of those are active") instead.
+function computeUserRoleCounts(rows: UserBreakdownRow[]): UserRoleCountRow[] {
+  const byRole = new Map<string, UserRoleCountRow>();
+  for (const row of rows) {
+    const entry = byRole.get(row.role) ?? { role: row.role, total: 0, active: 0, inactive: 0 };
+    entry.total += 1;
+    if (row.status === "active") entry.active += 1;
+    else if (row.status === "inactive") entry.inactive += 1;
+    byRole.set(row.role, entry);
+  }
+  return [...byRole.values()].sort((a, b) => b.total - a.total);
+}
+
 // License-cost math: total licensed seats (every non-deleted user - see
 // computeUserBreakdown, which already excludes deleted accounts, since those
 // free up their license), then Used vs. Unused scoped to users who are NOT
@@ -2801,7 +2841,14 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     if (selectedCard) detailPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedCard]);
   const [moduleFilter, setModuleFilter] = useState<ModuleCategory | "all">("all");
-  const [workflowFilter, setWorkflowFilter] = useState<"all" | "active" | "inactive" | "never" | "long-trigger" | "duplicate" | "overlapping">("all");
+  // A Set, not a single value, so multiple chips can be selected together
+  // (matchesWorkflowFilter OR's them) - an empty set means "all".
+  const [workflowFilter, setWorkflowFilter] = useState<Set<WorkflowFilterKey>>(() => new Set());
+  const toggleWorkflowFilter = (key: WorkflowFilterKey) => setWorkflowFilter(prev => {
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
   const [blueprintFilter, setBlueprintFilter] = useState<BlueprintStatus | "all">("all");
   const functionRecords = useFunctionRecords(config, tools, selectedCard === "functions", onLog);
   const workflowDetails = useWorkflowDetails(config, tools, entityData.workflows.items, selectedCard === "workflows", onLog);
@@ -2834,13 +2881,23 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   // by function instead of a hard slice(0, 15) + "N more" line, and each
   // function collapsed by default - click its name to see its own issues as
   // a bullet list instead of one flat row per issue repeating the name.
-  const [issueTypeFilter, setIssueTypeFilter] = useState<FunctionIssueCategory | "all">("all");
+  // A Set, not a single value, so multiple issue-type chips can be selected
+  // together (OR'd) - an empty set means "all".
+  const [issueTypeFilter, setIssueTypeFilter] = useState<Set<FunctionIssueCategory>>(() => new Set());
+  const toggleIssueTypeFilter = (cat: FunctionIssueCategory) => setIssueTypeFilter(prev => {
+    const next = new Set(prev);
+    if (next.has(cat)) next.delete(cat); else next.add(cat);
+    return next;
+  });
   const [issuePage, setIssuePage] = useState(1);
   const [expandedIssueFunctions, setExpandedIssueFunctions] = useState<Set<string>>(new Set());
   // Same "criteria filter buttons on top, clickable, paginated table" shape
   // as the Functions Issues tab above, applied to the combined Email/Task/
   // Call activity table - filter by record type first.
-  const [activityTypeFilter, setActivityTypeFilter] = useState<"all" | "email" | "task" | "call">("all");
+  // "due" is a Task-only criterion (not a fourth activity type) - selecting it
+  // filters to tasks and sorts them by due date, soonest/most overdue first,
+  // instead of just filtering by type like the other three.
+  const [activityTypeFilter, setActivityTypeFilter] = useState<"all" | "email" | "task" | "call" | "due">("all");
   const [activityPage, setActivityPage] = useState(1);
   useEffect(() => { setActivityPage(1); }, [activityTypeFilter]);
   // One search box per drill-down panel - cleared whenever a different card
@@ -3071,6 +3128,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const userBreakdown = selectedCard === "users" ? computeUserBreakdown(entityData) : [];
   const userLoginDataAvailable = userLoginFieldPresent(entityData.users.items);
   const ziaUserInsight = buildZiaUserInsight(userBreakdown, userLoginDataAvailable);
+  const userRoleCounts = computeUserRoleCounts(userBreakdown);
 
   // Metadata issues (e.g. missing description) come straight from the
   // function list, so they show for every function immediately - unlike the
@@ -3091,7 +3149,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
     .filter(cat => functionIssueRows.some(r => r.issue.category === cat));
   const functionIssueGroups = groupFunctionIssuesByFunction(sortedFunctionIssueRows);
   const filteredIssueGroups = functionIssueGroups
-    .filter(g => issueTypeFilter === "all" || g.issues.some(i => i.category === issueTypeFilter))
+    .filter(g => issueTypeFilter.size === 0 || g.issues.some(i => issueTypeFilter.has(i.category)))
     .filter(g => matchesSearch(g.functionName, g.moduleCategory));
   const issueTotalPages = Math.max(1, Math.ceil(filteredIssueGroups.length / FUNCTION_ISSUES_PAGE_SIZE));
   const issueCurrentPage = Math.min(issuePage, issueTotalPages);
@@ -3140,10 +3198,29 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
   const ziaApprovalRuleInsight = buildZiaApprovalRuleInsight(entityData.approvalRules.items);
   const activityStats = buildActivityStats(isEntityResolved(entityData.tasks), entityData.tasks.items, activityRecords.calls, activityRecords.emails);
   const ziaActivityInsight = buildZiaActivityInsight(entityData.tasks.items, activityRecords.calls, activityRecords.emails);
+  // Same freshest-due-date signal the Zia box already surfaces, promoted to
+  // its own sub-KPI tile (and, in the summary row below, its own clickable
+  // criterion) so it's visible at a glance without reading the Zia copy.
+  const lastTaskDueDays = daysSince(ziaActivityInsight.lastTaskDue.date);
+  const lastTaskDueSuggestion = !ziaActivityInsight.lastTaskDue.date
+    ? "No task due dates found."
+    : lastTaskDueDays === null ? "No task due dates found."
+    : lastTaskDueDays > 0 ? `Most recent due date was ${lastTaskDueDays} day${lastTaskDueDays !== 1 ? "s" : ""} ago - confirm it's completed or reschedule it.`
+    : lastTaskDueDays === 0 ? "A task is due today."
+    : `Next task is due in ${-lastTaskDueDays} day${-lastTaskDueDays !== 1 ? "s" : ""}.`;
   const activityTableRows = selectedCard === "activity"
     ? computeActivityTableRows(entityData.tasks.items, activityRecords.calls, activityRecords.emails)
     : [];
-  const filteredActivityRows = activityTypeFilter === "all" ? activityTableRows : activityTableRows.filter(r => r.type === activityTypeFilter);
+  const filteredActivityRows = activityTypeFilter === "all"
+    ? activityTableRows
+    : activityTypeFilter === "due"
+      // Most overdue/soonest-due first - undated tasks (no due_date set)
+      // have nothing to sort on, so they're excluded rather than shown at an
+      // arbitrary position.
+      ? activityTableRows
+          .filter(r => r.type === "task" && r.date)
+          .sort((a, b) => new Date(a.date as string).getTime() - new Date(b.date as string).getTime())
+      : activityTableRows.filter(r => r.type === activityTypeFilter);
   const activityTotalPages = Math.max(1, Math.ceil(filteredActivityRows.length / ACTIVITY_TABLE_PAGE_SIZE));
   const activityCurrentPage = Math.min(activityPage, activityTotalPages);
   const pagedActivityRows = filteredActivityRows.slice(
@@ -3751,23 +3828,20 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
               </>
             )}
           </div>
-          <div className="kpi-drilldown-table">
-            {userBreakdown.filter(row => matchesSearch(row.name, row.profile, row.role)).map(row => (
-              <div key={row.id} className="kpi-drilldown-row">
-                <span className="kpi-drilldown-name">{row.name}</span>
-                <span className="kpi-drilldown-module" data-tooltip={`Profile: ${row.profile}`}>{row.profile}</span>
-                <span className="kpi-drilldown-module" data-tooltip={`Role: ${row.role}`}>{row.role}</span>
-                {userLoginDataAvailable && row.status === "active" && (
-                  <span
-                    className={`kpi-drilldown-badge status-${row.everLoggedIn ? "active" : "inactive"}`}
-                    data-tooltip={row.everLoggedIn ? "This user has logged in at least once." : "This user has never logged in, despite holding an active license."}
-                  >
-                    {row.everLoggedIn ? "used" : "unused"}
-                  </span>
-                )}
-                <span className={`kpi-drilldown-badge status-${row.status}`}>{row.status}</span>
-              </div>
-            ))}
+          {/* Counts per role instead of one row per user - an individual name
+              truncates unreadably at this width, and the full name is already
+              shown just below in the Full User List panel. */}
+          <div className="kpi-drilldown-table kpi-drilldown-table-single">
+            {userRoleCounts
+              .filter(r => matchesSearch(r.role))
+              .map(r => (
+                <div key={r.role} className="kpi-drilldown-row">
+                  <span className="kpi-drilldown-name">{r.role}</span>
+                  <span className="kpi-drilldown-badge neutral" data-tooltip={`${r.total} user${r.total !== 1 ? "s" : ""} with the "${r.role}" role`}>{r.total} user{r.total !== 1 ? "s" : ""}</span>
+                  {r.active > 0 && <span className="kpi-drilldown-badge status-active">{r.active} active</span>}
+                  {r.inactive > 0 && <span className="kpi-drilldown-badge status-inactive">{r.inactive} inactive</span>}
+                </div>
+              ))}
           </div>
           </>
           )}
@@ -3904,8 +3978,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                       dead filters for an org with just a couple real issue types. */}
                   <div className="kpi-drilldown-summary">
                     <button
-                      className={`kpi-drilldown-stat kpi-drilldown-stat-clickable ${issueTypeFilter === "all" ? "selected" : ""}`}
-                      onClick={() => setIssueTypeFilter("all")}
+                      className={`kpi-drilldown-stat kpi-drilldown-stat-clickable ${issueTypeFilter.size === 0 ? "selected" : ""}`}
+                      onClick={() => setIssueTypeFilter(new Set())}
                     >
                       {functionIssueGroups.length} All
                     </button>
@@ -3914,8 +3988,8 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                       return (
                         <button
                           key={cat}
-                          className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${issueTypeFilter === cat ? "selected" : ""}`}
-                          onClick={() => setIssueTypeFilter(prev => (prev === cat ? "all" : cat))}
+                          className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${issueTypeFilter.has(cat) ? "selected" : ""}`}
+                          onClick={() => toggleIssueTypeFilter(cat)}
                         >
                           {count} {ISSUE_CATEGORY_LABELS[cat]}
                         </button>
@@ -3925,10 +3999,10 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   <div className="kpi-drilldown-table kpi-drilldown-table-single">
                     {pagedIssueGroups.map(group => {
                       const isExpanded = expandedIssueFunctions.has(group.id);
-                      // When a type filter is active, only that function's
+                      // When a type filter is active, only each function's
                       // matching issues show once expanded - not every issue it
                       // has, which would contradict the filter someone just clicked.
-                      const visibleIssues = issueTypeFilter === "all" ? group.issues : group.issues.filter(i => i.category === issueTypeFilter);
+                      const visibleIssues = issueTypeFilter.size === 0 ? group.issues : group.issues.filter(i => issueTypeFilter.has(i.category));
                       return (
                         <div key={group.id} className="kpi-drilldown-row kpi-drilldown-row-layouts">
                           <button
@@ -4199,54 +4273,61 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
           />
           <div className="kpi-drilldown-summary">
             <button
-              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${workflowFilter === "active" ? "selected" : ""}`}
-              onClick={() => setWorkflowFilter(prev => (prev === "active" ? "all" : "active"))}
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable good ${workflowFilter.has("active") ? "selected" : ""}`}
+              onClick={() => toggleWorkflowFilter("active")}
               data-tooltip={WORKFLOW_ACTIVE_TOOLTIP}
             >
               {workflowBreakdown.filter(r => r.active).length} Active
             </button>
             <button
-              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "inactive" ? "selected" : ""}`}
-              onClick={() => setWorkflowFilter(prev => (prev === "inactive" ? "all" : "inactive"))}
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter.has("inactive") ? "selected" : ""}`}
+              onClick={() => toggleWorkflowFilter("inactive")}
               data-tooltip={WORKFLOW_INACTIVE_TOOLTIP}
             >
               {workflowBreakdown.filter(r => !r.active).length} Inactive
             </button>
             <button
-              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter === "never" ? "selected" : ""}`}
-              onClick={() => setWorkflowFilter(prev => (prev === "never" ? "all" : "never"))}
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter.has("never") ? "selected" : ""}`}
+              onClick={() => toggleWorkflowFilter("never")}
               data-tooltip="Active or inactive workflows with no recorded execution yet - never matched their trigger criteria, or this MCP connection doesn't expose execution history."
             >
               {workflowBreakdown.filter(r => !r.lastTriggered).length} Never Triggered
             </button>
             <button
-              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter === "long-trigger" ? "selected" : ""}`}
-              onClick={() => setWorkflowFilter(prev => (prev === "long-trigger" ? "all" : "long-trigger"))}
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter.has("long-trigger") ? "selected" : ""}`}
+              onClick={() => toggleWorkflowFilter("long-trigger")}
               data-tooltip={WORKFLOW_LONG_TRIGGER_TOOLTIP}
             >
               {workflowBreakdown.filter(r => r.longTrigger).length} Idle 90+ Days
             </button>
             <button
-              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter === "duplicate" ? "selected" : ""}`}
-              onClick={() => setWorkflowFilter(prev => (prev === "duplicate" ? "all" : "duplicate"))}
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable bad ${workflowFilter.has("duplicate") ? "selected" : ""}`}
+              onClick={() => toggleWorkflowFilter("duplicate")}
               data-tooltip="Shares the exact same display name (case-insensitive) as another workflow, regardless of module, trigger, criteria, or actions"
             >
               {workflowBreakdown.filter(r => r.duplicate).length} Duplicate
             </button>
             <button
-              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter === "overlapping" ? "selected" : ""}`}
-              onClick={() => setWorkflowFilter(prev => (prev === "overlapping" ? "all" : "overlapping"))}
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter.has("overlapping") ? "selected" : ""}`}
+              onClick={() => toggleWorkflowFilter("overlapping")}
               data-tooltip="Shares a module + trigger event with another active rule"
             >
               {workflowBreakdown.filter(r => r.overlapping).length} Overlapping
             </button>
-            {workflowFilter !== "all" && (
-              <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setWorkflowFilter("all")}>
+            <button
+              className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${workflowFilter.has("no-description") ? "selected" : ""}`}
+              onClick={() => toggleWorkflowFilter("no-description")}
+              data-tooltip="No description set on this workflow rule - easy to mis-identify or misuse later, especially once several similarly-named workflows exist."
+            >
+              {workflowBreakdown.filter(r => r.noDescription).length} Missing Description
+            </button>
+            {workflowFilter.size > 0 && (
+              <button className="kpi-drilldown-stat kpi-drilldown-stat-clickable" onClick={() => setWorkflowFilter(new Set())}>
                 Show All
               </button>
             )}
           </div>
-          {workflowFilter === "duplicate" ? (
+          {workflowFilter.size === 1 && workflowFilter.has("duplicate") ? (
             workflowDuplicateGroups.length === 0 ? (
               <p className="business-view-hint">No duplicate workflows found.</p>
             ) : (
@@ -4282,7 +4363,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   })}
               </div>
             )
-          ) : workflowFilter === "overlapping" ? (
+          ) : workflowFilter.size === 1 && workflowFilter.has("overlapping") ? (
             workflowOverlapGroups.length === 0 ? (
               <p className="business-view-hint">No overlapping workflows found.</p>
             ) : (
@@ -4331,6 +4412,7 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                   {row.longTrigger && <span className="kpi-drilldown-badge status-draft" data-tooltip={WORKFLOW_LONG_TRIGGER_TOOLTIP}>idle 90+ days</span>}
                   {row.duplicate && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.duplicateDetail ?? "Same display name as another workflow"}>duplicate</span>}
                   {row.overlapping && <span className="kpi-drilldown-badge status-inactive" data-tooltip={row.overlappingDetail ?? "Shares a module + trigger event with another active rule"}>overlapping</span>}
+                  {row.noDescription && <span className="kpi-drilldown-badge status-draft" data-tooltip="No description set on this workflow rule">no description</span>}
                   <span className={`kpi-drilldown-badge status-${row.active ? "active" : "inactive"}`} data-tooltip={row.active ? WORKFLOW_ACTIVE_TOOLTIP : WORKFLOW_INACTIVE_TOOLTIP}>{row.active ? "active" : "inactive"}</span>
                 </div>
               ))}
@@ -4551,20 +4633,31 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
                 </ul>
               </div>
             ))}
+            <div className="activity-subkpi-tile">
+              <span className="kpi-tile-label">Last Task Due</span>
+              <span className="kpi-tile-value">{ziaActivityInsight.lastTaskDue.date ? formatLastTriggered(ziaActivityInsight.lastTaskDue.date) : "None found"}</span>
+              <ul className="activity-subkpi-suggestion">
+                <li>{lastTaskDueSuggestion}</li>
+              </ul>
+            </div>
           </div>
 
           {activityTableRows.length > 0 && (
             <>
               <div className="kpi-drilldown-summary">
-                {(["all", "email", "task", "call"] as const).map(t => {
-                  const count = t === "all" ? activityTableRows.length : activityTableRows.filter(r => r.type === t).length;
+                {(["all", "email", "task", "call", "due"] as const).map(t => {
+                  const count = t === "all" ? activityTableRows.length
+                    : t === "due" ? activityTableRows.filter(r => r.type === "task" && r.date).length
+                    : activityTableRows.filter(r => r.type === t).length;
+                  const label = t === "all" ? "All" : t === "email" ? "Email" : t === "task" ? "Task" : t === "call" ? "Call" : "Last Task Due";
                   return (
                     <button
                       key={t}
                       className={`kpi-drilldown-stat kpi-drilldown-stat-clickable neutral ${activityTypeFilter === t ? "selected" : ""}`}
                       onClick={() => setActivityTypeFilter(t)}
+                      data-tooltip={t === "due" ? "Tasks only, sorted by due date - most overdue or soonest due first." : undefined}
                     >
-                      {count} {t === "all" ? "All" : t === "email" ? "Email" : t === "task" ? "Task" : "Call"}
+                      {count} {label}
                     </button>
                   );
                 })}

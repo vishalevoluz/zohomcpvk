@@ -48,6 +48,17 @@ export function workflowModuleLabel(item: unknown): string {
   return String(mod);
 }
 
+// True when the workflow has no description set (or only whitespace) - same
+// "easy to mis-identify or misuse later" concern the Functions card already
+// flags via checkFunctionMetadata's "documentation" issue, applied to
+// workflows so the Workflows drilldown can surface it as its own filter.
+export function workflowMissingDescription(item: unknown): boolean {
+  if (!item || typeof item !== "object") return true;
+  const r = item as Record<string, unknown>;
+  const desc = r.description;
+  return typeof desc !== "string" || desc.trim() === "";
+}
+
 // The specific field an "on field update" trigger watches - verified against
 // a live getWorkflowRules response: Zoho nests it as
 // execute_when.details.criteria.field ({api_name, id}), NOT
