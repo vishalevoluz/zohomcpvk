@@ -76,7 +76,7 @@ const ACTION_COPY: Record<string, { title: string; why: (f: Finding) => string; 
     owner: "Your sales manager", timeToValue: "~30 mins",
   },
   "unforecastable-deals": {
-    title: "Fill In Missing Deal Amounts & Close Dates",
+    title: "Fill In Missing Deal Amounts or Close Dates",
     why: () => "You can't forecast revenue from deals with no amount or close date - this is quick per-deal cleanup.",
     owner: "Your sales manager", timeToValue: "~1 hour",
   },

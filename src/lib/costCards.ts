@@ -116,7 +116,7 @@ const CARD_COPY: Record<string, { icon: string; headline: string; bullets: (f: F
   "no-lead-source": {
     icon: "◫", headline: "You Don't Know What's Working",
     bullets: f => [
-      `${f.count} lead${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "have" : "has"} no source tagged.`,
+      `${f.count} lead${f.count !== 1 ? "s" : ""} ${f.count !== 1 ? "have" : "has"} no lead source recorded.`,
       "You can't tell which marketing actually brings in business.",
     ],
   },

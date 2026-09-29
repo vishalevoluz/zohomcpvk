@@ -63,15 +63,16 @@ function scoreAutomationCoverage(modules: unknown[], workflows: unknown[], ruleC
 }
 
 function scoreProcessCompleteness(pipelineCount: number, blueprints: unknown[], pipelineStageCount: number, outOfOrderStageCount: number): number {
-  let score = 20;
-  if (pipelineCount === 0) score -= 7;
-  if (blueprints.length === 0) score -= 7;
-  if (pipelineStageCount === 0) score -= 7;
+  // Three checks worth 7 + 7 + 6 = 20, mirroring processCompletenessChecklist
+  // in healthAuditModel.ts row for row.
+  let score = 0;
+  if (pipelineCount > 0) score += 7;
+  if (blueprints.length > 0) score += 7;
   // A pipeline with stages sequenced after Closed Won/Lost is misconfigured
   // even though stages technically exist - deals shouldn't have anywhere to
   // go once a pipeline is closed, so this can't score as if stages were fine.
-  if (outOfOrderStageCount > 0) score -= 7;
-  return Math.max(0, score);
+  if (pipelineStageCount > 0 && outOfOrderStageCount === 0) score += 6;
+  return score;
 }
 
 function scoreAccessSecurity(profiles: unknown[], users: unknown[], roles: unknown[]): number {
@@ -124,29 +125,33 @@ function scoreDataArchitecture(mandatoryFieldCount: number | null, modules: unkn
   return Math.max(0, score);
 }
 
-function scoreAutomationHealth(workflows: unknown[]): number {
-  // A percentage of total, matching what the dimension's own tooltip promises
-  // ("what share of your existing workflows are actually turned on"). The old
-  // formula subtracted a flat inactive count capped at 20 - any org with 20+
-  // inactive rules (common once workflows accumulate over years) permanently
-  // bottomed out at 0 regardless of how many were active, so activating more
-  // workflows never moved this dimension at all.
-  if (workflows.length === 0) return 20;
+// Points split shared with automationHealthChecklist in healthAuditModel.ts:
+// the active-ratio row is worth up to 14, and the overlap and duplicate rows
+// 3 each - 20 in total, so the checklist rows add up to exactly the score.
+export const AUTOMATION_HEALTH_RATIO_MAX = 14;
+export const AUTOMATION_HEALTH_CHECK_POINTS = 3;
+
+// Proportional share of AUTOMATION_HEALTH_RATIO_MAX, matching what the
+// dimension's own tooltip promises ("what share of your existing workflows
+// are actually turned on").
+export function automationHealthRatioPoints(workflows: unknown[]): number {
+  if (workflows.length === 0) return AUTOMATION_HEALTH_RATIO_MAX;
   const active = workflows.filter(isActiveWorkflow).length;
   // Floored at 1 whenever at least one workflow is active - otherwise a tiny
-  // active ratio (e.g. 1 of 64) rounds down to the same 0/20 as having zero
+  // active ratio (e.g. 1 of 64) rounds down to the same 0 as having zero
   // active workflows at all, hiding that some automation genuinely exists.
   if (active === 0) return 0;
-  let score = Math.max(1, Math.round(20 * (active / workflows.length)));
-  // Active-ratio alone scores multiple rules racing on the same trigger, or
-  // near-duplicate clones nobody ever merged, as perfectly healthy - they're
-  // "on", just not well. Flat deductions (not scaled by count) so one org
-  // with a handful of stray overlaps isn't punished the same as an org with
-  // a systemic overlap problem, matching the flat penalties elsewhere in this
-  // scoring model (e.g. the single-profile deduction below).
-  if (overlappingWorkflows(workflows).length > 0) score -= 3;
-  if (identicalWorkflows(workflows).length > 0) score -= 3;
-  return Math.max(0, score);
+  return Math.max(1, Math.round(AUTOMATION_HEALTH_RATIO_MAX * (active / workflows.length)));
+}
+
+function scoreAutomationHealth(workflows: unknown[]): number {
+  // Active-ratio alone would score multiple rules racing on the same trigger,
+  // or near-duplicate clones nobody ever merged, as perfectly healthy - they're
+  // "on", just not well. Each is a flat check (not scaled by count).
+  let score = automationHealthRatioPoints(workflows);
+  if (overlappingWorkflows(workflows).length === 0) score += AUTOMATION_HEALTH_CHECK_POINTS;
+  if (identicalWorkflows(workflows).length === 0) score += AUTOMATION_HEALTH_CHECK_POINTS;
+  return score;
 }
 
 // Same healthy/needs-attention/at-risk/critical banding used for the overall

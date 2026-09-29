@@ -20,6 +20,7 @@ import type { RuleCoverage } from "@/lib/crmPredicates";
 import { automationCoverageApiNames } from "@/lib/flowMapModel";
 import {
   computeHealthScore, zoneForValue, HEALTH_SCORE_ENTITIES,
+  automationHealthRatioPoints, AUTOMATION_HEALTH_RATIO_MAX, AUTOMATION_HEALTH_CHECK_POINTS,
   type HealthScoreDimensions, type HealthZone,
 } from "@/lib/businessScore";
 import type { ActionImpact, ActionEffort } from "@/lib/priorityActions";
@@ -380,8 +381,8 @@ function processCompletenessChecklist(
         : outOfOrderStageCount > 0
           ? `${pipelineStageCount} stage${pipelineStageCount !== 1 ? "s" : ""} defined, but ${outOfOrderStageCount} ${outOfOrderStageCount !== 1 ? "are" : "is"} sequenced after a Closed Won/Lost stage.`
           : `${pipelineStageCount} stage${pipelineStageCount !== 1 ? "s" : ""} defined on your Deals layout, in order.`,
-      weight: 7,
-      signals: [{ label: "Pipeline stages exist and are in order", on: stagesOk, points: 7 }],
+      weight: 6,
+      signals: [{ label: "Pipeline stages exist and are in order", on: stagesOk, points: 6 }],
     },
   ];
 }
@@ -633,28 +634,27 @@ function dataArchitectureReason(entityData: Record<CrmEntityType, EntityState>, 
 // own status pill uses (not a raw 100%-active check) - otherwise an org at,
 // say, 90% active could show a green "Healthy" pill right next to a red
 // checklist row for the same number, which would read as a contradiction.
-function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState>, score: number): ChecklistItem[] {
+function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState>): ChecklistItem[] {
   const workflows = entityData.workflows.items;
   const total = workflows.length;
   const active = workflows.filter(isActiveWorkflow).length;
   const overlapping = overlappingWorkflows(workflows);
   const duplicate = identicalWorkflows(workflows);
-  // The ratio's own pass/fail still comes from the real dimension zone (it's
-  // proportional, not a flat threshold) - the two new checks below are flat
-  // count > 0 conditions, matching the flat deductions scoreAutomationHealth
-  // applies for them in businessScore.ts.
-  const ratioPass = zoneForValue(score, 20) === "healthy";
+  // Row points come from the same helpers scoreAutomationHealth sums, so the
+  // rows always add up to the dimension score.
+  const ratioPoints = automationHealthRatioPoints(workflows);
+  const ratioPass = zoneForValue(ratioPoints, AUTOMATION_HEALTH_RATIO_MAX) === "healthy";
   return [
     {
       id: "automation-health-ratio",
       label: "Active workflow ratio",
       status: ratioPass ? "pass" : "fail",
       detail: total === 0 ? "No workflows configured yet - nothing to break." : `${active} of ${total} workflow${total !== 1 ? "s" : ""} are active.`,
-      weight: 14,
-      // Single-signal bullet, same pattern the other dimensions' checklists
-      // use - makes the point contribution explicit as a +/- pill instead of
-      // only implied by the pass/fail icon.
-      signals: total === 0 ? undefined : [{ label: "Active workflow ratio is healthy", on: ratioPass, points: 14 }],
+      weight: AUTOMATION_HEALTH_RATIO_MAX,
+      // Proportional, like Automation Coverage: earns its share of the row's
+      // points by how many workflows are active, so the row can show partial
+      // credit and the rows always add up to the score.
+      earnedWeight: ratioPoints,
     },
     {
       id: "automation-health-overlap",
@@ -663,8 +663,8 @@ function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState
       detail: overlapping.length === 0
         ? "No active workflows share the same module and trigger event."
         : `${overlapping.length} active workflow${overlapping.length !== 1 ? "s" : ""} overlap with at least one other on the same module and trigger event.`,
-      weight: 3,
-      signals: [{ label: "No workflows share a module + trigger", on: overlapping.length === 0, points: 3 }],
+      weight: AUTOMATION_HEALTH_CHECK_POINTS,
+      signals: [{ label: "No workflows share a module + trigger", on: overlapping.length === 0, points: AUTOMATION_HEALTH_CHECK_POINTS }],
     },
     {
       id: "automation-health-duplicate",
@@ -673,8 +673,8 @@ function automationHealthChecklist(entityData: Record<CrmEntityType, EntityState
       detail: duplicate.length === 0
         ? "No workflows share the same name and functional signature."
         : `${duplicate.length} workflow${duplicate.length !== 1 ? "s" : ""} ${duplicate.length !== 1 ? "are" : "is"} a near-certain clone of another (same name, same module/trigger).`,
-      weight: 3,
-      signals: [{ label: "No near-certain duplicate clones", on: duplicate.length === 0, points: 3 }],
+      weight: AUTOMATION_HEALTH_CHECK_POINTS,
+      signals: [{ label: "No near-certain duplicate clones", on: duplicate.length === 0, points: AUTOMATION_HEALTH_CHECK_POINTS }],
     },
   ];
 }
@@ -759,7 +759,7 @@ export function buildHealthAuditModel(
         reason = dataArchitectureReason(entityData, mandatoryFieldCount, mandatoryFieldsError);
         break;
       case "automationHealth":
-        checklist = automationHealthChecklist(entityData, score);
+        checklist = automationHealthChecklist(entityData);
         reason = automationHealthReason(entityData, score);
         criticalAlert = automationHealthCriticalAlert(entityData, score);
         break;
