@@ -1,7 +1,14 @@
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* overflow-wrap: break-word is a global safety net - any text (a long
+   recommendation title, an unbroken URL/ID, etc.) wraps inside its own
+   card/section instead of pushing that container wider than its slot and
+   getting clipped at the page edge (see .crm-report-grid's fix for a real
+   case this caught). Harmless everywhere else: normal prose already wraps
+   at spaces before this ever matters, and it doesn't affect pre/code blocks
+   that intentionally scroll via white-space: pre. */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; overflow-wrap: break-word; }
 
 :root {
   /* Same dark/green identity as the landing page, but a softer elevation
@@ -285,7 +292,10 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Metrics */
 .metrics-row {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* minmax(0, 1fr) so a track never grows past its share of the row to fit
+     a long label's intrinsic minimum width - same overflow class as
+     .crm-report-grid (see that fix's comment for the full explanation). */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 1rem;
 }
@@ -295,6 +305,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   border: 0.5px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 1rem;
+  min-width: 0;
 }
 
 .metric-label {
@@ -623,7 +634,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 /* Responsive */
 @media (max-width: 600px) {
   .page { padding: 1rem 1rem 3rem; }
-  .metrics-row { grid-template-columns: repeat(2, 1fr); }
+  .metrics-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-row { flex-direction: column; }
   .auth-row { flex-direction: column; }
 }
@@ -1955,7 +1966,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 @media (max-width: 640px) {
   .app-main { padding: 1rem; }
-  .tool-cards { grid-template-columns: 1fr 1fr; }
+  .tool-cards { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 
 /* ─── Modules Audit ──────────────────────────────────────────── */
@@ -2020,7 +2031,9 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 /* Findings grid */
 .findings-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  /* minmax(0, 1fr) - see .crm-report-grid's fix comment; .finding-hint's
+     tip text is long-form enough to hit the same overflow otherwise. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -2037,6 +2050,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   text-align: left;
   transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
   width: 100%;
+  min-width: 0;
 }
 
 .finding-card:hover { border-color: var(--color-border-strong); }
@@ -2278,7 +2292,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
    column (a finding-card carries an icon, label, value and note line, too
    much content to stay legible at 2-up on a phone-width screen). */
 @media (max-width: 1024px) {
-  .findings-grid { grid-template-columns: repeat(2, 1fr); }
+  .findings-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 640px) {
@@ -3278,7 +3292,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   flex-shrink: 0; margin-top: 6px;
 }
 .activity-zia-rec { margin-top: 12px; }
-.activity-zia-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 8px 0 10px; }
+.activity-zia-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 8px 0 10px; }
 .activity-zia-item { display: flex; flex-direction: column; gap: 2px; }
 .activity-zia-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-tertiary); }
 .activity-zia-value { font-size: 13px; font-weight: 700; color: var(--color-text); }
@@ -3729,7 +3743,12 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 .crm-report-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* minmax(0, 1fr), not a bare 1fr - a plain 1fr track still respects its
+     content's intrinsic minimum width, so a long recommendation title with
+     nowhere to wrap (see min-width: 0 below) was growing the 3rd column
+     past the container instead of sharing the row equally, pushing that
+     card's text and button off the edge of the page. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -3742,6 +3761,11 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   flex-direction: column;
   gap: 12px;
   transition: border-color 0.15s, box-shadow 0.15s;
+  /* Lets the grid's minmax(0, 1fr) actually take effect for this card - a
+     flex/grid item's default min-width is auto (its content's own minimum),
+     not 0, which would otherwise still force this column wider than its
+     share of the row. */
+  min-width: 0;
 }
 
 .crm-report-card:hover {
@@ -3769,12 +3793,14 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   flex-direction: column;
   gap: 5px;
   flex: 1;
+  min-width: 0;
 }
 
 .crm-report-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text);
+  overflow-wrap: break-word;
 }
 
 .crm-report-pills {
@@ -3851,6 +3877,8 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 .crm-report-preview-text {
   flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .crm-report-more {
@@ -3874,7 +3902,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 /* Responsive CRM dashboard */
 @media (max-width: 1000px) {
-  .crm-report-grid { grid-template-columns: 1fr 1fr; }
+  .crm-report-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 
 /* Tablet tier (≤1024px): the drilldown card grid's 260px minimum column can
@@ -3889,7 +3917,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 
 @media (max-width: 700px) {
   .crm-overview { padding: 1rem; }
-  .crm-stats-row { grid-template-columns: repeat(3, 1fr); }
+  .crm-stats-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .crm-report-grid { grid-template-columns: 1fr; }
 }
 
@@ -4636,7 +4664,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 .hsd-reason-line.zone-at-risk { border-left-color: var(--bv-warning); }
 .hsd-reason-line.zone-critical { border-left-color: var(--bv-critical); }
 
-.hsd-kpi-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 20px; }
+.hsd-kpi-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 20px; }
 .hsd-kpi-tile {
   background: var(--color-bg);
   border: 0.5px solid var(--color-border);
@@ -5163,7 +5191,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 /* What Is Costing You */
 .cost-cards-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 12px;
 }
 @media (max-width: 720px) {
@@ -5175,6 +5203,7 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   border-radius: var(--radius-lg);
   padding: 14px 16px;
   position: relative;
+  min-width: 0;
 }
 .cost-card.sev-critical { border-left: 3px solid var(--bv-critical); }
 .cost-card.sev-warning { border-left: 3px solid var(--bv-warning); }
