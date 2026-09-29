@@ -3891,6 +3891,12 @@ details[open] .log-summary::before { transform: rotate(90deg); }
   width: 100%;
   justify-content: center;
   font-size: 12px;
+  /* Every <button> gets white-space: nowrap by default (see the base button
+     rule) - harmless for short labels, but "Download PDF Report" has
+     nowhere to go on a narrow card and was overflowing past the button
+     (and card) edge instead of wrapping to a 2nd line. */
+  white-space: normal;
+  text-align: center;
 }
 
 /* Sidebar CRM Overview item */
