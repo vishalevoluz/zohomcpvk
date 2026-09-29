@@ -42,7 +42,7 @@ const STAGE_EXTRA_FIELDS: Record<RecordSampleStageId, string[]> = {
   // Amount/Closing_Date/Modified_Time/Stage power the "What Is Costing You" /
   // "Top Priority Actions" stale-pipeline and unforecastable-deal findings -
   // see isDealStale/isDealUnforecastable in crmPredicates.ts.
-  deals: ["Deal_Name", "Contact_Name", "Account_Name", "Amount", "Closing_Date", "Modified_Time", "Stage"],
+  deals: ["Deal_Name", "Contact_Name", "Account_Name", "Amount", "Closing_Date", "Modified_Time", "Stage", "Currency"],
   accounts: ["Account_Name"],
   invoices: ["Subject", "Deal_Name", "Account_Name"],
 };

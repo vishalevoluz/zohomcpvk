@@ -7,7 +7,7 @@ import type { RuleCoverage } from "@/lib/crmPredicates";
 import {
   hasEmailAction, isActiveUser, isAdminProfile, isActiveWorkflow,
   moduleApiName, unreferencedModules, isDeletedModule, isInternalModule, isSystemHiddenModule,
-  isDealStale, isDealUnforecastable, dealAmount, dealCurrencySymbol,
+  isDealStale, isDealUnforecastable, dealAmount, dealCurrencySymbol, dealCurrencyCode,
   hasNoLeadSource, userLoginAgeDays, userLoginFieldPresent,
 } from "@/lib/crmPredicates";
 import type { ModuleRecordCountsState } from "@/lib/useModuleRecordCounts";
@@ -258,11 +258,12 @@ const FINDING_DEFS: FindingDef[] = [
       // Prefer the currency symbol carried on the deal records themselves
       // (every record has one) over the org-level lookup, which depends on
       // getOrganizations being authorized on this MCP connection at all.
-      const symbol = stale.map(dealCurrencySymbol).find(Boolean) ?? currencySymbol;
+      const code = stale.map(dealCurrencyCode).find(Boolean);
+      const symbol = stale.map(dealCurrencySymbol).find(Boolean) ?? currencySymbol ?? (code ? `${code} ` : null);
       return {
         offenders: [],
         count: stale.length,
-        stakeLabel: totalValue > 0 ? `${formatMoney(totalValue, symbol)} of pipeline value` : undefined,
+        stakeLabel: totalValue > 0 ? `${stale.length} open deal${stale.length !== 1 ? "s" : ""} worth ${formatMoney(totalValue, symbol)}` : undefined,
         sampleSize: isFullPopulation(items.length) ? undefined : items.length,
         honesty: sampleHonesty(items.length, "deal"),
       };

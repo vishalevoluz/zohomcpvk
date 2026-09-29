@@ -906,6 +906,14 @@ export function dealCurrencySymbol(deal: unknown): string | null {
   return typeof raw === "string" && raw.trim() ? raw.trim() : null;
 }
 
+// ISO code (e.g. "INR") from the deal's Currency field - a fallback label for
+// when no symbol came back on the record or from the org lookup.
+export function dealCurrencyCode(deal: unknown): string | null {
+  if (!deal || typeof deal !== "object") return null;
+  const raw = (deal as Record<string, unknown>).Currency;
+  return typeof raw === "string" && raw.trim() ? raw.trim() : null;
+}
+
 export function isDealUnforecastable(deal: unknown): boolean {
   if (!isOpenDeal(deal)) return false;
   if (!deal || typeof deal !== "object") return false;
