@@ -4731,21 +4731,25 @@ export default function CRMOverviewDashboard({ config, tools, onLog, entityData,
             <ul className="panel-item-list">
               {userItemsForPanel
                 .map((item, idx) => {
-                  const name = getItemName(item, idx);
+                  const role = userRoleName(item) || "-";
                   const r = (item ?? {}) as Record<string, unknown>;
                   const profileName = typeof r.profile === "object" && r.profile
                     ? String((r.profile as Record<string, unknown>).name ?? "-")
                     : String(r.role ?? "-");
-                  return { item, idx, name, profileName };
+                  return { item, idx, role, profileName };
                 })
-                .filter(({ name, profileName }) => matchesSearch(name, profileName))
-                .map(({ item, idx, name, profileName }) => {
+                // No user name here or in the search below - one row per
+                // account, identified by role + profile only, not by who
+                // holds it (see the role-count breakdown above for the
+                // aggregated view of the same data).
+                .filter(({ role, profileName }) => matchesSearch(role, profileName))
+                .map(({ item, idx, role, profileName }) => {
                 const status = getItemStatus(item);
                 return (
                   <li key={idx} className="panel-item-row">
-                    <span className="panel-avatar">{name.charAt(0).toUpperCase()}</span>
+                    <span className="panel-avatar">{role.charAt(0).toUpperCase()}</span>
                     <span className="panel-item-body">
-                      <span className="panel-item-name">{name}</span>
+                      <span className="panel-item-name">{role}</span>
                       <span className="panel-item-sub">{profileName}</span>
                     </span>
                     {status && (
