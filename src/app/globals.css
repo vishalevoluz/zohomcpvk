@@ -3022,10 +3022,20 @@ details[open] .log-summary::before { transform: rotate(90deg); }
    the card's own box height and visibly shoved every card below it up or
    down each time - the exact "clicking a card moves other cards" bug. */
 .crmov-card .kpi-tile-note {
-  min-height: 18px;
+  /* .crmov-card is a <button>, and every <button> gets white-space: nowrap
+     from the base button rule (see .crm-report-btn's fix for the same
+     issue) - .kpi-tile-note never overrode it, so a longer note (e.g. "X
+     total licensed (Y inactive) - click to see who's active/inactive")
+     couldn't wrap and spilled outside the card instead. min-height raised
+     from 18px (one line) to 36px (two lines) so reserving space for the
+     wrap doesn't reintroduce the "card height changes on hover" bug the
+     original min-height was added to prevent. */
+  min-height: 36px;
   margin-top: 2px;
   opacity: 0;
   transition: opacity 0.14s ease;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 .crmov-card.clickable:hover .kpi-tile-note,
 .crmov-card:not(:disabled):hover .kpi-tile-note,
