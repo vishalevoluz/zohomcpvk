@@ -1,5 +1,5 @@
 import type { CrmEntityType, EntityState } from "@/lib/useCrmEntities";
-import { isActiveWorkflow, isAdminProfile, isAdminProfileUser, isInactiveUser, isDeletedUser, unassignedRoles, workflowReferencesModule, ruleCoverageHasActive, PER_MODULE_COVERAGE_KEYS, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, identicalWorkflows, withoutOverlappingWorkflows, withoutIdenticalWorkflows } from "@/lib/crmPredicates";
+import { isActiveWorkflow, isAdminProfile, isActiveUser, isAdminProfileUser, isInactiveUser, isDeletedUser, unassignedRoles, workflowReferencesModule, ruleCoverageHasActive, PER_MODULE_COVERAGE_KEYS, isDeletedModule, isEmptyModule, isHiddenModule, isInternalModule, isSystemHiddenModule, overlappingWorkflows, identicalWorkflows, withoutOverlappingWorkflows, withoutIdenticalWorkflows } from "@/lib/crmPredicates";
 import type { RuleCoverage } from "@/lib/crmPredicates";
 
 // The 5 automation signals a core module is scored against - the same set
@@ -75,28 +75,26 @@ function scoreProcessCompleteness(pipelineCount: number, blueprints: unknown[], 
 }
 
 function scoreAccessSecurity(profiles: unknown[], users: unknown[], roles: unknown[]): number {
-  let score = 20;
+  // Four checks worth 5 pts each (20 total), mirroring accessSecurityChecklist
+  // in healthAuditModel.ts item for item - the checklist's per-item points
+  // must add up to exactly this score.
+  let score = 0;
   // Deleted accounts are gone from the org and cost nothing - excluded up
   // front so a deleted user with a leftover admin-named profile or "disabled"
-  // status can't affect this score, matching accessSecurityChecklist in
-  // healthAuditModel.ts (which must describe the same counts this scores).
+  // status can't affect this score.
   const activeUsers = users.filter(u => !isDeletedUser(u));
   // How many USERS actually hold elevated access, not how many admin-named
   // profile definitions exist - an org can have a single "Administrator"
   // profile assigned to every user, which the profile-catalog count alone
   // would completely miss.
-  const adminCount = activeUsers.filter(isAdminProfileUser).length;
-  if (adminCount > 2) score -= 5;
-  const inactiveUsers = activeUsers.filter(isInactiveUser).length;
-  score -= Math.min(10, inactiveUsers * 3);
-  if (profiles.length === 1) score -= 10;
+  const adminCount = activeUsers.filter(isActiveUser).filter(isAdminProfileUser).length;
+  if (adminCount <= 2) score += 5;
+  if (activeUsers.filter(isInactiveUser).length === 0) score += 5;
+  if (profiles.length > 1) score += 5;
   // Roles nobody currently holds are stale role-hierarchy clutter (a reorg
-  // leftover, a role made for a hire who left first) - a small, capped
-  // deduction rather than a heavy one, since an unused role is untidy but
-  // not itself a live access risk the way excess admins or a shared login
-  // level are.
-  score -= Math.min(5, unassignedRoles(roles, users).length * 2);
-  return Math.max(0, score);
+  // leftover, a role made for a hire who left first).
+  if (roles.length === 0 || unassignedRoles(roles, users).length === 0) score += 5;
+  return score;
 }
 
 // mandatoryFieldCount comes from the real source - each core module's LAYOUT

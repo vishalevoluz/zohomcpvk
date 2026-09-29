@@ -357,9 +357,7 @@ function MetricRow({
                     </div>
                   )}
                 </div>
-                {item.weight === 0 ? (
-                  <span className="hsd-checklist-weight">Info</span>
-                ) : item.earnedWeight !== undefined ? (
+                {item.weight === 0 ? null : item.earnedWeight !== undefined ? (
                   <span className={`hsd-checklist-weight ${item.earnedWeight > 0 ? "earned" : ""}`}>
                     {item.earnedWeight === item.weight ? `+${item.weight} pts` : `+${item.earnedWeight} of ${item.weight} pts`}
                   </span>

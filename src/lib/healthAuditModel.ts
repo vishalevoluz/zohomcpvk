@@ -410,6 +410,7 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
   const trueActiveUsers = activeUsers.filter(isActiveUser);
   const activeAdminCount = trueActiveUsers.filter(isAdminProfileUser).length;
   const activeUserCount = trueActiveUsers.length;
+  const inactiveUserCount = activeUsers.filter(isInactiveUser).length;
   const profileCount = entityData.profiles.items.length;
   const roleCount = entityData.roles.items.length;
   const unassigned = unassignedRoles(entityData.roles.items, entityData.users.items);
@@ -456,8 +457,17 @@ function accessSecurityChecklist(entityData: Record<CrmEntityType, EntityState>)
     {
       id: "access-role-segmentation", label: "Access is split into multiple profiles", status: profileCount > 1 ? "pass" : "fail",
       detail: profileCount > 1 ? `${profileCount} profiles configured.` : "Only one profile exists - everyone shares the same access level.",
-      weight: 10,
-      signals: [{ label: "More than one profile configured", on: profileCount > 1, points: 10 }],
+      weight: 5,
+      signals: [{ label: "More than one profile configured", on: profileCount > 1, points: 5 }],
+    },
+    {
+      id: "access-inactive-licenses", label: "No disabled users holding licenses",
+      status: inactiveUserCount === 0 ? "pass" : "fail",
+      detail: inactiveUserCount === 0
+        ? "No disabled users are still licensed."
+        : `${inactiveUserCount} user${inactiveUserCount !== 1 ? "s are" : " is"} disabled but still licensed.`,
+      weight: 5,
+      signals: [{ label: "No disabled users still licensed", on: inactiveUserCount === 0, points: 5 }],
     },
     {
       id: "access-unassigned-roles",
