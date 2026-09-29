@@ -1954,16 +1954,8 @@ details[open] .log-summary::before { transform: rotate(90deg); }
 }
 
 @media (max-width: 640px) {
-  .sidebar { width: 180px; }
   .app-main { padding: 1rem; }
   .tool-cards { grid-template-columns: 1fr 1fr; }
-}
-
-@media (max-width: 480px) {
-  .app-shell { flex-direction: column; }
-  .sidebar { width: 100%; height: auto; position: static; flex-direction: row; flex-wrap: wrap; padding: 0.75rem; }
-  .sidebar-nav { flex-direction: row; flex-wrap: wrap; padding: 0; }
-  .sidebar-brand { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
 }
 
 /* ─── Modules Audit ──────────────────────────────────────────── */
